@@ -715,10 +715,13 @@ function frame() {
 }
 frame();
 
-addEventListener("resize", () => {
-  camera.aspect = innerWidth / innerHeight;
+function fitCity() {
+  const w = app.clientWidth || innerWidth, h = app.clientHeight || innerHeight;
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
-  labels.setSize(innerWidth, innerHeight);
-});
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  labels.setSize(w, h);
+}
+addEventListener("resize", fitCity);
+new ResizeObserver(fitCity).observe(app);   // iPhone home-screen apps settle their size after load

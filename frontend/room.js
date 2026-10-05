@@ -64,6 +64,7 @@ export class Room {
     this.say = null;
     this.open = false;
     addEventListener("resize", () => this.resize());
+    new ResizeObserver(() => this.resize()).observe(container);
   }
 
   // ---------------------------------------------------------------- build
@@ -215,7 +216,7 @@ export class Room {
 
     // speech bubble (DOM, positioned over the robot)
     const narrow = innerWidth < innerHeight;
-    this.camera.position.set(narrow ? 3.4 : 3.2, narrow ? 2.9 : 2.5, narrow ? 4.4 : 3.0);   // three-quarter view: robot + monitors
+    this.camera.position.set(narrow ? 3.3 : 3.2, narrow ? 3.9 : 2.5, narrow ? 3.1 : 3.0);   // three-quarter view: robot + monitors
     this.controls.target.set(-0.1, 1.45, -0.7);
     this.resize();
   }
@@ -716,10 +717,12 @@ export class Room {
 
   // ---------------------------------------------------------------- loop
   resize() {
-    const r = this.container.getBoundingClientRect();
-    if (!r.width) return;
-    this.renderer.setSize(r.width, r.height);
-    this.camera.aspect = r.width / r.height;
+    // size from the container itself: on iPhone home-screen apps the window size settles
+    // after the room opens, so sizing once at open left an empty band at the bottom
+    const w = this.container.clientWidth, h = this.container.clientHeight;
+    if (!w || !h) return;
+    this.renderer.setSize(w, h, false);   // CSS keeps the canvas at 100% of the room
+    this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
 
@@ -749,7 +752,7 @@ export class Room {
     // body language
     const r = this.robot, [la, ra] = this.arms;
     const turn = ["ecstatic", "upset", "hyped", "chill", "defeated"].includes(mood);
-    r.rotation.y += ((turn ? 0.35 : Math.PI + 0.25) - r.rotation.y) * Math.min(1, dt * 4);   // swivel to the camera when reacting
+    r.rotation.y += ((turn ? 0.35 : Math.PI - 0.55) - r.rotation.y) * Math.min(1, dt * 4);   // swivel to the camera when reacting; side-on while working
     this.chair.rotation.y = r.rotation.y - Math.PI;
     let bob = Math.sin(t * 2) * 0.01, armL = 0.6, armR = 0.6, headTilt = 0;
     if (mood === "focused" || mood === "confident" || mood === "thinking") {   // typing
