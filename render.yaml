@@ -1,0 +1,19 @@
+# Render Blueprint: dashboard → New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: starnet-city
+    runtime: docker
+    plan: starter          # always-on; the free plan sleeps after 15 idle minutes, which stops the bots
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: STARNET_MODE
+        value: live
+      - key: STARNET_PASSWORD
+        sync: false        # Render asks you for this when you create the Blueprint
+      - key: STARNET_WEBHOOK_SECRET
+        generateValue: true
+    disk:                  # keeps data/paper_trades.csv, paper_days.csv and the paper account across deploys
+      name: starnet-data
+      mountPath: /app/data
+      sizeGB: 1

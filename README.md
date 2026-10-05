@@ -1,1 +1,326 @@
-# starnet
+# Starnet City
+
+A live 3D "trading city": each Python bot is a **worker** living in its own
+building and trading micro futures (**MNQ, MES, M2K**) with the **Andrew Macre
+pointer strategy**. All workers share **one prop firm account** whose rules
+(Lucid Trading, LucidFlex 50K by default) they're built to pass: first the
+evaluation, then the funded stage. They watch every session from the 18:00 ET
+open to the 16:45 ET flat deadline and take new entries in the **London,
+NY AM and NY PM killzones**, aiming for **$600–$1,200 a day**. When a worker is in a trade its
+building fires a light beam into the sky. When it closes a trade, gold coins (or
+red ones) roll down its road to **The Vault** in the middle of town.
+
+![city](docs/city.png)
+
+## Streamer rooms
+
+Tap any building to go inside: its bot is a little robot streamer at a desk,
+with three monitors:
+
+- **Chart**: its live 1m candles with the untapped FFVG/IFFVG zones it's
+  watching, the current PROC box, its entry and the next-zone target.
+- **P&L**: today, the open position, recent wins/losses, career earnings and
+  progress to its next gadget.
+- **Stream chat**: viewers reacting to every entry, add, win and loss.
+
+Each bot has its own persona (handle, vibe, props and catchphrases in
+`persona` in `config.py`) and shows how it feels: typing while it scans, a
+"?" while it waits for MES to confirm, sweating in a losing trade, jumping with
+arms up and coins flying on a win, hands on head under a rain cloud on a loss,
+sunglasses when the day is locked in, slumped when the account stops it,
+asleep when it's switched off. Its face is a little screen.
+
+**The more a bot makes, the fancier its setup.** Gadgets unlock from its
+best-ever lifetime earnings and are never taken back: RGB racing chair ($500),
+4th monitor ($1k), hexagon LED wall ($2.5k), gold trophy + neon $ ($5k), wall
+of screens ($10k), aquarium ($25k), gold-plated chassis ($50k), penthouse view
+($100k). 💎 on a building's label shows how upgraded it is. In live mode,
+lifetime earnings are saved in `data/paper_bots.json`.
+
+![room](docs/room.png)
+
+## Run it
+
+```bash
+pip install -r requirements.txt
+uvicorn backend.main:app --reload
+# open http://localhost:8000
+```
+
+`STARNET_TICK_SECONDS=0.1 uvicorn backend.main:app` runs the market 10× faster.
+
+- **Click a building** to open that worker's card: strategy, open position, recent trades, and a button to send it home or put it back on shift.
+- **Click the vault** for today's payroll.
+
+## How it's built
+
+```
+backend/
+  market.py      simulated MNQ / MES / M2K prices with 1-minute OHLC candles
+  broker.py      PaperBroker: micro futures (tick slippage + fees; options still supported). Implement open/close/mark to go live
+  account.py     the shared prop firm account: LucidFlex / LucidPro 50K rules, EOD drawdown, daily goal / cap / stop, contract budget
+  bots/base.py   the worker lifecycle: scanning → in_trade → off_duty / stopped / walked; 3 → 6 contract sizing
+  bots/proc.py   the Macre PROC strategy (FFVG/IFFVG taps + 3-6m pointers)
+  config.py      who lives in the city
+  backtest.py    replay real 1m candles through the bots; walk-forward optimizer
+  fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
+  live.py        live paper trading on real (10-min delayed) candles, with trade logs
+frontend/room.js  the bots' streamer rooms: robot, monitors, emotions, gadgets
+Dockerfile, render.yaml   one-click hosting (password-protected) so you can watch from your phone
+  engine.py      ticks the market and every bot, builds the snapshot
+  main.py        FastAPI: WebSocket /ws, REST /api/state, /api/bots/{id}/{on|off}
+frontend/
+  city.js        Three.js scene: buildings, beams, halos, roads, coins, bloom, labels
+```
+
+### The strategy: PROC (`backend/bots/proc.py`)
+
+A rebuild of the indicators on your TradingView chart (PROC – Pointer Range of
+Control, Untapped FFVGs & IFFVGs, Troop Toolkit), computed from 1-minute candles:
+
+1. **FFVG**: the first fair value gap after a confirmed swing high/low on any
+   1–6 minute timeframe, within 6 candles of the swing (your "Sweep Proximity 6").
+2. **Tap**: the first time any 1-minute wick trades into an untapped FFVG.
+3. **IFFVG**: an FFVG that a candle on its own timeframe closes fully through
+   flips into an opposite zone that can be tapped the same way.
+4. **Pointer**: a 3/4/5/6-minute candle that closes inside the previous
+   candle's wick (beyond the body, within the high/low).
+5. **PROC = entry**: a pointer whose candle, or the one before it, made the
+   first-ever wick into a same-direction untapped FFVG/IFFVG. The bot enters
+   with 3 contracts and shows the next opposite zone as the expected move.
+6. **Add**: another PROC the same way while the trade is in profit → +3 (6 max).
+7. **Exit**: only on a PROC against the trade, i.e. a pointer against you on
+   another FFVG/IFFVG. No stop loss.
+8. **Walk away**: a PROC is invalidated when an opposite candle on its own
+   timeframe closes beyond its box; 3 of those in a day and the bot stops.
+9. **MNQ/MES correlation**: an MNQ PROC is only taken (or added to) when MES
+   agrees within 6 minutes before or after it, and vice versa. `confirm_mode`
+   sets how strict "agrees" is: `proc` (MES printed its own PROC the same way,
+   the default), `pointer` (a same-way 3–6m pointer) or `tap` (a wick into a
+   same-way FFVG/IFFVG). Exits never wait for confirmation. The bots keep both
+   markets' structure up to date even if only one of them is being traded.
+
+Settings (`params` in `config.py`, most tried by the optimizer): `confirm_with`,
+`confirm_mode`, `confirm_window`, `pointer_tfs`,
+`pivot_len`, `sweep_proximity`, `use_iffvg`, `walk_after`,
+`exit_on_invalidation`, `killzones` (Asia 20:00–00:00, London 02:00–05:00,
+NY AM 09:30–11:00, NY PM 14:00–16:00 ET), `require_liquidity_sweep` (the PROC
+must take one of those sessions' highs/lows, like Troop's liquidity levels).
+
+`backend/bots/pointer.py` is the earlier, simpler pointer bot, kept for reference.
+
+### Position size
+
+Every trade **starts at 3 contracts**. When another pointer forms in the trade's
+direction and the trade is in profit, the bot **adds 3 more, up to 6, never
+more**. The whole account holds at most **12 micros** at once (two bots at full
+size), and only one bot can hold a given symbol at a time, so they never take
+opposite sides of the same contract.
+
+### Trading day and sessions
+
+The simulated day matches the futures day under Lucid's flat rule: **18:00 ET
+open → Asia → London (03:00) → New York (09:30) → flat by 16:45 ET**. Bots track
+market structure the whole time but only open trades in the killzones London
+02:00–05:00, NY AM 09:30–11:00 and NY PM 14:00–16:00 ET (open trades run on
+until a PROC against them), and flatten at 16:40.
+
+### Real-data results (Sep 8 – Oct 5 2026, 21 days of 1m NQ/ES/RTY)
+
+| Settings | Profitable days | Total | Profit factor | Evaluations |
+|---|---|---|---|---|
+| **Defaults**: MNQ only (MES confirms), killzones London + NY AM + NY PM, pointer confirmation, swing length 6, stop after 3 losers in a row, $1,200 daily cap, −$600 daily stop | **71%** | **+$13,224** | **2.9** | 1 passed, 0 failed |
+| Same with a −$800 daily stop | 76% | +$11,847 | 2.73 | 1 passed, 0 failed |
+| Same with a $1,000 daily cap | 76% | +$10,173 | 2.63 | 1 passed, 0 failed |
+| Same, with MES and M2K bots also trading | 71% | +$10,321 | 1.86 | 1 passed, 0 failed |
+| Same, but entering in every session | 45% | −$515 | 0.97 | 0 passed, 2 failed |
+| Original settings (all sessions, PROC confirmation, swing length 2) | 48% | −$127 | 0.97 | 1 passed, 2 failed |
+
+On the last 7 days, which were never used for tuning, MNQ-only had 86%
+profitable days and +$4,252. Win rate is ~48%: winners average ~2.9× losers
+because trades only close on a PROC against them (or the daily cap).
+
+What the trade-level breakdown showed, and what was tried:
+
+- MNQ made +$9,645 while MES (−$197) and M2K (−$154) were breakeven → MNQ only.
+- Trades that grew to 6 contracts made +$11,047; trades that stayed at 3 lost
+  −$1,752. The edge is in adding to winners.
+- Trades closed within 15 minutes lost (chop); trades held 60+ minutes won 72%.
+- Losing days went straight to the −$800 stop without ever being up much →
+  stop after 3 losing trades in a row.
+- The daily cap does most of the profit-taking. $1,200 beat $1,000 (+16%, same
+  consistency); $1,500 made more but fewer profitable days and a best day over
+  Lucid's $1,500 consistency limit.
+- Tested and rejected (worse when re-run): dropping 5m pointers, exiting only
+  on an opposite PROC of the same or higher timeframe, a 2-loss streak stop,
+  adding on MNQ's own pointers, an $800 goal or no goal, a profit lock that
+  stops a green day from giving back (`lock_trigger` / `lock_floor`), 3 or 10
+  minute confirmation windows, FFVGs only (IFFVGs carry a lot of the edge),
+  and requiring a liquidity sweep (cut profit by ~90%).
+- Robustness: with 2-3 ticks of slippage per side instead of 1 the results
+  barely change, so the edge isn't living on perfect fills.
+- Daily stops of −$600 and −$1,000 both beat −$800 on total profit, which
+  shows how much of the difference between settings is noise on 21 days.
+  Adding on an MES pointer (`add_on:
+  "partner_pointer"`) made more money but fewer profitable days and a best day
+  over $1,500: worth re-testing as more data comes in. 21 days is a small sample:
+keep fetching data and re-running the backtest as history grows.
+
+### Daily goal
+
+| | Default | What happens |
+|---|---|---|
+| Daily goal | **$600** closed profit | no new trades; open trades keep running until a pointer forms against them |
+| Daily cap | **$1,200** open + closed | flatten everything, done for the day |
+| Daily stop | **−$600** open + closed | flatten everything, done for the day (smaller when the account is near its drawdown) |
+
+### Prop firm account (`backend/account.py`)
+
+All bots trade one shared account with LucidFlex 50K rules:
+
+| Rule | LucidFlex 50K | What the bots do |
+|---|---|---|
+| Profit target | $3,000, at least 2 trading days | stop for the day once it's in hand; pass at the 16:45 close |
+| Drawdown | **End-of-day**: $2,000 below the highest *closing* balance, only moves at the close, locks at $50,100 once the account closes at $52,100 | never let a day's loss reach it (keep a $100 cushion). Equity touching it during the day is treated as a breach (the safe reading) |
+| Consistency | evaluation: best day ≤ 50% of profit; funded: none | the $1,200 cap keeps the best day under half the $3,000 target |
+| Daily loss limit | none | our own −$600 daily stop |
+| Max size | 40 micros | at most 12 micros open, 3–6 per trade |
+| Flat rule | flat by 16:45 ET, no overnight/weekend holds | flatten at 16:40 |
+
+`LUCIDPRO_50K` is also included (no evaluation consistency rule; 40% funded
+consistency and a $2,100 payout buffer). Use it with
+`PropAccount(rules=LUCIDPRO_50K)` in `engine.py`. After passing, the account
+switches to the funded stage and the panel shows when a payout is eligible. If
+it fails, or ends up with under $150 of room above the drawdown, the bots stop
+and the panel shows **Reset evaluation**. Change `Guards` in `account.py` to
+adjust the goal, cap, stop or contract budget.
+
+The account's limits are the only exits besides a pointer against the trade:
+there are still **no per-trade stops**.
+
+| Bot rule | Effect |
+|---|---|
+| End of day | flattens everything 5 minutes before the close |
+| Walk away | 3 pointer inverses in a day and that bot stops for the day |
+
+### Add a worker
+
+```python
+# backend/config.py
+(ProcBot, BotConfig(id="mes-ny", name="MES NY", underlying="MES", district="LAB", timeframe=5,
+                    params={"pointer_tfs": [5], "killzones": ["NY AM"]}, color="#ff00aa")),
+```
+
+To add another micro (e.g. MYM), add it to `Market.underlyings` and its dollars
+per point to `FUTURES_MULTIPLIER` in `broker.py` (MNQ $2, MES $5, M2K $5, MYM $0.50).
+
+The city lays itself out automatically for however many workers you register.
+
+## Live paper trading (`backend/live.py`)
+
+Run the city on real markets with paper money:
+
+```bash
+STARNET_MODE=live uvicorn backend.main:app
+```
+
+- Real MNQ / MES / M2K candles (via NQ=F / ES=F / RTY=F on Yahoo) step the
+  bots minute by minute. The header shows **● LIVE PAPER** and how far behind
+  the data is: Yahoo's free CME feed is **~10 minutes delayed**, so this is a
+  forward test, not something to mirror trades from.
+- On startup the bots read the last 2 days of candles without trading, so
+  their FFVG / PROC structure is ready before the first live candle.
+- Every closed trade goes to `data/paper_trades.csv`, every finished day to
+  `data/paper_days.csv`, and the prop account to `data/paper_account.json`, so
+  a restart resumes the same evaluation (open positions aren't carried over).
+- Leave it running on a small server or always-on computer for a few weeks:
+  forward-test results can't be overfit, unlike backtests.
+
+Going from paper to a real Lucid account needs a real-time data feed and order
+routing through the platform your account uses (see *Going live* below).
+
+## Watch it from your phone, 24/7 (deploy to Render)
+
+The repo is ready to host: `Dockerfile` + `render.yaml` run the city in live
+paper mode with a password and a disk for the paper-trading logs.
+
+1. **Merge PR #1** into `main` on GitHub (Render deploys the default branch).
+2. Sign up at **render.com** with your GitHub account.
+3. Dashboard → **New → Blueprint** → pick `levetteit/starnet` → **Apply**.
+4. When asked for **`STARNET_PASSWORD`**, pick a strong password. That's what
+   you'll type on your phone. (`STARNET_WEBHOOK_SECRET` is generated for you.)
+5. It uses the **Starter plan (~$7/month) + a 1 GB disk (~$0.25/month)**. The free
+   plan sleeps after 15 minutes without visitors, which would stop the bots.
+6. When the deploy is green, open the `https://starnet-city-….onrender.com` URL
+   on your phone, log in with any username + your password, then
+   **Share → Add to Home Screen** (iPhone) or **⋮ → Add to Home screen /
+   Install app** (Android). It opens full screen like an app.
+
+On the phone you get a compact account bar (tap it for the full panel), the
+city, and an **activity feed** of what every bot is doing: PROCs seen, waiting
+for MES, entries, adds, exits, account stops. Tap a building for its card.
+
+Every push to `main` redeploys automatically. Paper results stay on the disk
+(`/app/data/paper_trades.csv`, `paper_days.csv`); download them from Render's
+Shell tab. The same Docker image runs on Fly.io, Railway or any VPS: set
+`STARNET_PASSWORD`, mount a volume at `/app/data`, expose port 8000.
+
+## Backtest and optimize on real data (`backend/backtest.py`)
+
+The live city runs on simulated, random prices, so it can't tell you if the
+strategy works. The backtester replays **real 1-minute candles** through the
+exact same bots, prop account rules and daily goal/cap/stop.
+
+1. **Get data.** Free: `python -m backend.fetch_data` downloads the last ~30
+   days of real 1-minute NQ / ES / RTY futures from Yahoo Finance into
+   `data/MNQ_1m.csv`, `data/MES_1m.csv`, `data/M2K_1m.csv` (micros track the
+   full-size contracts exactly). Run it every few weeks: it merges new candles
+   in, so your history keeps growing. A paid TradingView plan can also export
+   1-minute charts (chart menu → *Export chart data…*); name the files the same way.
+2. **Backtest the current settings:**
+   ```bash
+   python -m backend.backtest data/*.csv
+   ```
+   You get days traded, **% profitable days**, days that reached the $600 goal,
+   win rate, average win/loss, profit factor, best/worst day, evaluations passed
+   and failed, and P&L by session.
+3. **Optimize:**
+   ```bash
+   python -m backend.backtest data/*.csv --optimize --out results.json
+   ```
+   It tries ~190 combinations of the PROC settings (MNQ/MES confirmation off /
+   tap / pointer / PROC and its window, swing pivot length, IFFVGs on/off,
+   liquidity sweep required, killzones). Export **both MNQ and MES** so the
+   confirmation can be tested on the **first 70% of days**,
+   then re-runs the top 5 on the **last 30%** they never saw. Pick settings that
+   hold up on those unseen days, not the ones with the best tuned numbers.
+4. Put the winning settings in `params` in `backend/config.py`.
+
+More history gives more reliable answers; a few weeks of 1-minute data is a
+minimum. `--make-sample FOLDER` writes synthetic files if you just want to see
+it run.
+
+## TradingView alerts
+
+The PROC, Untapped FFVGs and Troop Toolkit indicators don't publish alert
+conditions, so they can't send webhooks. That's why the bots rebuild PROC
+themselves from price data. The webhook still accepts direct orders from any
+other alert you set up:
+
+1. Start the server with a secret: `STARNET_WEBHOOK_SECRET=<long random string> uvicorn backend.main:app --host 0.0.0.0`
+2. Give it a public HTTPS address (`ngrok http 8000`, or a cloud server).
+3. In the TradingView alert, tick **Webhook URL** → `https://<address>/api/tradingview`, message:
+   ```json
+   {"secret": "<your secret>", "ticker": "{{ticker}}", "signal": "long", "price": {{close}}}
+   ```
+   `signal` is `long`, `short` or `exit`. Alerts go to every bot on that symbol
+   (`MNQ1!`, `MES1!`, `M2K1!`), or add `"bot": "mnq-3m"` for one bot.
+
+## Going live (read this first)
+
+Everything runs on **simulated prices with a paper broker**. To trade for real
+you'd swap `Market` for a live data feed and `PaperBroker` for the platform your
+prop firm account runs on (check which platforms your Lucid plan supports,
+e.g. Tradovate, NinjaTrader or Rithmic-based platforms). Check your firm allows automated trading first.
+Simulated prices are a random walk, so they don't prove the strategy works
+(or that it doesn't). To judge it, backtest it on real historical candles.
