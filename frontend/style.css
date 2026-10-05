@@ -12,7 +12,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; }
-#app { position: fixed; inset: 0; }
+#app { position: fixed; top: 0; left: 0; right: 0; height: calc(100% + var(--ext, 0px)); }
 #app canvas { display: block; }
 .hidden { display: none !important; }
 
@@ -113,7 +113,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #feed li.think { color: #c7bdf5; } #feed li.muted, #feed li.muted2 { color: var(--muted); }
 @keyframes fadein { from { opacity: 0; transform: translateY(-4px); } }
 
-#room { position: fixed; inset: 0; z-index: 8; background: #0b0820; }
+#room { position: fixed; top: 0; left: 0; right: 0; height: calc(100% + var(--ext, 0px)); z-index: 8; background: #0b0820; }
 #room-view { position: absolute; inset: 0; }
 #room-view canvas { display: block; width: 100% !important; height: 100% !important; touch-action: none; }
 #room .room-top { position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
@@ -129,7 +129,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #room-bubble::after { content: ""; position: absolute; left: 50%; bottom: -10px; margin-left: -10px; border: 10px solid transparent;
   border-top-color: #fff; border-bottom: 0; }
 @keyframes pop { from { transform: translateX(-50%) scale(.6); opacity: 0; } }
-.room-hint { position: absolute; bottom: max(14px, calc(env(safe-area-inset-bottom) + 4px)); left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--muted); pointer-events: none; }
+.room-hint { position: absolute; bottom: calc(max(14px, calc(env(safe-area-inset-bottom) + 4px)) + var(--hb, 0px)); left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--muted); pointer-events: none; }
 #worker { z-index: 9; }
 
 #payroll { left: 50%; bottom: 16px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); }
@@ -149,21 +149,20 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
   #clock { font-size: 10px; margin-left: auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   #clock small.lag { display: inline; font-size: 9px; }
   #account { top: max(44px, calc(env(safe-area-inset-top) + 34px)); }
-  #feed { bottom: max(12px, env(safe-area-inset-bottom)); }
   .tag.off .status, .tag.off .earned { display: none; }   /* switched-off bots: just the name */
   .tag.off { padding: 3px 5px; }
   #room-title span { display: none; }
   #room-bubble { top: calc(env(safe-area-inset-top) + 70px); font-size: 13px; }
   #room #room-close { font-size: 14px; min-width: 48px; }
-  #account { width: auto; right: 16px; top: 44px; padding: 8px 12px; font-size: 11px; }
+  #account { width: auto; right: 16px; padding: 8px 12px; font-size: 11px; }
   #acct-sum { display: flex; margin-top: 2px; }
   #account:not(.expanded) #acct-body { display: none; }
   #account .acct-head { margin-bottom: 4px; }
-  #feed { left: 12px; right: 12px; bottom: 12px; width: auto; max-height: 30vh; }
+  #feed { left: 12px; right: 12px; bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--hb, 0px) - var(--ext, 0px)); width: auto; max-height: 30vh; }
   #feed ul { max-height: calc(30vh - 34px); font-size: 11px; }
-  #payroll { bottom: 12px; }
+  #payroll { bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--hb, 0px) - var(--ext, 0px)); }
   #clock small { display: none; }
-  #worker { top: auto; bottom: max(16px, env(safe-area-inset-bottom)); right: 16px; left: 16px; width: auto; max-height: 55vh; }
+  #worker { top: auto; bottom: calc(max(16px, env(safe-area-inset-bottom)) + var(--hb, 0px) - var(--ext, 0px)); right: 16px; left: 16px; width: auto; max-height: 55vh; }
   .tag { padding: 4px 6px; line-height: 1.5; }
   .tag .name { font-size: 7px; }
   .tag .status, .tag .earned { font-size: 6px; }
