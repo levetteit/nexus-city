@@ -51,6 +51,7 @@ async def run_live() -> None:
     from . import live
     market = await asyncio.to_thread(live.LiveMarket)
     engine = Engine(market=market, account=live.load_account())
+    live.load_careers(engine)
     while market.i + 1 < market.warm_until:   # read history, don't trade it
         engine.tick(trade=False)
     last_poll = 0.0
@@ -158,6 +159,13 @@ def toggle(bot_id: str, action: str) -> dict:
         raise HTTPException(404)
     engine.set_enabled(bot_id, action == "on")
     return engine.bots[bot_id].snapshot(engine.market)
+
+
+@app.get("/api/bots/{bot_id}/room")
+def bot_room(bot_id: str) -> dict:
+    if engine is None or bot_id not in engine.bots:
+        raise HTTPException(404)
+    return engine.bots[bot_id].room(engine.market)
 
 
 @app.post("/api/account/reset")

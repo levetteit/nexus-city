@@ -12,6 +12,33 @@ red ones) roll down its road to **The Vault** in the middle of town.
 
 ![city](docs/city.png)
 
+## Streamer rooms
+
+Tap any building to go inside: its bot is a little robot streamer at a desk,
+with three monitors:
+
+- **Chart**: its live 1m candles with the untapped FFVG/IFFVG zones it's
+  watching, the current PROC box, its entry and the next-zone target.
+- **P&L**: today, the open position, recent wins/losses, career earnings and
+  progress to its next gadget.
+- **Stream chat**: viewers reacting to every entry, add, win and loss.
+
+Each bot has its own persona (handle, vibe, props and catchphrases in
+`persona` in `config.py`) and shows how it feels: typing while it scans, a
+"?" while it waits for MES to confirm, sweating in a losing trade, jumping with
+arms up and coins flying on a win, hands on head under a rain cloud on a loss,
+sunglasses when the day is locked in, slumped when the account stops it,
+asleep when it's switched off. Its face is a little screen.
+
+**The more a bot makes, the fancier its setup.** Gadgets unlock from its
+best-ever lifetime earnings and are never taken back: RGB racing chair ($500),
+4th monitor ($1k), hexagon LED wall ($2.5k), gold trophy + neon $ ($5k), wall
+of screens ($10k), aquarium ($25k), gold-plated chassis ($50k), penthouse view
+($100k). 💎 on a building's label shows how upgraded it is. In live mode,
+lifetime earnings are saved in `data/paper_bots.json`.
+
+![room](docs/room.png)
+
 ## Run it
 
 ```bash
@@ -38,6 +65,7 @@ backend/
   backtest.py    replay real 1m candles through the bots; walk-forward optimizer
   fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
   live.py        live paper trading on real (10-min delayed) candles, with trade logs
+frontend/room.js  the bots' streamer rooms: robot, monitors, emotions, gadgets
 Dockerfile, render.yaml   one-click hosting (password-protected) so you can watch from your phone
   engine.py      ticks the market and every bot, builds the snapshot
   main.py        FastAPI: WebSocket /ws, REST /api/state, /api/bots/{id}/{on|off}

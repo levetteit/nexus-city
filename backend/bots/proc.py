@@ -476,6 +476,22 @@ class ProcBot(Bot):
             return f"{kind} order" if self.position else None
         return None
 
+    def room(self, market: Market) -> dict:
+        out = super().room(market)
+        e = self.engine
+        if e:
+            first = out["candles"][0][0] if out["candles"] else 0
+            out["zones"] = [{"side": z.side, "top": z.top, "bottom": z.bottom, "kind": z.kind, "tf": z.tf,
+                             "from": max(z.created, first)}
+                            for z in e.zones if not z.dead and z.tapped_at is None][-24:]
+            if e.proc:
+                p = e.proc
+                out["proc"] = {"side": p.side, "tf": p.tf, "high": p.high, "low": p.low, "t": p.time,
+                               "zone": p.zone.label()}
+        out["waiting"] = len(self.pending)
+        out["confirm_with"] = self.p["confirm_with"] if self._confirming else None
+        return out
+
     def info(self) -> dict:
         e = self.engine
         live = [z for z in (e.zones if e else []) if not z.dead and z.tapped_at is None]

@@ -5,6 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { Room, moodEmoji, tierOf, GADGETS } from "./room.js";
 
 // ---------------------------------------------------------------- setup
 const app = document.getElementById("app");
@@ -250,7 +251,7 @@ function makeBuilding(bot, index, total) {
   const tag = document.createElement("div");
   tag.className = "tag";
   tag.style.setProperty("--accent", bot.color);
-  tag.onclick = () => openWorker(bot.id);
+  tag.onclick = () => openRoom(bot.id);
   const label = new CSS2DObject(tag);
   label.position.set(0, hero + 12, 0);
   group.add(label);
@@ -364,7 +365,8 @@ function applyState(s) {
     const statusCls = ["stopped", "walked", "disabled"].includes(bot.status) ? "stopped" : bot.status === "off_duty" ? "off" : "";
     const star = bot.id === top.id && top.realized > 0 ? "★ " : "";
     const live = bot.status === "in_trade" ? ` <span class="earned ${bot.unrealized < 0 ? "neg" : ""}">(${money(bot.unrealized)} open)</span>` : "";
-    b.tag.innerHTML = `<div class="name">${star}${bot.name}</div><div class="status ${statusCls}">${STATUS_TEXT[bot.status](bot)}</div><div class="earned ${bot.realized < 0 ? "neg" : ""}">earned ${money(bot.realized)}${live}</div>`;
+    const gadget = tierOf(bot.career_best) > 0 ? ` <span title="${GADGETS[tierOf(bot.career_best)][2]}">${"💎".repeat(Math.min(3, Math.ceil(tierOf(bot.career_best) / 3)))}</span>` : "";
+    b.tag.innerHTML = `<div class="name">${moodEmoji(bot)} ${star}${bot.name}${gadget}</div><div class="status ${statusCls}">${STATUS_TEXT[bot.status](bot)}</div><div class="earned ${bot.realized < 0 ? "neg" : ""}">earned ${money(bot.realized)}${live}</div>`;
     b.tag.classList.toggle("dim", bot.status === "disabled");
     b.status = bot.status;
     const dark = ["disabled", "stopped", "walked"].includes(bot.status);
@@ -456,6 +458,49 @@ function feedSetups(s) {   // what each working bot is thinking: PROC seen, wait
   }
 }
 
+// ---------------------------------------------------------------- streamer rooms
+let room = null, roomBotId = null, roomTimer = null;
+async function refreshRoom() {
+  const bot = state?.bots.find((b) => b.id === roomBotId);
+  if (!bot) return;
+  try {
+    const data = await (await fetch(`/api/bots/${roomBotId}/room`)).json();
+    room.update(bot, data);
+  } catch { /* next refresh */ }
+}
+function openRoom(id) {
+  const bot = state?.bots.find((b) => b.id === id);
+  if (!bot) return;
+  const el = document.getElementById("room");
+  el.classList.remove("hidden");
+  el.style.setProperty("--accent", bot.color);
+  document.getElementById("room-title").innerHTML = `<b>${bot.persona?.handle || bot.name}</b> <span>${bot.name} · ${bot.persona?.vibe || ""}</span>`;
+  room ||= new Room(document.getElementById("room-view"));
+  if (roomBotId !== id) { room.build(bot); room.chat = []; }
+  roomBotId = id;
+  room.start();
+  refreshRoom();
+  clearInterval(roomTimer);
+  roomTimer = setInterval(refreshRoom, 2000);
+  openWorkerId = null;
+  document.getElementById("worker").classList.add("hidden");
+}
+function closeRoom() {
+  document.getElementById("room").classList.add("hidden");
+  room?.stop();
+  clearInterval(roomTimer);
+  roomBotId = null;
+  document.getElementById("worker").classList.add("hidden");
+  openWorkerId = null;
+}
+document.getElementById("room-close").onclick = closeRoom;
+document.getElementById("room-stats").onclick = () => {
+  const w = document.getElementById("worker");
+  w.classList.toggle("hidden");
+  openWorkerId = roomBotId;
+  renderWorker();
+};
+
 function openWorker(id) {
   openWorkerId = id;
   document.getElementById("worker").classList.remove("hidden");
@@ -520,7 +565,7 @@ renderer.domElement.addEventListener("pointerup", (e) => {
   const hit = ray.intersectObjects([...clickables, dome]).find((h) => h.object.userData.botId || h.object === dome);
   if (!hit) return;
   if (hit.object === dome) document.getElementById("payroll").classList.toggle("hidden");
-  else openWorker(hit.object.userData.botId);
+  else openRoom(hit.object.userData.botId);
 });
 
 // ---------------------------------------------------------------- live feed
@@ -534,6 +579,7 @@ function connect() {
     applyState(msg.state);
     feedEvents(msg.events);
     feedSetups(msg.state);
+    if (roomBotId && room) for (const ev of msg.events) if (ev.bot === roomBotId || ev.type === "account_halt") room.onEvent(ev);
     for (const ev of msg.events) {
       if (ev.type === "trade_close") sendCoins(ev.bot, ev.pnl);
       if (ev.type === "tv_signal") tvPing(ev);
@@ -570,7 +616,7 @@ function frame() {
   dome.scale.setScalar(1 + vaultPulse * 0.04);
   updateCoins(dt);
 
-  composer.render();
+  if (!roomBotId) composer.render();   // the city pauses while you're inside a room
   labels.render(scene, camera);
   requestAnimationFrame(frame);
 }

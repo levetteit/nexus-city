@@ -10,8 +10,9 @@ Start it with:  STARNET_MODE=live uvicorn backend.main:app
   their FFVG / PROC structure is in place before the first live candle.
 * Every closed paper trade goes to data/paper_trades.csv and every finished day
   to data/paper_days.csv. The prop account is saved to data/paper_account.json
-  after each trade and day, so a restart picks up where it left off (open
-  positions are not carried over a restart).
+  after each trade and day, and each bot's lifetime earnings (which unlock
+  gadgets in its room) to data/paper_bots.json, so a restart picks up where it
+  left off (open positions are not carried over a restart).
 """
 from __future__ import annotations
 
@@ -105,6 +106,23 @@ def save_account(acct: PropAccount) -> None:
         json.dump({k: getattr(acct, k) for k in ACCOUNT_FIELDS}, f, indent=1)
 
 
+def load_careers(engine) -> None:
+    """Restore each bot's lifetime earnings (and so its room gadgets)."""
+    path = os.path.join(DATA_DIR, "paper_bots.json")
+    if os.path.exists(path):
+        with open(path) as f:
+            saved = json.load(f)
+        for bot_id, c in saved.items():
+            if bot_id in engine.bots:
+                engine.bots[bot_id].career, engine.bots[bot_id].career_best = c["career"], c["career_best"]
+
+
+def save_careers(engine) -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(os.path.join(DATA_DIR, "paper_bots.json"), "w") as f:
+        json.dump({b.cfg.id: {"career": b.career, "career_best": b.career_best} for b in engine.bots.values()}, f, indent=1)
+
+
 def _append(name: str, header: list[str], row: list) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     path = os.path.join(DATA_DIR, name)
@@ -135,3 +153,4 @@ def record(engine, events: list[dict]) -> None:
             changed = True
     if changed:
         save_account(acct)
+        save_careers(engine)

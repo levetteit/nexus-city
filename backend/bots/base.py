@@ -64,6 +64,7 @@ class BotConfig:
     max_contracts: int = 6         # never hold more than this
     otm_steps: int = 0             # 0 = ATM strikes
     enabled: bool = True           # False: the building stands, the bot starts switched off
+    persona: dict = field(default_factory=dict)   # streamer-room personality: handle, vibe, props, lines
     color: str = "#7c5cff"
     params: dict = field(default_factory=dict)   # strategy-specific settings
 
@@ -80,6 +81,8 @@ class Bot:
         self.position: Optional[Position] = None
         self.plan: Optional[Entry] = None
         self.realized = 0.0
+        self.career = 0.0        # lifetime P&L, never reset: buys gadgets for the bot's room
+        self.career_best = 0.0   # high-water mark, so gadgets are never taken back
         self.trades: list[TradeRecord] = []
         self._last_bar_count = -1
 
@@ -184,6 +187,8 @@ class Bot:
         pos = self.position
         pnl = pos.pnl(exit_px, qty)
         self.realized += pnl
+        self.career += pnl
+        self.career_best = max(self.career_best, self.career)
         rec = TradeRecord(next(_trade_ids), self.cfg.id, pos.label, qty, round(pos.entry, 2),
                           round(exit_px, 2), round(pnl, 2), reason, pos.opened_at, market.clock_str)
         self.trades.append(rec)
@@ -224,6 +229,21 @@ class Bot:
         if self.status != "disabled":
             self.status = "scanning"
 
+    def room(self, market: Market) -> dict:
+        """What the bot's monitors show: recent candles, its zones, PROC and position."""
+        u = market.underlyings[self.cfg.underlying]
+        out = {
+            "symbol": self.cfg.underlying, "clock": market.clock_str, "price": u.price,
+            "candles": [[b.t, b.open, b.high, b.low, b.close] for b in u.bars[-90:]],
+            "zones": [], "proc": None, "position": None,
+            "trades": [t.__dict__ for t in self.trades[-12:]],
+        }
+        if self.position:
+            mark = self.broker.mark(self.position, market)
+            out["position"] = {"side": self.plan.side, "qty": self.position.qty, "entry": self.position.entry,
+                               "pnl": round(self.position.pnl(mark), 2), "target": self.plan.target}
+        return out
+
     # ---- reporting ------------------------------------------------------
     def snapshot(self, market: Market) -> dict:
         unreal = 0.0
@@ -244,5 +264,7 @@ class Bot:
             "trades": len(self.trades), "wins": wins, "position": pos,
             "contracts": self.cfg.contracts, "max_contracts": self.cfg.max_contracts,
             "info": self.info(),
+            "persona": self.cfg.persona,
+            "career": round(self.career, 2), "career_best": round(self.career_best, 2),
             "recent": [t.__dict__ for t in self.trades[-8:]][::-1],
         }
