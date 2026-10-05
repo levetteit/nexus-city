@@ -64,7 +64,8 @@ backend/
   config.py      who lives in the city
   backtest.py    replay real 1m candles through the bots; walk-forward optimizer
   fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
-  live.py        live paper trading on real (10-min delayed) candles, with trade logs
+  live.py        live paper trading on real candles (Yahoo, or real-time via TradingView), with trade logs
+  execution.py   real orders to your Lucid accounts via TradersPost (armed from the city, with safety checks)
 frontend/room.js  the bots' streamer rooms: robot, monitors, emotions, gadgets
 Dockerfile, render.yaml   one-click hosting (password-protected) so you can watch from your phone
   engine.py      ticks the market and every bot, builds the snapshot
@@ -264,6 +265,56 @@ Every push to `main` redeploys automatically. Paper results stay on the disk
 (`/app/data/paper_trades.csv`, `paper_days.csv`); download them from Render's
 Shell tab. The same Docker image runs on Fly.io, Railway or any VPS: set
 `STARNET_PASSWORD`, mount a volume at `/app/data`, expose port 8000.
+
+## Real orders on your Lucid accounts (`backend/execution.py`)
+
+Lucid allows automated trading (not high-frequency trading or sub-5-second
+scalping, which these bots don't do). Real orders go **bot → TradersPost →
+Tradovate → your Lucid account(s)**. Two pieces, both one-time setup:
+
+**1. Real-time prices (required).** The free Yahoo data is ~10 minutes late, and
+real orders are blocked whenever prices are more than 2.5 minutes old. The
+`tradingview/starnet_feed.pine` script streams each 1-minute candle the moment
+it closes (needs a paid TradingView plan with webhooks and CME real-time data):
+
+1. In Render → your service → **Environment**, copy `STARNET_FEED_SECRET`.
+2. TradingView → open **MNQ1!** on the **1-minute** chart → Pine Editor → paste
+   the script → **Add to chart** → settings → paste the secret.
+3. **Create Alert** → Condition **Starnet feed → Any alert() function call** →
+   Notifications: **Webhook URL** `https://<your-render-url>/api/feed` → Create.
+4. Repeat 2–3 on **MES1!** (MES confirms every MNQ entry).
+
+The account panel shows **Price data: TradingView · real-time** once it's flowing.
+
+**2. Order routing.**
+
+1. Buy your Lucid account(s) and choose **Tradovate** as the platform.
+2. Sign up at **traderspost.io** → **Brokers → Tradovate** → log in with your
+   Lucid Tradovate credentials (repeat for each Lucid account).
+3. **Strategies → New strategy** (futures). Copy its **webhook URL**.
+4. **Subscribe** each Lucid account to the strategy. In the subscription
+   settings: allow **shorting**, allow **add to position**, use the **signal's
+   quantity**, market orders. No stop loss or take profit (the bots manage exits).
+5. Render → **Environment** → set `STARNET_TRADERSPOST_WEBHOOKS` to that URL →
+   Save (it redeploys).
+6. In the city, the account panel shows **Real orders: off**. Tap
+   **ARM REAL ORDERS** and type `ARM`. The header turns to **● REAL ORDERS**.
+
+What gets sent: entry `buy`/`sell` with the bot's quantity (3), `add` (3 more,
+6 max) and `exit`, on the front-month contract (e.g. `MNQZ2026`, rolling 8
+days before expiry). Every order is logged in `data/orders.csv`.
+
+Safety built in:
+- Off until you arm it; **FLATTEN ALL** exits everything on your accounts and disarms.
+- New entries are blocked when price data is over 2.5 minutes old; exits always go through.
+- Adds and exits are only sent for positions the router opened itself.
+- After a restart, any position left open is closed immediately (the bots restart flat).
+- Your Lucid account still enforces its own rules (drawdown, position limits,
+  4:45 PM ET flat); the bots' daily goal / cap / stop and 16:40 flatten sit inside those.
+
+The city's account panel still tracks paper P&L from the bots' fills. Your real
+fills (slippage, commissions) are in TradersPost and Tradovate. Run paper for a
+while, then start with **one** evaluation account before connecting more.
 
 ## Backtest and optimize on real data (`backend/backtest.py`)
 

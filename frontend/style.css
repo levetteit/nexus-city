@@ -91,6 +91,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #account .bar.day i { background: linear-gradient(90deg, #2bd47f, var(--green)); border-radius: 3px; }
 #account .bar.day em { position: absolute; top: -3px; width: 2px; height: 11px; background: #fff; opacity: .7; }
 #account .halt { margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: rgba(255, 84, 112, .15); color: #ffb3c0; }
+#account .exec-btns { display: flex; gap: 8px; margin-top: 8px; }
+#account .exec-btns button { flex: 1; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,.06);
+  color: var(--text); font-family: var(--pixel); font-size: 8px; cursor: pointer; }
+#account .exec-btns button.arm { border-color: var(--gold); color: var(--gold); }
+#account .exec-btns button.danger { background: var(--red); border-color: var(--red); color: #fff; }
 #account button.reset { margin-top: 8px; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: var(--gold);
   color: #2a1a00; font-family: var(--pixel); font-size: 9px; cursor: pointer; }
 
@@ -137,6 +142,15 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 
 @media (max-width: 640px) {
   #tickers { display: none; }
+  #hud { gap: 8px; padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top)); }
+  .brand { font-size: 11px; }
+  .brand span { display: none; }
+  #clock { font-size: 10px; margin-left: auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #clock small.lag { display: inline; font-size: 9px; }
+  #account { top: max(44px, calc(env(safe-area-inset-top) + 34px)); }
+  #feed { bottom: max(12px, env(safe-area-inset-bottom)); }
+  .tag.off .status, .tag.off .earned { display: none; }   /* switched-off bots: just the name */
+  .tag.off { padding: 3px 5px; }
   #room-title span { display: none; }
   #room-bubble { top: 14%; font-size: 13px; }
   #account { width: auto; right: 16px; top: 44px; padding: 8px 12px; font-size: 11px; }

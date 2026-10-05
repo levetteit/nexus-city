@@ -48,21 +48,28 @@ class LiveMarket(ReplayMarket):
         self.warm_until = len(self.timeline)   # candles before this index are history, not traded
         self._pending: dict[datetime, dict[str, tuple]] = {}
         self._prev_day = 0
+        self.last_push: datetime | None = None   # last candle from the real-time TradingView feed
+        self._pushed: dict[str, datetime] = {}
 
     def poll(self) -> int:
         """Fetch the newest candles. Returns how many new timestamps are ready to step through."""
-        added = 0
         for sym in self.symbols:
             for row in _rows(fetch_recent(SOURCES[sym], "1d")):
                 if row[0] > self.last_seen:
                     self._pending.setdefault(row[0], {})[sym] = row
+        return self._release()
+
+    def _release(self) -> int:
+        added = 0
         if not self._pending:
             return 0
         newest = max(self._pending)
         for t in sorted(self._pending):
             bars = self._pending[t]
-            # release a minute once every symbol has it, or once it's 3 minutes old (a symbol had no trade)
-            if len(bars) == len(self.underlyings) or (newest - t).total_seconds() >= 180:
+            # release a minute once every symbol we expect has it, or once it's 2 minutes old (a symbol had
+            # no trade). With the real-time feed on, only its symbols count: the rest come 10 minutes late.
+            need = self.realtime_symbols or set(self.underlyings)
+            if need <= set(bars) or (newest - t).total_seconds() >= 120:
                 self.timeline.append((t, bars))
                 self.last_seen = t
                 del self._pending[t]
@@ -71,12 +78,35 @@ class LiveMarket(ReplayMarket):
                 break
         return added
 
+    def push(self, symbol: str, ts: int, o: float, h: float, l: float, c: float) -> None:
+        """A closed 1m candle pushed in real time (TradingView feed). Newer than Yahoo, so it wins."""
+        if symbol not in self.underlyings:
+            return
+        row = (datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(ET), o, h, l, c)
+        if row[0] > self.last_seen:
+            self._pending.setdefault(row[0], {})[symbol] = row
+        self.last_push = self._pushed[symbol] = datetime.now(timezone.utc)
+
+    def release(self) -> int:
+        """Move pushed/polled candles that are complete onto the timeline."""
+        return self._release()
+
     def step(self) -> None:
         super().step()
         if self.day != self._prev_day:
             self._prev_day = self.day
             for u in self.underlyings.values():
                 u.open_price = u.price
+
+    @property
+    def realtime_symbols(self) -> set[str]:
+        now = datetime.now(timezone.utc)
+        return {s for s, t in self._pushed.items() if (now - t).total_seconds() < 180}
+
+    @property
+    def feed(self) -> str:
+        live = self.last_push and (datetime.now(timezone.utc) - self.last_push).total_seconds() < 180
+        return "tradingview" if live else "yahoo"
 
     @property
     def delay_minutes(self) -> float:
