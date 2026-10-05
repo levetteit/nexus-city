@@ -19,10 +19,10 @@ the presets below if they change or you use another plan):
   * Every position must be flat by 16:45 ET; no overnight or weekend holds.
 
 Our safety layer (`Guards`), tighter than the firm so we never touch its lines:
-  * daily goal $1,000: once closed P&L for the day reaches it, no new trades
+  * daily goal $600: once closed P&L for the day reaches it, no new trades
     (open trades still run until a pointer forms against them)
-  * daily cap $1,500: flatten everything at +$1,500 (open + closed); this also
-    keeps the best day inside the 50% consistency rule
+  * daily cap $1,000: flatten everything at +$1,000 (open + closed); this also
+    keeps the best day well inside the 50% consistency rule ($1,500 max)
   * daily stop -$800 (open + closed), shrunk on days the account starts close
     to the MLL so a loss can never reach it (we keep a $100 cushion)
   * less than $150 of room above the MLL -> stop trading, ask for a reset
@@ -65,8 +65,8 @@ LUCIDPRO_50K = PropRules(
 
 @dataclass
 class Guards:
-    daily_goal: float = 1_000.0        # no new trades once closed P&L reaches this
-    daily_cap: float = 1_500.0         # flatten at this (open + closed)
+    daily_goal: float = 600.0          # no new trades once closed P&L reaches this
+    daily_cap: float = 1_000.0         # flatten at this (open + closed)
     daily_stop: float = 800.0          # flatten at -this (open + closed)
     mll_cushion: float = 100.0         # never let a day's loss get closer than this to the MLL
     min_room: float = 150.0            # less room than this above the MLL -> stop trading

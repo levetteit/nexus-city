@@ -6,7 +6,7 @@ pointer strategy**. All workers share **one prop firm account** whose rules
 (Lucid Trading, LucidFlex 50K by default) they're built to pass: first the
 evaluation, then the funded stage. They trade **every session** (Asia, London,
 New York) from the 18:00 ET open to the 16:45 ET flat deadline, aiming for
-**$1,000–$1,500 a day**. When a worker is in a trade its
+**$600–$1,000 a day**. When a worker is in a trade its
 building fires a light beam into the sky. When it closes a trade, gold coins (or
 red ones) roll down its road to **The Vault** in the middle of town.
 
@@ -100,8 +100,8 @@ is lowest in Asia, higher in London, and highest at the New York open.
 
 | | Default | What happens |
 |---|---|---|
-| Daily goal | **$1,000** closed profit | no new trades; open trades keep running until a pointer forms against them |
-| Daily cap | **$1,500** open + closed | flatten everything, done for the day |
+| Daily goal | **$600** closed profit | no new trades; open trades keep running until a pointer forms against them |
+| Daily cap | **$1,000** open + closed | flatten everything, done for the day |
 | Daily stop | **−$800** open + closed | flatten everything, done for the day (smaller when the account is near its drawdown) |
 
 ### Prop firm account (`backend/account.py`)
@@ -112,7 +112,7 @@ All bots trade one shared account with LucidFlex 50K rules:
 |---|---|---|
 | Profit target | $3,000, at least 2 trading days | stop for the day once it's in hand; pass at the 16:45 close |
 | Drawdown | **End-of-day**: $2,000 below the highest *closing* balance, only moves at the close, locks at $50,100 once the account closes at $52,100 | never let a day's loss reach it (keep a $100 cushion). Equity touching it during the day is treated as a breach (the safe reading) |
-| Consistency | evaluation: best day ≤ 50% of profit; funded: none | the $1,500 cap keeps the best day at half the $3,000 target |
+| Consistency | evaluation: best day ≤ 50% of profit; funded: none | the $1,000 cap keeps the best day well under half the $3,000 target |
 | Daily loss limit | none | our own −$800 daily stop |
 | Max size | 40 micros | at most 12 micros open, 3–6 per trade |
 | Flat rule | flat by 16:45 ET, no overnight/weekend holds | flatten at 16:40 |
