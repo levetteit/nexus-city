@@ -15,6 +15,28 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@500;700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
+  <script>
+    // iOS home-screen apps (black-translucent status bar) can hand the page a viewport that stops
+    // short of the bottom of the screen. Measure the gap and let the CSS stretch into it.
+    (function () {
+      var standalone = navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+      function fit() {
+        var ext = 0;
+        if (standalone && screen && screen.height) {
+          var land = innerWidth > innerHeight;
+          var full = land ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+          var gap = full - innerHeight;
+          if (gap > 0 && gap < 140) ext = gap;
+        }
+        var r = document.documentElement.style;
+        r.setProperty("--ext", ext + "px");
+        r.setProperty("--hb", ext ? "22px" : "0px");   // keep clear of the home bar once we reach it
+      }
+      fit();
+      addEventListener("resize", fit);
+      addEventListener("orientationchange", function () { setTimeout(fit, 300); });
+    })();
+  </script>
   <script type="importmap">
     {
       "imports": {
