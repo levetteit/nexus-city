@@ -31,7 +31,7 @@ WORKERS = [
                                  "win": ["LET'S GOOO", "PROC printed, money printed", "that's why they call me OG", "paid in full"],
                                  "loss": ["nah that's crazy", "chat it's fine", "pointer against... respect it", "we go again"],
                                  "idle": ["MES confirm or no trade", "patience = profit", "waiting on that tap"]})),
-    (ProcBot, BotConfig(id="mnq-6m", name="MNQ 6M", underlying="MNQ", district="6M POINTERS", timeframe=6,
+    (ProcBot, BotConfig(id="mnq-6m", name="MNQ 5/6M", underlying="MNQ", district="5M & 6M", timeframe=6,
                         params={"pointer_tfs": [5, 6], "confirm_with": "MES"}, color="#ff3df2",
                         persona={"handle": "SixMinuteSage", "vibe": "lo-fi zen trader", "props": ["plant", "plant", "candle"],
                                  "win": ["calm money", "the 6m never lies", "breathe in profit", "as foretold"],

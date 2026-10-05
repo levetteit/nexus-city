@@ -461,7 +461,12 @@ export class Room {
   onEvent(ev) {
     const p = this.bot?.persona || {};
     const pick = (a, d) => (a && a.length ? a[Math.floor(Math.random() * a.length)] : d);
-    if (ev.type === "trade_close") {
+    if (ev.type === "trade_trim") {
+      this.setMood("happy", 4, `trimmed ${ev.qty} at the zone (+$${Math.round(ev.pnl)}) · runner on`);
+      this.burst("coin", 15);
+      this.chatSay(["paid ✂️", "pay yourself", "trim and ride", "smart trim"], 2);
+    } else if (ev.type === "trade_close") {
+      ev = { ...ev, pnl: ev.trade_pnl ?? ev.pnl };   // the whole trade, trims included
       if (ev.pnl >= 0) {
         this.setMood("ecstatic", 7, `${pick(p.win, "LET'S GO")} (+$${Math.round(ev.pnl)})`);
         this.burst("coin", 40);

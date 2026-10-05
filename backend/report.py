@@ -40,19 +40,23 @@ class DayReports:
                 finished = self._finish(engine, ev)
                 self.start_day(engine)
             elif kind == "trade_open":
-                self._day["open"][ev["bot"]] = {"why": ev.get("note", ""), "adds": []}
+                self._day["open"][ev["bot"]] = {"why": ev.get("note", ""), "adds": [], "trims": []}
             elif kind == "trade_add":
-                self._day["open"].setdefault(ev["bot"], {"why": "", "adds": []})["adds"].append(ev.get("why", ""))
+                self._day["open"].setdefault(ev["bot"], {"why": "", "adds": [], "trims": []})["adds"].append(ev.get("why", ""))
+            elif kind == "trade_trim":
+                self._day["open"].setdefault(ev["bot"], {"why": "", "adds": [], "trims": []})["trims"].append(
+                    {"qty": ev["qty"], "price": ev["price"], "pnl": ev["pnl"]})
             elif kind == "trade_close":
                 bot = engine.bots[ev["bot"]]
                 t = bot.trades[-1]
-                info = self._day["open"].pop(ev["bot"], {"why": "", "adds": []})
+                info = self._day["open"].pop(ev["bot"], {"why": "", "adds": [], "trims": []})
                 persona = bot.cfg.persona or {}
                 self._day["trades"].append({
                     "bot": bot.cfg.id, "name": bot.cfg.name, "handle": persona.get("handle", bot.cfg.name),
                     "side": "long" if t.contract.endswith("LONG") else "short", "qty": t.qty,
-                    "entry": t.entry, "exit": t.exit, "pnl": t.pnl, "opened": t.opened_at, "closed": t.closed_at,
-                    "why": info["why"], "adds": info["adds"], "exit_reason": t.reason})
+                    "entry": t.entry, "exit": t.exit, "pnl": ev.get("trade_pnl", t.pnl), "opened": t.opened_at,
+                    "closed": t.closed_at, "why": info["why"], "adds": info["adds"], "trims": info.get("trims", []),
+                    "exit_reason": t.reason})
             elif kind == "news_hold":
                 self._day["news"].append(f"{ev['title']} {ev['at']}")
             elif kind == "account_halt":

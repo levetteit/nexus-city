@@ -201,13 +201,21 @@ class PropAccount:
         self.open_micros[bot_id] = self.open_micros.get(bot_id, 0) + qty
         self.symbol_owner[symbol] = bot_id
 
-    def closed(self, bot_id: str, symbol: str, pnl: float) -> None:
+    def closed(self, bot_id: str, symbol: str, pnl: float, trade_pnl: Optional[float] = None) -> None:
+        """`pnl`: this last exit. `trade_pnl`: the whole trade including earlier trims (decides the losing streak)."""
         self.open_micros.pop(bot_id, None)
         if self.symbol_owner.get(symbol) == bot_id:
             del self.symbol_owner[symbol]
         self.balance += pnl
         self.day_realized += pnl
-        self.loss_streak = self.loss_streak + 1 if pnl <= 0 else 0
+        whole = pnl if trade_pnl is None else trade_pnl
+        self.loss_streak = self.loss_streak + 1 if whole <= 0 else 0
+
+    def trimmed(self, bot_id: str, qty: int, pnl: float) -> None:
+        """Part of a position was closed for profit (a trim); the rest stays open."""
+        self.open_micros[bot_id] = max(0, self.open_micros.get(bot_id, 0) - qty)
+        self.balance += pnl
+        self.day_realized += pnl
 
     # ---- risk checks (engine calls this every tick) --------------------------
     def check(self, unrealized: float) -> Optional[str]:

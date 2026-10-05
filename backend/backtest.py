@@ -141,24 +141,27 @@ class ReplayMarket:
 
 
 # ---------------------------------------------------------------- one run
-def run(data: dict[str, list], params: dict | None = None, news=None) -> dict:
+def run(data: dict[str, list], params: dict | None = None, news=None, workers=None) -> dict:
     """Replay `data` once. Failed or stuck evaluations are reset and counted, like buying a new one.
     `news` is an optional NewsCalendar (news.py): no trades around high-impact releases."""
     market = ReplayMarket(data)
-    engine = Engine(market=market, account=PropAccount(), params=params, news=news)
+    engine = Engine(market=market, account=PropAccount(), params=params, news=news, workers=workers)
     acct = engine.account
     trades, by_session, reasons = [], Counter(), Counter()
     open_session: dict[str, str] = {}
-    passes = fails = funded_days = 0
+    passes = fails = funded_days = trims = 0
     last_day = 0
     while market.has_next():
         for ev in engine.tick():
             if ev["type"] == "trade_open":
                 open_session[ev["bot"]] = market.session
             elif ev["type"] == "trade_close":
-                trades.append(ev["pnl"])
-                by_session[open_session.get(ev["bot"], "?")] += ev["pnl"]
+                whole = ev.get("trade_pnl", ev["pnl"])   # including any trims
+                trades.append(whole)
+                by_session[open_session.get(ev["bot"], "?")] += whole
                 reasons[ev["reason"].split(":")[0]] += 1
+            elif ev["type"] == "trade_trim":
+                trims += 1
             elif ev["type"] == "new_session" and ev.get("phase_change"):
                 passes += 1
         if market.day != last_day:
@@ -185,7 +188,7 @@ def run(data: dict[str, list], params: dict | None = None, news=None) -> dict:
         "profit_factor": round(sum(wins) / -sum(losses), 2) if losses and sum(losses) < 0 else None,
         "evals_passed": passes, "evals_failed": fails,
         "pnl_by_session": {k: round(v, 2) for k, v in by_session.items()},
-        "exits": dict(reasons),
+        "exits": dict(reasons), "trims": trims,
     }
 
 

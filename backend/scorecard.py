@@ -68,7 +68,7 @@ class Scorecard:
             elif ev["type"] == "trade_close":
                 for t in reversed(self._day["trades"]):
                     if t["bot"] == ev["bot"] and t["pnl"] is None:
-                        t["pnl"] = ev["pnl"]
+                        t["pnl"] = ev.get("trade_pnl", ev["pnl"])
                         break
             elif ev["type"] == "tv_signal":
                 self._day["toggled"] = True
@@ -118,7 +118,7 @@ class Scorecard:
                 elif ev["type"] == "trade_close":
                     for t in reversed(replay):
                         if t["bot"] == ev["bot"] and t["pnl"] is None:
-                            t["pnl"] = ev["pnl"]
+                            t["pnl"] = ev.get("trade_pnl", ev["pnl"])
                             break
         return self._compare(day, replay)
 
@@ -166,8 +166,9 @@ class Scorecard:
             with open(path, newline="") as f:
                 for row in csv.DictReader(f):
                     p = float(row["pnl"])
-                    n += 1
-                    won += p > 0
+                    if not row["reason"].startswith("trim"):   # a trim is part of the trade after it
+                        n += 1
+                        won += p > 0
                     wins += max(p, 0)
                     losses += min(p, 0)
         return {"days": len(traded),

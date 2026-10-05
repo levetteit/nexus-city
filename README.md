@@ -168,6 +168,57 @@ What the trade-level breakdown showed, and what was tried:
   over $1,500: worth re-testing as more data comes in. 21 days is a small sample:
 keep fetching data and re-running the backtest as history grows.
 
+### Trims and the 5-minute chart (tested Oct 2026)
+
+**Trims (partial profits).** Setting `params={"trim": True}` makes a bot close part of the
+position each time price reaches the next untapped opposite FFVG/IFFVG in the
+trade's direction. The last contract always runs until a pointer against, and
+PROCs with the trade can add back up to 6. These settings tune it:
+
+| Setting | What it does |
+| --- | --- |
+| `trim_frac` | Share of open contracts closed at each zone |
+| `trim_min_tf` | Only zones of this timeframe or higher count |
+| `trim_min_pts` | Only zones at least this many points from entry count |
+| `trim_max` | Most trims per trade |
+| `trim_fill` | `limit` at the zone edge, or `close` (market order after the candle) |
+
+On real accounts each trim is sent to TradersPost as a `resize` to the remaining size.
+
+On the 21 real days, **no trim setting made more money than no trims**:
+
+| Setting | Total | Change |
+| --- | --- | --- |
+| No trims (default) | $13,224 | — |
+| Best trim: 3m+ zones, 30+ pts away, 1/3 each | $12,899 | −$325 |
+| Median of 36 trim settings | $11,886 | −$1,338 |
+| Trim at every next zone | $6,896 | about half |
+
+Every setting kept 71.4% green days. Trims shrink the size on the runners that
+make the money (average win $540 vs average loss $181), and the daily $600 goal
+and $1,200 cap already bank profits. So trims stay off by default.
+
+**The 5-minute chart.** The **MNQ 5/6M** bot already trades 5m pointers (`pointer_tfs: [5, 6]`).
+Results by entry timeframe:
+
+| Entry | Trades | P&L | Win rate |
+| --- | --- | --- | --- |
+| 3m PROC | 25 | +$6,521 | |
+| 4m PROC | 10 | +$2,322 | |
+| 5m PROC | 16 | −$755 | 31% |
+| 6m PROC | 18 | +$3,950 | |
+
+Removing 5m entries still made less overall ($11,362). Other ways of using the 5m, tested:
+
+| Setup | Total |
+| --- | --- |
+| Current: [3,4] + [5,6] | $13,224 |
+| Dedicated 5m bot | $12,474 |
+| 5m only | $3,417 |
+| 5m PROC/pointer as a direction filter (`bias_tf: 5`) | $17 – $4,119 |
+
+So the current setup stays.
+
 ### Daily goal
 
 | | Default | What happens |

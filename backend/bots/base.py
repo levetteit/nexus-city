@@ -52,6 +52,7 @@ class TradeRecord:
     closed_at: str
     t_open: int = 0     # candle minute the trade opened / closed (chart markers)
     t_close: int = 0
+    trim: bool = False  # a partial exit; the rest of the position stayed open
 
 
 @dataclass
@@ -154,6 +155,7 @@ class Bot:
         return self.broker.open(self.cfg.underlying, kind, qty, market, u.atm_strike(kind, self.cfg.otm_steps))
 
     _t_open = 0
+    _trade_pnl = 0.0
 
     def _last_t(self, market: Market) -> int:
         bars = market.underlyings[self.cfg.underlying].bars
@@ -202,6 +204,7 @@ class Bot:
             return
         self.position = self._buy(entry.side, qty, u, market)
         self._t_open = self._last_t(market)
+        self._trade_pnl = 0.0   # P&L already banked by trims on this trade
         self.account.filled(self.cfg.id, self.cfg.underlying, qty)
         self.plan = entry
         self.status = "in_trade"
@@ -243,16 +246,33 @@ class Bot:
         self.trades.append(rec)
         return rec
 
+    def trim(self, qty: int, why: str, market: Market, price: Optional[float] = None) -> bool:
+        """Take partial profit: close `qty` contracts (at `price` for a resting limit), keep the rest."""
+        pos = self.position
+        qty = min(qty, pos.qty - 1)   # never trims the last contract: that's the runner
+        if qty <= 0:
+            return False
+        rec = self._record(qty, self.broker.close(pos, market, price), f"trim: {why}", market)
+        rec.trim = True
+        pos.qty -= qty
+        self._trade_pnl += rec.pnl
+        self.account.trimmed(self.cfg.id, qty, rec.pnl)
+        self.emit({"type": "trade_trim", "bot": self.cfg.id, "qty": qty, "left": pos.qty, "pnl": rec.pnl,
+                   "price": rec.exit, "why": why})
+        return True
+
     def _close(self, reason: str, market: Market) -> None:
         pos = self.position
         rec = self._record(pos.qty, self.broker.close(pos, market), reason, market)
-        self.account.closed(self.cfg.id, self.cfg.underlying, rec.pnl)
+        whole = round(self._trade_pnl + rec.pnl, 2)
+        self.account.closed(self.cfg.id, self.cfg.underlying, rec.pnl, whole)
         self.position = None
         self.plan = None
         if self.status not in DONE_FOR_DAY:
             self.status = "scanning"
-        self.on_position_closed(rec.pnl)
-        self.emit({"type": "trade_close", "bot": self.cfg.id, "pnl": rec.pnl, "reason": reason,
+        self._trade_pnl = 0.0
+        self.on_position_closed(whole)
+        self.emit({"type": "trade_close", "bot": self.cfg.id, "pnl": rec.pnl, "trade_pnl": whole, "reason": reason,
                    "contract": rec.contract, "status": self.status})
 
     def halt(self, reason: str, status: str, market: Market) -> None:
@@ -304,13 +324,14 @@ class Bot:
                    "entry": round(self.position.entry, 2), "mark": round(mark, 2),
                    "target": round(self.plan.target, 2) if self.plan.target is not None else None,
                    "note": self.plan.note}
-        wins = sum(1 for t in self.trades if t.pnl > 0)
+        whole = [t for t in self.trades if not t.trim]   # trims are part of a trade, not trades of their own
+        wins = sum(1 for t in whole if t.pnl > 0)
         return {
             "id": self.cfg.id, "name": self.cfg.name, "underlying": self.cfg.underlying,
             "district": self.cfg.district, "strategy": self.strategy_name, "color": self.cfg.color,
             "instrument": self.cfg.instrument, "timeframe": self.cfg.timeframe,
             "status": self.status, "realized": round(self.realized, 2), "unrealized": round(unreal, 2),
-            "trades": len(self.trades), "wins": wins, "position": pos,
+            "trades": len(whole), "wins": wins, "position": pos,
             "contracts": self.cfg.contracts, "max_contracts": self.cfg.max_contracts,
             "info": self.info(),
             "persona": self.cfg.persona,

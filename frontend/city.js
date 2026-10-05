@@ -567,6 +567,7 @@ async function toggleReport(day, open = false) {
   const trades = r.trades.map((t) => `
     <div class="trade"><b class="${t.pnl >= 0 ? "pos" : "neg"}">${money(t.pnl)}</b> · ${t.handle} ${t.side.toUpperCase()} ×${t.qty} · ${t.opened}→${t.closed}
       <small>in: ${t.why || "—"} @ ${t.entry}${t.adds.length ? ` · added: ${t.adds.join(", ")}` : ""}</small>
+      ${t.trims?.length ? `<small>trimmed: ${t.trims.map((x) => `${x.qty} @ ${x.price} ${money(x.pnl)}`).join(", ")}</small>` : ""}
       <small>out: ${t.exit_reason} @ ${t.exit}</small></div>`).join("");
   el.innerHTML = `
     <div class="row"><span>Day</span><span><b class="${r.pnl >= 0 ? "pos" : "neg"}">${money(r.pnl)}</b> · ${r.wins}W ${r.losses}L${r.goal_hit ? " · goal ✓" : ""}</span></div>
@@ -603,7 +604,11 @@ function feedEvents(events) {
     const who = `<b>${nameOf(ev.bot)}</b>`;
     if (ev.type === "trade_open") feed(`${who} entered ${ev.contract} ×${ev.qty}${ev.note ? ` · ${ev.note}` : ""}`, "open");
     else if (ev.type === "trade_add") feed(`${who} added ${ev.qty} → ${ev.total} contracts · ${ev.why}`, "open");
-    else if (ev.type === "trade_close") feed(`${who} closed ${money(ev.pnl)} · ${ev.reason}`, ev.pnl >= 0 ? "win" : "loss");
+    else if (ev.type === "trade_trim") feed(`${who} trimmed ${ev.qty} ${money(ev.pnl)} · ${ev.left} left · ${ev.why}`, "win");
+    else if (ev.type === "trade_close") {
+      const whole = ev.trade_pnl ?? ev.pnl;
+      feed(`${who} closed ${money(whole)}${whole !== ev.pnl ? ` (runner ${money(ev.pnl)})` : ""} · ${ev.reason}`, whole >= 0 ? "win" : "loss");
+    }
     else if (ev.type === "account_halt") feed(`<b>Account</b> ${ev.reason}`, /cap|target/.test(ev.reason) ? "win" : "loss");
     else if (ev.type === "tv_signal") feed(`${who} TradingView: ${ev.action}`);
     else if (ev.type === "new_session") feed(`<b>New trading day</b>`, "muted2");
@@ -776,7 +781,7 @@ function connect() {
     feedSetups(msg.state);
     if (roomBotId && room) for (const ev of msg.events) if (ev.bot === roomBotId || ev.type === "account_halt") room.onEvent(ev);
     for (const ev of msg.events) {
-      if (ev.type === "trade_close") sendCoins(ev.bot, ev.pnl);
+      if (ev.type === "trade_close" || ev.type === "trade_trim") sendCoins(ev.bot, ev.pnl);
       if (ev.type === "tv_signal") tvPing(ev);
     }
   };

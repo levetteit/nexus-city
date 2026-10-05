@@ -169,7 +169,7 @@ def record(engine, events: list[dict]) -> None:
     market, acct = engine.market, engine.account
     changed = False
     for ev in events:
-        if ev["type"] == "trade_close":
+        if ev["type"] in ("trade_close", "trade_trim"):   # a trim is a partial exit: its own row
             t = engine.bots[ev["bot"]].trades[-1]
             _append("paper_trades.csv",
                     ["closed_at_et", "bot", "contract", "qty", "entry", "exit", "pnl", "reason", "opened_at"],

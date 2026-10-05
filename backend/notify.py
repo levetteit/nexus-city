@@ -101,10 +101,12 @@ class Notifier:
             return (f"📈 {who} went {side} ×{ev['qty']}{tag}", f"{ev['contract']} @ {ev['entry']:,.2f} · {ev.get('note', '')}", "trade")
         if ev["type"] == "trade_add":
             return (f"➕ {who} added → {ev['total']} contracts{tag}", ev.get("why", ""), "trade")
+        if ev["type"] == "trade_trim":
+            return (f"✂️ {who} trimmed {ev['qty']} {money(ev['pnl'])}{tag}", f"{ev['why']} · {ev['left']} left running", "trade")
         if ev["type"] == "trade_close":
-            day = engine.account.day_pnl
-            icon = "💰" if ev["pnl"] >= 0 else "🔻"
-            return (f"{icon} {who} closed {money(ev['pnl'])}{tag}", f"{ev['reason']} · today {money(day)}", "trade")
+            day, whole = engine.account.day_pnl, ev.get("trade_pnl", ev["pnl"])
+            icon = "💰" if whole >= 0 else "🔻"
+            return (f"{icon} {who} closed {money(whole)}{tag}", f"{ev['reason']} · today {money(day)}", "trade")
         if ev["type"] == "news_hold":
             return (f"📰 {ev['title']} at {ev['at']} ET", f"bots paused for news · no new trades until {ev['until']}", "news")
         if ev["type"] == "account_halt":
