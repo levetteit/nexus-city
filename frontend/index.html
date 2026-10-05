@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <title>Starnet City</title>
+  <link rel="manifest" href="manifest.json" crossorigin="use-credentials" />
+  <link rel="icon" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
+  <meta name="theme-color" content="#1b0f6b" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Starnet" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@500;700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
@@ -28,8 +36,14 @@
   <div id="conn" class="hidden">reconnecting to the city…</div>
 
   <section id="account" class="panel">
-    <div class="acct-head"><span id="acct-firm">PROP ACCOUNT</span><span id="acct-phase" class="phase">—</span></div>
+    <div class="acct-head" id="acct-toggle"><span id="acct-firm">PROP ACCOUNT</span><span id="acct-phase" class="phase">—</span></div>
+    <div id="acct-sum"></div>
     <div id="acct-body"></div>
+  </section>
+
+  <section id="feed" class="panel">
+    <h3>ACTIVITY</h3>
+    <ul id="feed-list"><li class="muted">waiting for the bots…</li></ul>
   </section>
 
   <section id="payroll" class="panel hidden">

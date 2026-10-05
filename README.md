@@ -38,6 +38,7 @@ backend/
   backtest.py    replay real 1m candles through the bots; walk-forward optimizer
   fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
   live.py        live paper trading on real (10-min delayed) candles, with trade logs
+Dockerfile, render.yaml   one-click hosting (password-protected) so you can watch from your phone
   engine.py      ticks the market and every bot, builds the snapshot
   main.py        FastAPI: WebSocket /ws, REST /api/state, /api/bots/{id}/{on|off}
 frontend/
@@ -209,6 +210,32 @@ STARNET_MODE=live uvicorn backend.main:app
 
 Going from paper to a real Lucid account needs a real-time data feed and order
 routing through the platform your account uses (see *Going live* below).
+
+## Watch it from your phone, 24/7 (deploy to Render)
+
+The repo is ready to host: `Dockerfile` + `render.yaml` run the city in live
+paper mode with a password and a disk for the paper-trading logs.
+
+1. **Merge PR #1** into `main` on GitHub (Render deploys the default branch).
+2. Sign up at **render.com** with your GitHub account.
+3. Dashboard → **New → Blueprint** → pick `levetteit/starnet` → **Apply**.
+4. When asked for **`STARNET_PASSWORD`**, pick a strong password. That's what
+   you'll type on your phone. (`STARNET_WEBHOOK_SECRET` is generated for you.)
+5. It uses the **Starter plan (~$7/month) + a 1 GB disk (~$0.25/month)**. The free
+   plan sleeps after 15 minutes without visitors, which would stop the bots.
+6. When the deploy is green, open the `https://starnet-city-….onrender.com` URL
+   on your phone, log in with any username + your password, then
+   **Share → Add to Home Screen** (iPhone) or **⋮ → Add to Home screen /
+   Install app** (Android). It opens full screen like an app.
+
+On the phone you get a compact account bar (tap it for the full panel), the
+city, and an **activity feed** of what every bot is doing: PROCs seen, waiting
+for MES, entries, adds, exits, account stops. Tap a building for its card.
+
+Every push to `main` redeploys automatically. Paper results stay on the disk
+(`/app/data/paper_trades.csv`, `paper_days.csv`); download them from Render's
+Shell tab. The same Docker image runs on Fly.io, Railway or any VPS: set
+`STARNET_PASSWORD`, mount a volume at `/app/data`, expose port 8000.
 
 ## Backtest and optimize on real data (`backend/backtest.py`)
 

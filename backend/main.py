@@ -5,6 +5,8 @@ STARNET_MODE=live runs the city on real candles with paper trading (see live.py)
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import hmac
 import json
 import os
@@ -85,6 +87,62 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Starnet trading city", lifespan=lifespan)
+
+PASSWORD = os.getenv("STARNET_PASSWORD")   # set this whenever the city is reachable from the internet
+OPEN_PATHS = ("/healthz", "/api/tradingview")   # health checks, and the webhook (it has its own secret)
+
+
+class PasswordGate:
+    """HTTP Basic auth for every page, API call and the WebSocket when STARNET_PASSWORD is set.
+    A successful login also sets a cookie, so the browser's WebSocket gets in too."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.token = hashlib.sha256(f"starnet:{PASSWORD}".encode()).hexdigest() if PASSWORD else None
+
+    def _authorized(self, headers: dict) -> tuple[bool, bool]:
+        """(allowed, set_cookie)"""
+        cookie = headers.get(b"cookie", b"").decode()
+        if f"starnet_auth={self.token}" in cookie:
+            return True, False
+        auth = headers.get(b"authorization", b"").decode()
+        if auth.lower().startswith("basic "):
+            try:
+                _, _, pw = base64.b64decode(auth[6:]).decode().partition(":")
+            except Exception:
+                return False, False
+            if hmac.compare_digest(pw, PASSWORD):
+                return True, True
+        return False, False
+
+    async def __call__(self, scope, receive, send):
+        if not self.token or scope["type"] not in ("http", "websocket") or scope["path"] in OPEN_PATHS:
+            return await self.app(scope, receive, send)
+        ok, set_cookie = self._authorized(dict(scope["headers"]))
+        if not ok:
+            if scope["type"] == "websocket":
+                return await send({"type": "websocket.close", "code": 4401})
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"www-authenticate", b'Basic realm="Starnet City"'),
+                                    (b"content-type", b"text/plain")]})
+            return await send({"type": "http.response.body", "body": b"password required"})
+        if not set_cookie:
+            return await self.app(scope, receive, send)
+
+        async def send_with_cookie(msg):
+            if msg["type"] == "http.response.start":
+                msg = {**msg, "headers": list(msg.get("headers", [])) + [
+                    (b"set-cookie", f"starnet_auth={self.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000".encode())]}
+            await send(msg)
+        return await self.app(scope, receive, send_with_cookie)
+
+
+app.add_middleware(PasswordGate)
+
+
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"ok": True, "ready": engine is not None}
 
 
 @app.get("/api/state")

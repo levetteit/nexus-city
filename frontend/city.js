@@ -404,6 +404,11 @@ function renderAccount(a) {
     ? `<div class="row"><span>Target</span><span>${money(a.profit)} / ${fmt(a.target)}</span></div>
        <div class="bar"><i style="width:${Math.max(0, Math.min(100, (a.profit / a.target) * 100))}%"></i></div>`
     : `<div class="row"><span>Payout</span><span class="${a.payout_eligible ? "pos" : ""}">${a.payout_eligible ? "eligible" : `${a.profitable_days} / ${a.payout_days} profitable days`}</span></div>`;
+  document.getElementById("acct-sum").innerHTML = `
+    <span>${fmt(a.balance)}</span>
+    <span class="${a.day_pnl >= 0 ? "pos" : "neg"}">today ${money(a.day_pnl)}</span>
+    <span class="${room < 500 ? "neg" : ""}">${fmt(Math.max(0, room))} room</span>
+    <span class="more">▾</span>`;
   document.getElementById("acct-body").innerHTML = `
     <div class="row"><span>Balance</span><span>${fmt(a.balance)}</span></div>
     ${stage}
@@ -416,6 +421,39 @@ function renderAccount(a) {
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
     ${a.halted ? `<div class="halt">${a.halted}</div>` : ""}
     ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET EVALUATION</button>` : ""}`;
+}
+
+// ---------------------------------------------------------------- activity feed
+const lastSetup = new Map();
+const nameOf = (id) => state?.bots.find((b) => b.id === id)?.name ?? id;
+function feed(text, cls = "") {
+  const list = document.getElementById("feed-list");
+  list.querySelector(".muted")?.remove();
+  const li = document.createElement("li");
+  li.className = cls;
+  li.innerHTML = `<time>${state?.clock ?? ""}</time> ${text}`;
+  list.prepend(li);
+  while (list.children.length > 40) list.lastChild.remove();
+}
+function feedEvents(events) {
+  for (const ev of events) {
+    const who = `<b>${nameOf(ev.bot)}</b>`;
+    if (ev.type === "trade_open") feed(`${who} entered ${ev.contract} ×${ev.qty}${ev.note ? ` · ${ev.note}` : ""}`, "open");
+    else if (ev.type === "trade_add") feed(`${who} added ${ev.qty} → ${ev.total} contracts · ${ev.why}`, "open");
+    else if (ev.type === "trade_close") feed(`${who} closed ${money(ev.pnl)} · ${ev.reason}`, ev.pnl >= 0 ? "win" : "loss");
+    else if (ev.type === "account_halt") feed(`<b>Account</b> ${ev.reason}`, /cap|target/.test(ev.reason) ? "win" : "loss");
+    else if (ev.type === "tv_signal") feed(`${who} TradingView: ${ev.action}`);
+    else if (ev.type === "new_session") feed(`<b>New trading day</b>`, "muted2");
+  }
+}
+function feedSetups(s) {   // what each working bot is thinking: PROC seen, waiting for MES, skipped…
+  for (const b of s.bots) {
+    const setup = b.info?.setup;
+    if (!setup || b.status === "disabled" || lastSetup.get(b.id) === setup) continue;
+    const first = !lastSetup.has(b.id);
+    lastSetup.set(b.id, setup);
+    if (!first && !/waiting for a PROC|entered|closed/.test(setup)) feed(`<b>${b.name}</b> ${setup}`, "think");
+  }
 }
 
 function openWorker(id) {
@@ -456,6 +494,9 @@ function renderWorker() {
     <button class="toggle ${enabled ? "off" : "on"}" data-bot="${bot.id}" data-action="${enabled ? "off" : "on"}">${enabled ? "SEND HOME" : "PUT ON SHIFT"}</button>`;
 }
 
+document.getElementById("acct-toggle").onclick = () => document.getElementById("account").classList.toggle("expanded");
+document.getElementById("acct-sum").onclick = () => document.getElementById("account").classList.toggle("expanded");
+
 document.addEventListener("click", async (e) => {
   const close = e.target.closest("[data-close]");
   if (close) {
@@ -491,6 +532,8 @@ function connect() {
     const msg = JSON.parse(m.data);
     if (msg.type !== "tick") return;
     applyState(msg.state);
+    feedEvents(msg.events);
+    feedSetups(msg.state);
     for (const ev of msg.events) {
       if (ev.type === "trade_close") sendCoins(ev.bot, ev.pnl);
       if (ev.type === "tv_signal") tvPing(ev);
