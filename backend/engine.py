@@ -15,7 +15,9 @@ class Engine:
     `ReplayMarket` of real candles (see backtest.py)."""
 
     def __init__(self, broker: Broker | None = None, market=None, account: PropAccount | None = None,
-                 workers=None, params: dict | None = None) -> None:
+                 workers=None, params: dict | None = None, news=None) -> None:
+        self.news = news                # NewsCalendar: no trades around high-impact releases (news.py)
+        self._news_seen: set = set()
         self.broker = broker or PaperBroker()
         self.events: list[dict] = []
         self.account = account or PropAccount()
@@ -53,11 +55,30 @@ class Engine:
             self.events.append({"type": "new_session", "phase_change": phase != self.account.phase})
         if not self.account.can_trade:
             self._halt_all("account failed" if self.account.phase == "failed" else self.account.halted)
+        self._news_check()
         for bot in self.bots.values():
             bot.on_tick(self.market)
         self._risk_check()
         out, self.events[:] = list(self.events), []
         return out
+
+    def _news_check(self) -> None:
+        now = getattr(self.market, "now", None)
+        if self.news is None or now is None:
+            return
+        hold = self.news.blackout(now)
+        for bot in self.bots.values():
+            bot.news_hold = hold
+        if hold and hold not in self._news_seen:
+            self._news_seen.add(hold)
+            until = self.news.window(hold)[1].strftime("%H:%M")
+            self.events.append({"type": "news_hold", "title": hold.title, "at": hold.time.strftime("%H:%M"),
+                                "until": until})
+        flat = self.news.flatten_for(now)
+        if flat:
+            for bot in self.bots.values():
+                if bot.position:
+                    bot._close(f"news: {flat.label}", self.market)
 
     def _unrealized(self) -> float:
         return sum(b.position.pnl(self.broker.mark(b.position, self.market))
@@ -119,4 +140,5 @@ class Engine:
             "tickers": {s: {"price": round(u.price, 2), "change_pct": round(u.change_pct, 2)}
                         for s, u in self.market.underlyings.items()},
             "bots": bots,
+            "news": self.news.status(getattr(self.market, "now", None)) if self.news else None,
         }

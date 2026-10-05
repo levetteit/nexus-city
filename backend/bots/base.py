@@ -151,7 +151,18 @@ class Bot:
         kind = "call" if side == "long" else "put"
         return self.broker.open(self.cfg.underlying, kind, qty, market, u.atm_strike(kind, self.cfg.otm_steps))
 
+    news_hold = None   # a NewsEvent while the engine's news filter blocks new trades (see news.py)
+
+    def _news_blocked(self, what: str) -> bool:
+        if self.news_hold is None:
+            return False
+        if hasattr(self, "last_event"):
+            self.last_event = f"{what} skipped · {self.news_hold.label} news"
+        return True
+
     def _open(self, entry: Entry, u: Underlying, market: Market) -> None:
+        if self._news_blocked(f"{entry.side} entry"):
+            return
         qty = self.account.request(self.cfg.id, self.cfg.underlying, self.cfg.contracts)
         if qty < self.cfg.contracts:   # never open undersized; wait for room in the budget
             return
@@ -165,6 +176,8 @@ class Bot:
     def add(self, market: Market, why: str) -> bool:
         """Size up the open position by `contracts`, up to `max_contracts`."""
         pos = self.position
+        if self._news_blocked("add"):
+            return False
         want = min(self.cfg.contracts, self.cfg.max_contracts - pos.qty)
         qty = self.account.request(self.cfg.id, self.cfg.underlying, want, adding=True) if want > 0 else 0
         if qty <= 0:

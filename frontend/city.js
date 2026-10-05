@@ -488,10 +488,39 @@ function renderAccount(a) {
     <div class="row"><span>Day stop</span><span>-${fmt(a.daily_stop)}</span></div>
     <div class="row"><span>Micros open</span><span>${a.open_micros} / ${a.max_micros}</span></div>
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
+    ${scoreRows(state)}
+    ${newsRows(state)}
     ${alertRows(state)}
     ${execRows(state)}
     ${a.halted ? `<div class="halt">${a.halted}</div>` : ""}
     ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET EVALUATION</button>` : ""}`;
+}
+
+function scoreRows(s) {
+  const c = s.scorecard;
+  if (!c) return "";
+  const p = c.paper, b = c.backtest;
+  const pct = (v) => (v == null ? "—" : `${v}%`);
+  const cash = (v) => (v == null ? "—" : money(v));
+  const last = c.last
+    ? `<div class="row"><span>Last day ${c.last.day.slice(5)}</span><span class="${c.last.verdict === "match" ? "pos" : "neg"}">${money(c.last.live_pnl)} vs replay ${money(c.last.replay_pnl)} ${c.last.verdict === "match" ? "✓" : "⚠"}</span></div>`
+    : `<div class="row"><span>Replay check</span><span>${c.running ? "running…" : "after the first full day"}</span></div>`;
+  return `<div class="row"><span><b>📊 Paper vs backtest</b></span><span>${p.days} day${p.days === 1 ? "" : "s"}</span></div>
+    <div class="row"><span>Green days</span><span>${pct(p.profitable_day_pct)} · bt ${b.profitable_day_pct}%</span></div>
+    <div class="row"><span>Avg day</span><span>${cash(p.avg_day)} · bt ${money(b.avg_day)}</span></div>
+    <div class="row"><span>Profit factor</span><span>${p.profit_factor ?? "—"} · bt ${b.profit_factor}</span></div>
+    ${c.clean_days ? `<div class="row"><span>Replay match</span><span>${c.clean_days_matched}/${c.clean_days} days · ${pct(c.trade_match_pct)} trades</span></div>` : ""}
+    ${last}`;
+}
+
+function newsRows(s) {
+  const n = s.news;
+  if (!n) return "";
+  const hold = n.hold ? `<div class="halt">📰 ${n.hold} · paused until ${n.hold_until}</div>` : "";
+  const next = n.next.length
+    ? n.next.slice(0, 3).map((e) => `<div class="row"><span>${e.time}</span><span>${e.title}</span></div>`).join("")
+    : `<div class="row"><span>News</span><span>no high-impact USD news ahead</span></div>`;
+  return `<div class="row"><span><b>📰 News filter</b></span><span>${n.error ? "using saved calendar" : "on"}</span></div>${hold}${next}`;
 }
 
 // ---------------------------------------------------------------- activity feed
@@ -515,6 +544,7 @@ function feedEvents(events) {
     else if (ev.type === "account_halt") feed(`<b>Account</b> ${ev.reason}`, /cap|target/.test(ev.reason) ? "win" : "loss");
     else if (ev.type === "tv_signal") feed(`${who} TradingView: ${ev.action}`);
     else if (ev.type === "new_session") feed(`<b>New trading day</b>`, "muted2");
+    else if (ev.type === "news_hold") feed(`📰 <b>${ev.title}</b> at ${ev.at} · no new trades until ${ev.until}`, "think");
   }
 }
 function feedSetups(s) {   // what each working bot is thinking: PROC seen, waiting for MES, skipped…
