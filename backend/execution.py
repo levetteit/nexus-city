@@ -1,6 +1,6 @@
 """Real order execution on your Lucid accounts, through TradersPost.
 
-How it works: every time a bot opens, adds to or closes a trade, a webhook
+How it works: every time a bot opens, adds to, trims or closes a trade, a webhook
 goes to your TradersPost strategy; TradersPost places the market order on
 every Lucid (Tradovate) account subscribed to that strategy.
 
@@ -107,7 +107,7 @@ class TradersPostRouter:
         if not (self.armed and self.queue):
             return
         for ev in events:
-            if ev["type"] not in ("trade_open", "trade_add", "trade_close"):
+            if ev["type"] not in ("trade_open", "trade_add", "trade_trim", "trade_close"):
                 continue
             bot = engine.bots.get(ev.get("bot"))
             if bot is None or bot.cfg.instrument != "future":
@@ -130,6 +130,12 @@ class TradersPostRouter:
                 self.open[symbol]["qty"] += ev["qty"]
                 self._enqueue(symbol, {"action": "add", "quantity": ev["qty"], "orderType": "market"}, ev["bot"],
                               self.open[symbol]["contract"])
+            elif ev["type"] == "trade_trim" and symbol in self.open:
+                # resize = "end at this many contracts": TradersPost only sends the difference,
+                # so a repeat or a missed fill can't over-trim. Never blocked: it only reduces risk.
+                left = self.open[symbol]["qty"] = max(1, self.open[symbol]["qty"] - ev["qty"])
+                self._enqueue(symbol, {"action": "resize", "quantity": left, "orderType": "market", "cancel": False},
+                              ev["bot"], self.open[symbol]["contract"])
             elif ev["type"] == "trade_close" and symbol in self.open:
                 pos = self.open.pop(symbol)
                 self._enqueue(symbol, {"action": "exit", "cancel": True}, ev["bot"], pos["contract"])

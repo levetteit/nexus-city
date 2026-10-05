@@ -1,7 +1,7 @@
 """Live vs backtest: is paper trading doing what the backtest says it should?
 
-Two checks run in live mode. Both show in the account panel and go to your
-phone when each trading day ends.
+Two checks run in live mode. Both show in the account panel and in the end-of-day
+report pushed to your phone (report.py).
 
 1. Replay check. When a day ends, its candles are downloaded again and replayed
    through the same bots, settings, news filter and account state. The paper
@@ -68,7 +68,7 @@ class Scorecard:
             elif ev["type"] == "trade_close":
                 for t in reversed(self._day["trades"]):
                     if t["bot"] == ev["bot"] and t["pnl"] is None:
-                        t["pnl"] = ev["pnl"]
+                        t["pnl"] = ev.get("trade_pnl", ev["pnl"])
                         break
             elif ev["type"] == "tv_signal":
                 self._day["toggled"] = True
@@ -118,7 +118,7 @@ class Scorecard:
                 elif ev["type"] == "trade_close":
                     for t in reversed(replay):
                         if t["bot"] == ev["bot"] and t["pnl"] is None:
-                            t["pnl"] = ev["pnl"]
+                            t["pnl"] = ev.get("trade_pnl", ev["pnl"])
                             break
         return self._compare(day, replay)
 
@@ -166,8 +166,9 @@ class Scorecard:
             with open(path, newline="") as f:
                 for row in csv.DictReader(f):
                     p = float(row["pnl"])
-                    n += 1
-                    won += p > 0
+                    if not row["reason"].startswith("trim"):   # a trim is part of the trade after it
+                        n += 1
+                        won += p > 0
                     wins += max(p, 0)
                     losses += min(p, 0)
         return {"days": len(traded),
@@ -185,16 +186,3 @@ class Scorecard:
                 "clean_days": len(real),
                 "trade_match_pct": round(100 * sum(c["matched"] for c in real) / trades, 1) if trades else None,
                 "last": self.checks[-1] if self.checks else None, "running": self.running}
-
-    def message(self, check: dict, account) -> tuple[str, str, str]:
-        e = self.edge(account)
-        money = lambda v: f"{'+' if v >= 0 else '-'}${abs(v):,.0f}"
-        icon = "✅" if check["verdict"] == "match" else "⚠️"
-        title = f"📊 Day done {money(check['live_pnl'])} · replay {money(check['replay_pnl'])} {icon}"
-        body = f"trades matched {check['matched']}/{max(check['live_trades'], check['replay_trades'])}"
-        if check["verdict"] != "match":
-            body += f" ({'; '.join(check['explained_by']) or 'live data or execution drift, check the log'})"
-        if e["days"]:
-            body += (f" · paper {e['days']}d: {e['profitable_day_pct']}% green (backtest {BASELINE['profitable_day_pct']}%),"
-                     f" avg {money(e['avg_day'])} (backtest {money(BASELINE['avg_day'])})")
-        return title, body, "scorecard"

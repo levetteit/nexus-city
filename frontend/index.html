@@ -82,11 +82,28 @@
     <div id="room-view"></div>
     <div class="room-top">
       <div id="room-title"></div>
+      <button id="room-chart">CHART</button>
       <button id="room-stats">STATS</button>
       <button id="room-close">✕</button>
     </div>
     <div id="room-bubble" class="hidden"></div>
     <div class="room-hint">drag to look around</div>
+  </section>
+
+  <section id="chart" class="hidden">
+    <div class="chart-top">
+      <div class="chart-name"></div>
+      <div class="tfs"><button data-tf="1" class="on">1m</button><button data-tf="3">3m</button><button data-tf="6">6m</button><button data-tf="15">15m</button></div>
+      <button id="chart-close">✕</button>
+    </div>
+    <canvas></canvas>
+    <div class="chart-info"></div>
+  </section>
+
+  <section id="reports" class="panel hidden">
+    <button class="close" data-close="reports">×</button>
+    <h3>DAILY REPORTS</h3>
+    <div id="reports-body"></div>
   </section>
 
   <section id="worker" class="panel hidden">

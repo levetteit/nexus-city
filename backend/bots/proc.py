@@ -309,6 +309,20 @@ DEFAULTS = {
     "confirm_mode": "pointer",  # 'proc' | 'pointer' | 'tap' | None (off); 'pointer' tested best
     "confirm_window": 6,        # minutes before/after the PROC for the partner to agree
     "signals": "both",          # TradingView webhook orders still accepted
+    # Higher-timeframe bias: only take a PROC that agrees with the latest `bias_kind`
+    # ('proc' | 'pointer') on the `bias_tf` chart within `bias_window` minutes. None = off.
+    "bias_tf": None,
+    "bias_kind": "proc",
+    "bias_window": 60,
+    # Trims (partial profits): when price reaches the next untapped opposite FFVG/IFFVG
+    # in the trade's direction, close part of the position and aim for the zone after it.
+    # The last contract always runs until a pointer against.
+    "trim": False,
+    "trim_frac": 1 / 3,         # share of the open contracts to close at each zone (at least 1)
+    "trim_fill": "limit",       # 'limit': resting order at the zone edge | 'close': market order after the candle
+    "trim_min_tf": 1,           # only zones of this timeframe or higher count as trim levels
+    "trim_min_pts": 0.0,        # ...and only once they're at least this many points from the entry
+    "trim_max": None,           # most trims per trade (None = no limit)
 }
 
 # One engine per (market, symbol, settings), shared by every bot that needs it
@@ -338,6 +352,9 @@ class ProcBot(Bot):
         self.pending: list[Proc] = []    # PROCs waiting for the partner market to confirm
         self.candidates: list[Proc] = [] # PROCs that passed this bot's filters (for counting inverses)
         self.my_proc: Optional[Proc] = None
+        self.trim_target: Optional[float] = None
+        self.trims_done = 0
+        self.trim_last: Optional[float] = None
         self._session = ""
         self.last_signal = ""
         self.reset_day()
@@ -376,7 +393,19 @@ class ProcBot(Bot):
                     self.status = "walked"
                     self.last_event = f"{self.inverses} pointer inverses · walked away until next session"
 
+    def _bias_ok(self, p: Proc) -> bool:
+        tf = self.p["bias_tf"]
+        if not tf:
+            return True
+        kinds = ("proc",) if self.p["bias_kind"] == "proc" else ("proc", "pointer")
+        for t, k, side, ptf in reversed(self.engine.recent):
+            if ptf == tf and k in kinds and p.time - self.p["bias_window"] <= t <= p.time:
+                return side == p.side
+        return False
+
     def _usable(self, p: Proc, market: Market) -> bool:
+        if not self._bias_ok(p):
+            return False
         kz = self.p["killzones"]
         if kz:
             mod = int(market.clock_min) % (24 * 60)
@@ -431,11 +460,43 @@ class ProcBot(Bot):
             both = f" + {self.p['confirm_with']}" if self._confirming and self.partner else ""
             self.last_event = f"{p.tf}m PROC {arrow}{both} off {p.zone.label()} · entered {p.side}"
             price = market.underlyings[self.cfg.underlying].price
-            return Entry(p.side, self.engine.next_zone(p.side, price),
+            self.trims_done, self.trim_last = 0, None
+            self.trim_target = self._trim_level(p.side, price, price)
+            return Entry(p.side, self.trim_target,
                          note=f"{p.tf}m PROC off {p.zone.label()}{both}")
         return None
 
+    def _trim_level(self, side: str, price: float, entry: float) -> Optional[float]:
+        """Next untapped opposite FFVG/IFFVG in the trade's direction that qualifies as a trim level."""
+        tf, pts = self.p["trim_min_tf"], self.p["trim_min_pts"]
+        if side == "long":
+            lv = [z.bottom for z in self.engine.zones if z.side == "short" and not z.dead and z.tapped_at is None
+                  and z.tf >= tf and z.bottom > price and z.bottom >= entry + pts]
+            return min(lv) if lv else None
+        lv = [z.top for z in self.engine.zones if z.side == "long" and not z.dead and z.tapped_at is None
+              and z.tf >= tf and z.top < price and z.top <= entry - pts]
+        return max(lv) if lv else None
+
+    def _trim_check(self, bar: Bar, market: Market) -> None:
+        side, t = self.plan.side, self.trim_target
+        cap = self.p["trim_max"]
+        if t is not None and (bar.high >= t if side == "long" else bar.low <= t) and (cap is None or self.trims_done < cap):
+            qty = max(1, round(self.position.qty * self.p["trim_frac"]))
+            price = t if self.p["trim_fill"] == "limit" else None
+            if self.trim(qty, f"next zone {t:,.2f}", market, price):
+                self.trims_done += 1
+                self.last_event = f"trimmed {qty} at the next zone {t:,.2f} · {self.position.qty} left"
+        if t is not None and (bar.high >= t if side == "long" else bar.low <= t):
+            self.trim_last = t   # reached: a zone only touched at its edge stays "untapped", so remember it
+        # aim for the next qualifying zone beyond price and beyond the last level reached
+        ref = bar.close if self.trim_last is None else (
+            max(bar.close, self.trim_last) if side == "long" else min(bar.close, self.trim_last))
+        self.trim_target = self._trim_level(side, ref, self.position.entry)
+        self.plan.target = self.trim_target
+
     def exit_on_bar(self, htf, ltf: list[Bar], market: Market) -> Optional[str]:
+        if self.p["trim"] and ltf:
+            self._trim_check(ltf[-1], market)
         for kind, p in self._events:
             if kind == "proc" and p.side != self.plan.side:
                 if self.p["exit_min_tf"] and self.my_proc and p.tf < self.my_proc.tf:
@@ -490,6 +551,30 @@ class ProcBot(Bot):
                                "zone": p.zone.label()}
         out["waiting"] = len(self.pending)
         out["confirm_with"] = self.p["confirm_with"] if self._confirming else None
+        return out
+
+    def chart(self, market: Market, tf: int = 1, count: int = 180) -> dict:
+        out = super().chart(market, tf, count)
+        e = self.engine
+        if not e or not out["candles"]:
+            return out
+        first = out["candles"][0][0]
+        out["zones"] = [{"side": z.side, "top": z.top, "bottom": z.bottom, "kind": z.kind, "tf": z.tf,
+                         "from": max(z.created, first), "tapped": z.tapped_at is not None}
+                        for z in e.zones if not z.dead and (z.tapped_at is None or z.tapped_at >= first)][-40:]
+        mine = set(self.p["pointer_tfs"])
+        out["procs"] = [{"t": t - t % tf, "kind": k, "side": sd, "tf": ptf}
+                        for t, k, sd, ptf in e.recent if k in ("proc", "pointer") and ptf in mine and t >= first]
+        if e.proc:
+            p = e.proc
+            out["proc"] = {"side": p.side, "tf": p.tf, "high": p.high, "low": p.low, "t": p.time - p.time % tf,
+                           "zone": p.zone.label()}
+        if self._confirming and self.partner:
+            out["partner"] = {"symbol": self.p["confirm_with"], "mode": self.p["confirm_mode"],
+                              "marks": [{"t": t - t % tf, "kind": k, "side": sd, "tf": ptf}
+                                        for t, k, sd, ptf in self.partner.recent
+                                        if k in ("proc", "pointer") and t >= first]}
+        out["setup"] = self.last_event
         return out
 
     def info(self) -> dict:

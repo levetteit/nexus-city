@@ -27,6 +27,7 @@ engine = Engine() if MODE != "live" else None   # live mode builds its engine at
 router = None     # real-order router (live mode only), see execution.py
 notifier = None   # phone notifications (live mode only), see notify.py
 scorecard = None  # live vs backtest checks (live mode only), see scorecard.py
+reports = None    # end-of-day reports (live mode only), see report.py
 clients: set[WebSocket] = set()
 
 
@@ -51,8 +52,9 @@ async def run_city() -> None:
 async def run_live() -> None:
     """Poll for new real candles and step the bots through each one."""
     global engine, router, notifier
-    global scorecard
+    global scorecard, reports
     from . import execution, live, news, notify
+    from .report import DayReports
     from .scorecard import Scorecard
     notifier = notify.Notifier(live.DATA_DIR)
     calendar = news.NewsCalendar(data_dir=live.DATA_DIR)
@@ -66,6 +68,8 @@ async def run_live() -> None:
         engine.tick(trade=False)
     scorecard = Scorecard(live.DATA_DIR, calendar)
     scorecard.start_day(engine, partial=True)   # we may have come up mid-day
+    reports = DayReports(live.DATA_DIR)
+    reports.start_day(engine, partial=True)
     last_poll = 0.0
     last_order_error = ""
     while True:
@@ -84,9 +88,11 @@ async def run_live() -> None:
             live.record(engine, new)
             router.handle(engine, new, market.delay_minutes)   # real orders, if armed
             notifier.handle(engine, new, real=router.armed)     # buzz your phone
+            report = reports.observe(engine, new)
             finished = scorecard.observe(engine, new)
-            if finished:   # a trading day just ended: replay it and compare with what paper trading did
-                asyncio.create_task(check_day(finished))
+            if report:   # a trading day just ended: replay it, compare with paper trading, send the report
+                reports.save(report)
+                asyncio.create_task(check_day(finished, report))
             events += new
         if router.last_error and router.last_error != last_order_error:   # a real order failed: tell you now
             notifier.send("⚠️ Real order failed", router.last_error, "error")
@@ -95,13 +101,16 @@ async def run_live() -> None:
         await asyncio.sleep(1)
 
 
-async def check_day(day: dict) -> None:
+async def check_day(day: dict | None, report: dict) -> None:
+    from .scorecard import BASELINE
     try:
-        check = await asyncio.to_thread(scorecard.replay, day)
-    except Exception as exc:   # e.g. Yahoo down: skip this day's check
+        if day:
+            report["check"] = await asyncio.to_thread(scorecard.replay, day)
+            reports.save(report)
+    except Exception as exc:   # e.g. Yahoo down: send the report without the check
         print(f"replay check failed: {exc}")
-        return
-    notifier.send(*scorecard.message(check, engine.account))
+    title, body = reports.message(report, scorecard.edge(engine.account), BASELINE)
+    notifier.send(title, body, "report", url=f"/?report={report['day']}")
 
 
 def state() -> dict:
@@ -202,11 +211,31 @@ def toggle(bot_id: str, action: str) -> dict:
     return engine.bots[bot_id].snapshot(engine.market)
 
 
+@app.get("/api/reports")
+def list_reports() -> list:
+    return reports.list() if reports else []
+
+
+@app.get("/api/reports/{day}")
+def get_report(day: str) -> dict:
+    r = reports.get(day) if reports else None
+    if r is None:
+        raise HTTPException(404, "no report for that day")
+    return r
+
+
 @app.get("/api/scorecard")
 def get_scorecard() -> dict:
     if scorecard is None:
         raise HTTPException(503, "the live vs backtest check only runs in live mode")
     return {**scorecard.status(engine.account), "days": scorecard.checks}
+
+
+@app.get("/api/bots/{bot_id}/chart")
+def bot_chart(bot_id: str, tf: int = 1, count: int = 180) -> dict:
+    if engine is None or bot_id not in engine.bots or tf not in (1, 2, 3, 4, 5, 6, 15):
+        raise HTTPException(404)
+    return engine.bots[bot_id].chart(engine.market, tf, max(30, min(count, 400)))
 
 
 @app.get("/api/bots/{bot_id}/room")

@@ -8,8 +8,8 @@ Two ways, use either or both:
 * ntfy (free app, App Store / Play Store): set STARNET_NTFY_TOPIC to a long,
   hard-to-guess topic name and subscribe to it in the ntfy app.
 
-Sent for: entries, adds, exits (with P&L), account stops/caps, news pauses, and
-real-order failures. Only in live mode, so the simulation doesn't spam you.
+Sent for: entries, adds, exits (with P&L), account stops/caps, news pauses, the
+end-of-day report and real-order failures. Only in live mode, so the simulation doesn't spam you.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ import os
 import urllib.request
 from typing import Optional
 
+PUBLIC_URL = os.getenv("STARNET_PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL", "")   # Render sets the latter
 PUSH_CONTACT = os.getenv("STARNET_PUSH_CONTACT", "mailto:starnet-alerts@users.noreply.github.com")   # push services want a contact
 
 
@@ -100,10 +101,12 @@ class Notifier:
             return (f"📈 {who} went {side} ×{ev['qty']}{tag}", f"{ev['contract']} @ {ev['entry']:,.2f} · {ev.get('note', '')}", "trade")
         if ev["type"] == "trade_add":
             return (f"➕ {who} added → {ev['total']} contracts{tag}", ev.get("why", ""), "trade")
+        if ev["type"] == "trade_trim":
+            return (f"✂️ {who} trimmed {ev['qty']} {money(ev['pnl'])}{tag}", f"{ev['why']} · {ev['left']} left running", "trade")
         if ev["type"] == "trade_close":
-            day = engine.account.day_pnl
-            icon = "💰" if ev["pnl"] >= 0 else "🔻"
-            return (f"{icon} {who} closed {money(ev['pnl'])}{tag}", f"{ev['reason']} · today {money(day)}", "trade")
+            day, whole = engine.account.day_pnl, ev.get("trade_pnl", ev["pnl"])
+            icon = "💰" if whole >= 0 else "🔻"
+            return (f"{icon} {who} closed {money(whole)}{tag}", f"{ev['reason']} · today {money(day)}", "trade")
         if ev["type"] == "news_hold":
             return (f"📰 {ev['title']} at {ev['at']} ET", f"bots paused for news · no new trades until {ev['until']}", "news")
         if ev["type"] == "account_halt":
@@ -117,18 +120,19 @@ class Notifier:
             if msg:
                 self.send(*msg)
 
-    def send(self, title: str, body: str, tag: str = "starnet") -> None:
+    def send(self, title: str, body: str, tag: str = "starnet", url: str = "/") -> None:
+        """`url`: the page in the app a tap on the notification opens."""
         if not (self.subs or self.ntfy_topic):
             return
         try:
-            asyncio.get_running_loop().create_task(asyncio.to_thread(self._send_all, title, body, tag))
+            asyncio.get_running_loop().create_task(asyncio.to_thread(self._send_all, title, body, tag, url))
         except RuntimeError:   # no event loop (tests / scripts)
-            self._send_all(title, body, tag)
+            self._send_all(title, body, tag, url)
 
-    def _send_all(self, title: str, body: str, tag: str) -> None:
+    def _send_all(self, title: str, body: str, tag: str, url: str = "/") -> None:
         if self.web_push and self.subs:
             from pywebpush import WebPushException, webpush
-            payload = json.dumps({"title": title, "body": body, "tag": tag})
+            payload = json.dumps({"title": title, "body": body, "tag": tag, "url": url})
             dead = []
             for sub in list(self.subs):
                 try:
@@ -146,7 +150,10 @@ class Notifier:
                 self.unsubscribe(endpoint)
         if self.ntfy_topic:
             try:
-                msg = json.dumps({"topic": self.ntfy_topic, "title": title, "message": body or title}).encode()
+                note = {"topic": self.ntfy_topic, "title": title, "message": body or title}
+                if PUBLIC_URL:   # tapping the ntfy notification opens the app there
+                    note["click"] = PUBLIC_URL.rstrip("/") + url
+                msg = json.dumps(note).encode()
                 req = urllib.request.Request("https://ntfy.sh/", data=msg, method="POST",
                                              headers={"Content-Type": "application/json"})
                 urllib.request.urlopen(req, timeout=10).read()

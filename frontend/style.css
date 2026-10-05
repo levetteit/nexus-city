@@ -132,6 +132,33 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .room-hint { position: absolute; bottom: calc(max(14px, calc(env(safe-area-inset-bottom) + 4px)) + var(--hb, 0px)); left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--muted); pointer-events: none; }
 #worker { z-index: 9; }
 
+/* ---------- full-screen chart ---------- */
+#chart { position: fixed; top: 0; left: 0; right: 0; height: calc(100% + var(--ext, 0px)); z-index: 10; background: #070b14;
+  display: flex; flex-direction: column; }
+#chart .chart-top { display: flex; align-items: center; gap: 8px;
+  padding: max(10px, calc(env(safe-area-inset-top) + 4px)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); }
+#chart .chart-name { flex: 1; min-width: 0; font-family: var(--pixel); font-size: 11px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#chart button { min-width: 44px; min-height: 38px; border: 1px solid var(--line); background: rgba(20, 14, 50, .85); color: var(--text);
+  border-radius: 10px; padding: 6px 10px; font-family: var(--pixel); font-size: 9px; cursor: pointer; }
+#chart .tfs { display: flex; gap: 4px; }
+#chart .tfs button { min-width: 40px; padding: 6px 6px; }
+#chart .tfs button.on { background: var(--accent); color: #000; }
+#chart canvas { flex: 1; min-height: 0; width: 100%; display: block; touch-action: none; }
+#chart .chart-info { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted);
+  padding: 8px max(14px, env(safe-area-inset-left)) calc(max(10px, env(safe-area-inset-bottom)) + var(--hb, 0px)); }
+#chart .chart-info b { font-size: 13px; }
+
+/* ---------- daily reports ---------- */
+#reports { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 24px)); max-height: 80vh; overflow: auto; z-index: 9; font-size: 12.5px; }
+#reports .day { border-top: 1px solid rgba(255, 255, 255, .07); padding: 8px 0; cursor: pointer; }
+#reports .day .row { display: flex; justify-content: space-between; }
+#reports .detail { margin-top: 8px; display: grid; gap: 6px; }
+#reports .trade { background: rgba(255, 255, 255, .04); border-radius: 8px; padding: 6px 8px; line-height: 1.4; }
+#reports .trade small { color: var(--muted); display: block; }
+#reports .tag2 { font-family: var(--pixel); font-size: 8px; padding: 2px 5px; border-radius: 4px; background: #3a2c8f; margin-left: 6px; }
+#account button.reports-btn { width: 100%; margin-top: 8px; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+  background: rgba(124, 92, 255, .15); color: var(--text); font-family: var(--pixel); font-size: 9px; cursor: pointer; }
+
 #payroll { left: 50%; bottom: 16px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); }
 #worker { right: 16px; top: 64px; width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 90px); overflow: auto; }
 #worker .row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }

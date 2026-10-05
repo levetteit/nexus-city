@@ -48,7 +48,7 @@ class Position:
 
 class Broker(Protocol):
     def open(self, symbol: str, kind: str, qty: int, market: Market, strike: Optional[float] = None) -> Position: ...
-    def close(self, pos: Position, market: Market) -> float: ...
+    def close(self, pos: Position, market: Market, price: Optional[float] = None) -> float: ...
     def mark(self, pos: Position, market: Market) -> float: ...
 
 
@@ -71,12 +71,14 @@ class PaperBroker:
         fill = mid * (1 + self.spread_pct / 2) + self.option_fee / 100
         return Position(symbol, kind, qty, fill, market.clock_str, strike, 100.0)
 
-    def close(self, pos: Position, market: Market) -> float:
-        """Exit price, net of costs, for `pos` (the caller decides how many contracts)."""
+    def close(self, pos: Position, market: Market, price: Optional[float] = None) -> float:
+        """Exit price, net of costs, for `pos` (the caller decides how many contracts).
+        `price`: a resting limit order's price (futures only, no slippage) instead of the market."""
         if pos.is_future:
             u = market.underlyings[pos.symbol]
-            cost = self.slippage_ticks * u.tick_size + self.futures_fee / pos.multiplier
-            return u.price - cost if pos.kind == "long" else u.price + cost
+            cost = (0 if price is not None else self.slippage_ticks * u.tick_size) + self.futures_fee / pos.multiplier
+            px = u.price if price is None else price
+            return px - cost if pos.kind == "long" else px + cost
         mid = market.option_price(pos.symbol, pos.strike, pos.kind)
         return max(mid * (1 - self.spread_pct / 2) - self.option_fee / 100, 0.0)
 
