@@ -24,7 +24,8 @@ from .engine import Engine
 MODE = os.getenv("STARNET_MODE", "sim")
 POLL_SECONDS = 20
 engine = Engine() if MODE != "live" else None   # live mode builds its engine at startup (needs a download)
-router = None   # real-order router (live mode only), see execution.py
+router = None     # real-order router (live mode only), see execution.py
+notifier = None   # phone notifications (live mode only), see notify.py
 clients: set[WebSocket] = set()
 
 
@@ -48,8 +49,9 @@ async def run_city() -> None:
 
 async def run_live() -> None:
     """Poll for new real candles and step the bots through each one."""
-    global engine, router
-    from . import execution, live
+    global engine, router, notifier
+    from . import execution, live, notify
+    notifier = notify.Notifier(live.DATA_DIR)
     market = await asyncio.to_thread(live.LiveMarket)
     engine = Engine(market=market, account=live.load_account())
     live.load_careers(engine)
@@ -58,6 +60,7 @@ async def run_live() -> None:
     while market.i + 1 < market.warm_until:   # read history, don't trade it
         engine.tick(trade=False)
     last_poll = 0.0
+    last_order_error = ""
     while True:
         loop = asyncio.get_running_loop()
         if loop.time() - last_poll >= POLL_SECONDS:
@@ -72,7 +75,11 @@ async def run_live() -> None:
             new = engine.tick()
             live.record(engine, new)
             router.handle(engine, new, market.delay_minutes)   # real orders, if armed
+            notifier.handle(engine, new, real=router.armed)     # buzz your phone
             events += new
+        if router.last_error and router.last_error != last_order_error:   # a real order failed: tell you now
+            notifier.send("⚠️ Real order failed", router.last_error, "error")
+        last_order_error = router.last_error
         await broadcast({"type": "tick", "state": state(), "events": events})
         await asyncio.sleep(1)
 
@@ -85,6 +92,8 @@ def state() -> dict:
         snap["feed"] = engine.market.feed
         if router:
             snap["execution"] = router.status(engine.market.delay_minutes)
+        if notifier:
+            snap["push"] = {"web_push": notifier.web_push, "devices": len(notifier.subs), "ntfy": bool(notifier.ntfy_topic)}
     return snap
 
 
@@ -240,6 +249,42 @@ def execution_flatten() -> dict:
             bot._close("flatten all", engine.market)
     r.flatten_all([b.cfg.underlying for b in engine.bots.values()])
     return r.status(engine.market.delay_minutes)
+
+
+def _notifier():
+    if notifier is None:
+        raise HTTPException(503, "notifications are only available in live mode")
+    return notifier
+
+
+@app.get("/api/push")
+def push_status() -> dict:
+    return _notifier().status()
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(request: Request) -> dict:
+    n = _notifier()
+    try:
+        n.subscribe(json.loads(await request.body()))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    n.send("🔔 Starnet alerts are on", "You'll get a buzz every time a bot enters, adds, or exits a trade.", "setup")
+    return n.status()
+
+
+@app.post("/api/push/unsubscribe")
+async def push_unsubscribe(request: Request) -> dict:
+    n = _notifier()
+    n.unsubscribe(json.loads(await request.body()).get("endpoint", ""))
+    return n.status()
+
+
+@app.post("/api/push/test")
+def push_test() -> dict:
+    n = _notifier()
+    n.send("💰 Test: MNQ OG closed +$420", "pointer against (PROC) · today +$420", "test")
+    return n.status()
 
 
 @app.post("/api/account/reset")

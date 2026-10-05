@@ -398,6 +398,49 @@ function applyState(s) {
   if (openWorkerId) renderWorker();
 }
 
+// ---------------------------------------------------------------- phone alerts (web push)
+let pushOn = false;
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").then(async (reg) => {
+    pushOn = !!(await reg.pushManager?.getSubscription());
+  }).catch(() => {});
+}
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+function b64ToBytes(b64) {
+  const s = atob((b64 + "=".repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(s, (c) => c.charCodeAt(0));
+}
+async function turnOnAlerts() {
+  if (isIOS && !standalone) return alert("On iPhone, open Starnet from its home-screen icon first, then tap this again.");
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return alert("This browser doesn't support notifications.");
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") return alert("Notifications are blocked. Allow them in Settings → Notifications → Starnet.");
+  const { public_key } = await (await fetch("/api/push")).json();
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(public_key) });
+  const res = await fetch("/api/push/subscribe", { method: "POST", body: JSON.stringify(sub.toJSON()) });
+  pushOn = res.ok;
+  if (!res.ok) alert("Couldn't turn on alerts: " + ((await res.json()).detail ?? res.status));
+}
+async function turnOffAlerts() {
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (sub) {
+    await fetch("/api/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint: sub.endpoint }) });
+    await sub.unsubscribe();
+  }
+  pushOn = false;
+}
+function alertRows(s) {
+  if (s?.mode !== "live" || !s.push) return "";
+  const where = [pushOn ? "this phone" : "", s.push.ntfy ? "ntfy" : ""].filter(Boolean).join(" + ");
+  return `<div class="row"><span>Trade alerts</span><span class="${where ? "pos" : ""}">${where ? `on · ${where}` : "off"}</span></div>
+    <div class="exec-btns">${pushOn
+      ? `<button data-push="test">SEND TEST</button><button data-push="off">ALERTS OFF</button>`
+      : s.push.web_push ? `<button class="arm" data-push="on">🔔 TURN ON ALERTS</button>` : ""}</div>`;
+}
+
 // real orders on your Lucid accounts (live mode only)
 function execRows(s) {
   if (s?.mode !== "live") return "";
@@ -445,6 +488,7 @@ function renderAccount(a) {
     <div class="row"><span>Day stop</span><span>-${fmt(a.daily_stop)}</span></div>
     <div class="row"><span>Micros open</span><span>${a.open_micros} / ${a.max_micros}</span></div>
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
+    ${alertRows(state)}
     ${execRows(state)}
     ${a.halted ? `<div class="halt">${a.halted}</div>` : ""}
     ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET EVALUATION</button>` : ""}`;
@@ -574,6 +618,14 @@ document.addEventListener("click", async (e) => {
     if (close.dataset.close === "worker") openWorkerId = null;
   }
   if (e.target.closest("[data-reset]")) await fetch("/api/account/reset", { method: "POST" });
+  const pb = e.target.closest("[data-push]");
+  if (pb) {
+    const act = pb.dataset.push;
+    if (act === "on") await turnOnAlerts();
+    else if (act === "off") await turnOffAlerts();
+    else await fetch("/api/push/test", { method: "POST" });
+    if (state) renderAccount(state.account);
+  }
   const ex = e.target.closest("[data-exec]");
   if (ex) {
     const act = ex.dataset.exec;

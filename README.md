@@ -66,6 +66,7 @@ backend/
   fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
   live.py        live paper trading on real candles (Yahoo, or real-time via TradingView), with trade logs
   execution.py   real orders to your Lucid accounts via TradersPost (armed from the city, with safety checks)
+  notify.py      phone notifications for every trade (web push to the home-screen app, or ntfy)
 frontend/room.js  the bots' streamer rooms: robot, monitors, emotions, gadgets
 Dockerfile, render.yaml   one-click hosting (password-protected) so you can watch from your phone
   engine.py      ticks the market and every bot, builds the snapshot
@@ -265,6 +266,22 @@ Every push to `main` redeploys automatically. Paper results stay on the disk
 (`/app/data/paper_trades.csv`, `paper_days.csv`); download them from Render's
 Shell tab. The same Docker image runs on Fly.io, Railway or any VPS: set
 `STARNET_PASSWORD`, mount a volume at `/app/data`, expose port 8000.
+
+## Trade alerts on your phone (`backend/notify.py`)
+
+Get a notification every time a bot enters, adds to or exits a trade (with the
+P&L), when the account stops for the day, and if a real order ever fails.
+
+**iPhone / Android (no extra app):** open Starnet from its **home-screen icon**
+(on iPhone, web push only works from there), tap the account bar to expand it →
+**🔔 TURN ON ALERTS** → **Allow**. You'll get a confirmation buzz; **SEND TEST**
+sends another. Turn it on separately on each device you want alerts on.
+
+**Backup: ntfy.** Install the free **ntfy** app, subscribe to a long random topic
+name (e.g. `starnet-7f3k9q2x`), and set `STARNET_NTFY_TOPIC` to the same name in
+Render → Environment.
+
+Alerts only fire in live mode. Real-order alerts are marked **· REAL**.
 
 ## Real orders on your Lucid accounts (`backend/execution.py`)
 
