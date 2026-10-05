@@ -15,7 +15,7 @@ from .bots.base import BotConfig
 from .bots.pointer import PointerBot
 
 TICK_SECONDS = float(os.getenv("STARNET_TICK_SECONDS", "1.0"))  # real seconds between ticks
-SIM_MINUTES_PER_TICK = 0.25   # market minutes that pass each tick (390 min session ~ 26 real min)
+SIM_MINUTES_PER_TICK = 0.25   # market minutes per tick (an 18:00-16:45 day ~ 91 real minutes)
 
 # All bots trade micro futures in ONE prop firm account (see account.py).
 # Each trade starts at 3 contracts and can grow to 6, never more.

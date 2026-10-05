@@ -6,7 +6,7 @@ shift rules:
 
 * scanning  - on shift, waiting for its strategy to fire a setup
 * in_trade  - holding a position (the building's light beam turns on)
-* off_duty  - the account hit its daily profit cap / profit target, clocked out
+* off_duty  - the account reached its daily goal / cap / profit target, clocked out
 * stopped   - the account hit its daily stop (or failed), sent home
 * walked    - the strategy told it to walk away from the market for the day
 * disabled  - turned off by you
@@ -153,7 +153,7 @@ class Bot:
         """Size up the open position by `contracts`, up to `max_contracts`."""
         pos = self.position
         want = min(self.cfg.contracts, self.cfg.max_contracts - pos.qty)
-        qty = self.account.request(self.cfg.id, self.cfg.underlying, want) if want > 0 else 0
+        qty = self.account.request(self.cfg.id, self.cfg.underlying, want, adding=True) if want > 0 else 0
         if qty <= 0:
             return False
         extra = self._buy(self.plan.side, qty, market.underlyings[self.cfg.underlying], market)
@@ -165,8 +165,8 @@ class Bot:
 
     def _manage_tick(self, u: Underlying, market: Market) -> None:
         # No stop loss, target or time stop: exits come from the strategy
-        # (exit_on_bar / on_signal). The one forced exit is the close, since
-        # same-day options expire and positions aren't held overnight.
+        # (exit_on_bar / on_signal). The one forced exit is just before the
+        # 16:45 ET flat deadline: prop firms don't allow overnight holds.
         if market.minutes_to_close <= 5:
             self._close("end of day", market)
 

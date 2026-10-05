@@ -376,7 +376,7 @@ function applyState(s) {
   vEl.textContent = money(s.vault);
   vEl.classList.toggle("neg", s.vault < 0);
   vaultTag.querySelector(".s").textContent = `${s.on_shift} workers on shift · tap for payroll`;
-  document.getElementById("clock").textContent = s.clock;
+  document.getElementById("clock").textContent = `${s.session} · ${s.clock} ET`;
   document.getElementById("tickers").innerHTML = Object.entries(s.tickers)
     .map(([sym, t]) => `<span>${sym} ${t.price.toFixed(2)} <b class="${t.change_pct >= 0 ? "up" : "down"}">${t.change_pct >= 0 ? "+" : ""}${t.change_pct.toFixed(2)}%</b></span>`).join("");
 
@@ -388,29 +388,32 @@ function applyState(s) {
   if (openWorkerId) renderWorker();
 }
 
-const PHASES = { combine: "TRADING COMBINE", funded: "FUNDED (XFA)", failed: "FAILED" };
+const PHASES = { evaluation: "EVALUATION", funded: "FUNDED", failed: "FAILED" };
 function renderAccount(a) {
   if (!a) return;
+  const fmt = (v) => `$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
   document.getElementById("acct-firm").textContent = a.firm.toUpperCase();
   const phase = document.getElementById("acct-phase");
   phase.textContent = PHASES[a.phase];
   phase.className = `phase ${a.phase}`;
   const room = a.equity - a.mll;
-  const goal = a.target
-    ? `<div class="row"><span>Target</span><span>${money(a.profit)} / $${a.target.toLocaleString()}</span></div>
+  const goalPct = Math.max(0, Math.min(100, (a.day_pnl / a.cap) * 100));
+  const stage = a.target
+    ? `<div class="row"><span>Target</span><span>${money(a.profit)} / ${fmt(a.target)}</span></div>
        <div class="bar"><i style="width:${Math.max(0, Math.min(100, (a.profit / a.target) * 100))}%"></i></div>`
-    : `<div class="row"><span>Payout days</span><span>${a.winning_days} / ${a.payout_days_needed} (≥ $150)</span></div>
-       ${a.payouts.length ? `<div class="row"><span>Paid out</span><span class="pos">$${a.payouts.reduce((x, y) => x + y, 0).toLocaleString()}</span></div>` : ""}`;
+    : `<div class="row"><span>Payout</span><span class="${a.payout_eligible ? "pos" : ""}">${a.payout_eligible ? "eligible" : `${a.profitable_days} / ${a.payout_days} profitable days`}</span></div>`;
   document.getElementById("acct-body").innerHTML = `
-    <div class="row"><span>Balance</span><span>$${a.balance.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
-    ${goal}
-    <div class="row"><span>MLL</span><span>$${a.mll.toLocaleString()} · <b class="${room < 500 ? "neg" : ""}">$${Math.max(0, room).toLocaleString(undefined, { maximumFractionDigits: 0 })} room</b></span></div>
-    <div class="row"><span>Today</span><span class="${a.day_pnl >= 0 ? "pos" : "neg"}">${money(a.day_pnl)}</span></div>
-    <div class="row"><span>Day stop / cap</span><span>-$${a.daily_stop.toLocaleString()} / +$${a.profit_cap.toLocaleString()}</span></div>
+    <div class="row"><span>Balance</span><span>${fmt(a.balance)}</span></div>
+    ${stage}
+    <div class="row"><span>Drawdown</span><span>${fmt(a.mll)}${a.mll_locked ? " 🔒" : ""} · <b class="${room < 500 ? "neg" : ""}">${fmt(Math.max(0, room))} room</b></span></div>
+    <div class="row"><span>Today</span><span class="${a.day_pnl >= 0 ? "pos" : "neg"}">${money(a.day_pnl)}${a.goal_reached ? " · goal ✓" : ""}</span></div>
+    <div class="row"><span>Day goal</span><span>${fmt(a.goal)} → ${fmt(a.cap)} cap</span></div>
+    <div class="bar day"><i style="width:${goalPct}%"></i><em style="left:${(a.goal / a.cap) * 100}%"></em></div>
+    <div class="row"><span>Day stop</span><span>-${fmt(a.daily_stop)}</span></div>
     <div class="row"><span>Micros open</span><span>${a.open_micros} / ${a.max_micros}</span></div>
-    <div class="row"><span>Best day</span><span>$${a.best_day.toLocaleString(undefined, { maximumFractionDigits: 0 })} · day ${a.days}</span></div>
+    <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
     ${a.halted ? `<div class="halt">${a.halted}</div>` : ""}
-    ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET COMBINE</button>` : ""}`;
+    ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET EVALUATION</button>` : ""}`;
 }
 
 function openWorker(id) {

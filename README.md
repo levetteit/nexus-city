@@ -3,8 +3,10 @@
 A live 3D "trading city": each Python bot is a **worker** living in its own
 building and trading micro futures (**MNQ, MES, M2K**) with the **Andrew Macre
 pointer strategy**. All workers share **one prop firm account** whose rules
-(Topstep 50K by default) they're built to pass: first the Trading Combine,
-then the funded stage. When a worker is in a trade its
+(Lucid Trading, LucidFlex 50K by default) they're built to pass: first the
+evaluation, then the funded stage. They trade **every session** (Asia, London,
+New York) from the 18:00 ET open to the 16:45 ET flat deadline, aiming for
+**$1,000–$1,500 a day**. When a worker is in a trade its
 building fires a light beam into the sky. When it closes a trade, gold coins (or
 red ones) roll down its road to **The Vault** in the middle of town.
 
@@ -29,7 +31,7 @@ uvicorn backend.main:app --reload
 backend/
   market.py      simulated MNQ / MES / M2K prices with 1-minute OHLC candles
   broker.py      PaperBroker: micro futures (tick slippage + fees; options still supported). Implement open/close/mark to go live
-  account.py     the shared prop firm account: Topstep 50K rules, daily stop / profit cap, contract budget, payouts
+  account.py     the shared prop firm account: LucidFlex / LucidPro 50K rules, EOD drawdown, daily goal / cap / stop, contract budget
   bots/base.py   the worker lifecycle: scanning → in_trade → off_duty / stopped / walked; 3 → 6 contract sizing
   bots/pointer.py  the Macre pointer strategy
   config.py      who lives in the city
@@ -87,27 +89,44 @@ more**. The whole account holds at most **12 micros** at once (two bots at full
 size), and only one bot can hold a given symbol at a time, so they never take
 opposite sides of the same contract.
 
+### Trading day and sessions
+
+The simulated day matches the futures day under Lucid's flat rule: **18:00 ET
+open → Asia → London (03:00) → New York (09:30) → flat by 16:45 ET**. Bots trade
+whenever the market is open, in every session, and flatten at 16:40. Volatility
+is lowest in Asia, higher in London, and highest at the New York open.
+
+### Daily goal
+
+| | Default | What happens |
+|---|---|---|
+| Daily goal | **$1,000** closed profit | no new trades; open trades keep running until a pointer forms against them |
+| Daily cap | **$1,500** open + closed | flatten everything, done for the day |
+| Daily stop | **−$800** open + closed | flatten everything, done for the day (smaller when the account is near its drawdown) |
+
 ### Prop firm account (`backend/account.py`)
 
-All bots trade one shared account with Topstep 50K rules:
+All bots trade one shared account with LucidFlex 50K rules:
 
-| Rule | Topstep 50K | What the bots do |
+| Rule | LucidFlex 50K | What the bots do |
 |---|---|---|
-| Profit target (Combine) | $3,000 | stop for the day once it's in hand; pass at end of day |
-| Maximum Loss Limit | $2,000 below the highest end-of-day balance, locks at $50,000, counts open P&L | never let a day's loss reach it (keep a $100 cushion) |
-| Daily loss limit (optional) | $1,000 | **daily stop at −$800** (open + closed): flatten everything, done for the day |
-| Consistency | best day ≤ 50% of profit | **daily profit cap at +$1,400** (open + closed): flatten, done for the day |
-| Max size | 50 micros (Combine); funded: 20 → 30 at +$1,500 → 50 at +$2,000 | at most 12 micros open, and never above the firm's limit |
-| Payouts (funded) | 5 days of ≥ $150, then 50% of profit up to $2,000 | requested automatically; locks the MLL at $50,000 |
+| Profit target | $3,000, at least 2 trading days | stop for the day once it's in hand; pass at the 16:45 close |
+| Drawdown | **End-of-day**: $2,000 below the highest *closing* balance, only moves at the close, locks at $50,100 once the account closes at $52,100 | never let a day's loss reach it (keep a $100 cushion). Equity touching it during the day is treated as a breach (the safe reading) |
+| Consistency | evaluation: best day ≤ 50% of profit; funded: none | the $1,500 cap keeps the best day at half the $3,000 target |
+| Daily loss limit | none | our own −$800 daily stop |
+| Max size | 40 micros | at most 12 micros open, 3–6 per trade |
+| Flat rule | flat by 16:45 ET, no overnight/weekend holds | flatten at 16:40 |
 
-After passing, the account switches to the funded stage. If it fails, or ends
-up with under $150 of room above the MLL, the bots stop and the panel shows
-**Reset Combine**. Change the numbers in `TOPSTEP_50K` / `Guards` for another
-firm or account size.
+`LUCIDPRO_50K` is also included (no evaluation consistency rule; 40% funded
+consistency and a $2,100 payout buffer). Use it with
+`PropAccount(rules=LUCIDPRO_50K)` in `engine.py`. After passing, the account
+switches to the funded stage and the panel shows when a payout is eligible. If
+it fails, or ends up with under $150 of room above the drawdown, the bots stop
+and the panel shows **Reset evaluation**. Change `Guards` in `account.py` to
+adjust the goal, cap, stop or contract budget.
 
 The account's limits are the only exits besides a pointer against the trade:
-there are still **no per-trade stops**. They exist because breaking a firm rule
-fails the account.
+there are still **no per-trade stops**.
 
 | Bot rule | Effect |
 |---|---|
@@ -131,7 +150,7 @@ The city lays itself out automatically for however many workers you register.
 
 Everything runs on **simulated prices with a paper broker**. To trade for real
 you'd swap `Market` for a live data feed and `PaperBroker` for the platform your
-prop firm uses (Topstep runs on TopstepX / ProjectX; Tradovate and NinjaTrader
-are common elsewhere). Check your firm allows automated trading first.
+prop firm account runs on (check which platforms your Lucid plan supports,
+e.g. Tradovate, NinjaTrader or Rithmic-based platforms). Check your firm allows automated trading first.
 Simulated prices are a random walk, so they don't prove the strategy works
 (or that it doesn't). To judge it, backtest it on real historical candles.

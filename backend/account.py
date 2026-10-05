@@ -1,29 +1,31 @@
 """The prop firm account every bot trades in.
 
-All workers share ONE account, the way a Topstep evaluation works. This module
+All workers share ONE account, the way a prop evaluation works. This module
 enforces the firm's rules plus a safety layer of our own, so the bots can pass
-the Trading Combine and then keep the Express Funded Account (XFA) alive.
+the evaluation and then keep the funded account alive.
 
-Firm rules (Topstep 50K, as published in 2026; edit `TOPSTEP_50K` if they change):
-  * Profit target: $3,000 (Combine).
-  * Maximum Loss Limit: $2,000 below the highest end-of-day balance, checked in
-    real time including open P&L. It stops trailing once it reaches the
-    starting balance. Touching it fails the account.
-  * Consistency: best day should be <= 50% of total profit. A bigger best day
-    raises the profit needed to pass (2x the best day).
-  * Position size: 50 micros in the Combine. The XFA scaling plan allows
-    20 micros until +$1,500, 30 until +$2,000, then 50.
-  * XFA payouts: after 5 winning days of >= $150, request 50% of profit, capped
-    at $2,000. A payout locks the MLL at the starting balance.
+Default firm: Lucid Trading, LucidFlex 50K (rules as published in 2026; edit
+the presets below if they change or you use another plan):
+  * Profit target: $3,000 (evaluation, minimum 2 trading days).
+  * Max Loss Limit: end-of-day (EOD) drawdown of $2,000. The MLL is set from
+    the highest *closing* balance and only moves at the close, never during
+    the day. It locks for good at the starting balance + $100 ($50,100) once
+    the account closes at or above $52,100. We treat equity touching the MLL
+    during the day as a breach, which is the safe reading.
+  * Consistency: in the LucidFlex evaluation the best day must be <= 50% of
+    total profit (a bigger best day raises the profit needed to 2x that day).
+    LucidFlex funded has none. LucidPro: none in the evaluation, 40% funded.
+  * No daily loss limit. Max size 40 micros.
+  * Every position must be flat by 16:45 ET; no overnight or weekend holds.
 
 Our safety layer (`Guards`), tighter than the firm so we never touch its lines:
-  * daily stop: flatten everything and stop for the day at -$800 (open + closed),
-    shrunk on days the account starts close to the MLL so a loss can never
-    reach it (we keep a $100 cushion)
-  * if there's less than $150 of room left above the MLL, the bots stop trading
-    and the account asks for a reset
-  * daily profit cap: flatten and stop at +$1,400 (open + closed) so one day
-    never breaks the 50% consistency rule; same once the profit target is in hand
+  * daily goal $1,000: once closed P&L for the day reaches it, no new trades
+    (open trades still run until a pointer forms against them)
+  * daily cap $1,500: flatten everything at +$1,500 (open + closed); this also
+    keeps the best day inside the 50% consistency rule
+  * daily stop -$800 (open + closed), shrunk on days the account starts close
+    to the MLL so a loss can never reach it (we keep a $100 cushion)
+  * less than $150 of room above the MLL -> stop trading, ask for a reset
   * contract budget: at most 12 micros open across all bots (each trade is 3-6)
   * one bot per symbol at a time, so bots never hold opposite sides of the same contract
 """
@@ -38,68 +40,75 @@ class PropRules:
     name: str
     start_balance: float
     profit_target: float
-    max_loss: float
-    consistency_pct: float
-    combine_max_micros: int
-    xfa_scaling: list[tuple[float, int]]        # (profit reached, micros allowed)
-    payout_winning_days: int
-    payout_min_day: float
-    payout_pct: float
-    payout_cap: float
+    max_loss: float                     # EOD drawdown size
+    mll_lock_offset: float              # MLL stops trailing at start_balance + this
+    eval_consistency: Optional[float]   # best day <= this share of profit (evaluation)
+    funded_consistency: Optional[float] # same rule in the funded stage (for payouts)
+    min_eval_days: int
+    max_micros: int
+    payout_days: int                    # profitable days needed before a payout request
+    payout_buffer: float                # funded balance must exceed start + this to request
 
 
-TOPSTEP_50K = PropRules(
-    name="Topstep 50K", start_balance=50_000, profit_target=3_000, max_loss=2_000,
-    consistency_pct=0.5, combine_max_micros=50,
-    xfa_scaling=[(0, 20), (1_500, 30), (2_000, 50)],
-    payout_winning_days=5, payout_min_day=150, payout_pct=0.5, payout_cap=2_000,
+LUCIDFLEX_50K = PropRules(
+    name="LucidFlex 50K", start_balance=50_000, profit_target=3_000, max_loss=2_000,
+    mll_lock_offset=100, eval_consistency=0.5, funded_consistency=None, min_eval_days=2,
+    max_micros=40, payout_days=5, payout_buffer=0,
+)
+
+LUCIDPRO_50K = PropRules(
+    name="LucidPro 50K", start_balance=50_000, profit_target=3_000, max_loss=2_000,
+    mll_lock_offset=100, eval_consistency=None, funded_consistency=0.4, min_eval_days=1,
+    max_micros=40, payout_days=5, payout_buffer=2_100,
 )
 
 
 @dataclass
 class Guards:
-    daily_stop: float = 800.0          # below Topstep's optional $1,000 daily loss limit
+    daily_goal: float = 1_000.0        # no new trades once closed P&L reaches this
+    daily_cap: float = 1_500.0         # flatten at this (open + closed)
+    daily_stop: float = 800.0          # flatten at -this (open + closed)
     mll_cushion: float = 100.0         # never let a day's loss get closer than this to the MLL
     min_room: float = 150.0            # less room than this above the MLL -> stop trading
-    daily_profit_cap: float = 1_400.0  # below 50% of the $3,000 target
     max_open_micros: int = 12          # e.g. two bots at the full 6
 
 
 @dataclass
 class PropAccount:
-    rules: PropRules = field(default_factory=lambda: TOPSTEP_50K)
+    rules: PropRules = field(default_factory=lambda: LUCIDFLEX_50K)
     guards: Guards = field(default_factory=Guards)
-    phase: str = "combine"             # combine | funded | failed
+    phase: str = "evaluation"          # evaluation | funded | failed
     balance: float = 0.0
     eod_high: float = 0.0
     mll: float = 0.0
+    mll_locked: bool = False
     day_realized: float = 0.0
     day_open: float = 0.0              # unrealized, refreshed each tick by the engine
     halted: str = ""                   # why trading stopped for the day, if it did
     day_stop: float = 0.0              # today's loss limit (daily_stop, or less near the MLL)
     best_day: float = 0.0
     days: int = 0
-    winning_days: int = 0
-    payouts: list[float] = field(default_factory=list)
+    profitable_days: int = 0
     log: list[str] = field(default_factory=list)
     open_micros: dict[str, int] = field(default_factory=dict)   # bot id -> contracts held
     symbol_owner: dict[str, str] = field(default_factory=dict)  # symbol -> bot id holding it
 
     def __post_init__(self) -> None:
-        self.reset("combine")
+        self.reset("evaluation")
 
     # ---- lifecycle ----------------------------------------------------------
-    def reset(self, phase: str = "combine") -> None:
+    def reset(self, phase: str = "evaluation") -> None:
         r = self.rules
         self.phase = phase
         self.balance = self.eod_high = r.start_balance
         self.mll = r.start_balance - r.max_loss
+        self.mll_locked = False
         self.day_realized = self.day_open = self.best_day = 0.0
-        self.days = self.winning_days = 0
+        self.days = self.profitable_days = 0
         self.open_micros.clear()
-        self._start_day()
         self.symbol_owner.clear()
-        self._note(f"{'Trading Combine' if phase == 'combine' else 'Express Funded Account'} started at ${r.start_balance:,.0f}")
+        self._note(f"{r.name} {phase} started at ${r.start_balance:,.0f}")
+        self._start_day()
 
     def _start_day(self) -> None:
         g = self.guards
@@ -127,28 +136,42 @@ class PropAccount:
         return self.day_realized + self.day_open
 
     @property
+    def consistency(self) -> Optional[float]:
+        r = self.rules
+        return r.eval_consistency if self.phase == "evaluation" else r.funded_consistency
+
+    @property
     def target_needed(self) -> float:
-        """Combine profit needed, raised if the best day breaks consistency."""
-        return max(self.rules.profit_target, self.best_day / self.rules.consistency_pct)
+        """Evaluation profit needed, raised if the best day breaks consistency."""
+        c = self.consistency
+        return max(self.rules.profit_target, self.best_day / c if c else 0)
 
     @property
     def max_micros(self) -> int:
-        """Contracts allowed right now: the firm's limit, then our tighter budget."""
-        if self.phase == "combine":
-            firm = self.rules.combine_max_micros
-        else:
-            scaling = self.rules.xfa_scaling
-            firm = max((m for p, m in scaling if self.profit >= p), default=scaling[0][1])
-        return min(firm, self.guards.max_open_micros)
+        return min(self.rules.max_micros, self.guards.max_open_micros)
+
+    @property
+    def goal_reached(self) -> bool:
+        return self.day_realized >= self.guards.daily_goal
 
     @property
     def can_trade(self) -> bool:
         return self.phase != "failed" and not self.halted
 
+    @property
+    def payout_eligible(self) -> bool:
+        r = self.rules
+        if self.phase != "funded" or self.profitable_days < r.payout_days or self.profit <= 0:
+            return False
+        if self.balance < r.start_balance + r.payout_buffer:
+            return False
+        c = r.funded_consistency
+        return not c or self.best_day <= c * self.profit
+
     # ---- position budget ----------------------------------------------------
-    def request(self, bot_id: str, symbol: str, qty: int) -> int:
-        """How many of `qty` contracts this bot may add now (0 = none)."""
-        if not self.can_trade:
+    def request(self, bot_id: str, symbol: str, qty: int, adding: bool = False) -> int:
+        """How many of `qty` contracts this bot may open now (0 = none)."""
+        if not self.can_trade or (self.goal_reached and not adding):
             return 0
         owner = self.symbol_owner.get(symbol)
         if owner and owner != bot_id:
@@ -176,15 +199,16 @@ class PropAccount:
         if self.equity <= self.mll:
             self.phase = "failed"
             self._note(f"FAILED: equity ${self.equity:,.0f} touched the MLL ${self.mll:,.0f}")
-            return "maximum loss limit"
+            return "max loss limit"
         if self.halted:
             return None
         g = self.guards
         if self.day_pnl <= -self.day_stop:
             self.halted = f"daily stop -${self.day_stop:,.0f}"
-        elif self.day_pnl >= g.daily_profit_cap:
-            self.halted = f"daily profit cap +${g.daily_profit_cap:,.0f}"
-        elif self.phase == "combine" and self.profit + self.day_open >= self.target_needed:
+        elif self.day_pnl >= g.daily_cap:
+            self.halted = f"daily cap +${g.daily_cap:,.0f} locked in"
+        elif self.phase == "evaluation" and self.profit + self.day_open >= self.target_needed \
+                and self.days + 1 >= self.rules.min_eval_days:
             self.halted = "profit target reached"
         if self.halted:
             self._note(f"day halted: {self.halted}")
@@ -192,43 +216,44 @@ class PropAccount:
         return None
 
     def end_of_day(self) -> None:
-        """Roll the day: trail the MLL, score consistency, pass / pay out."""
+        """Roll the day at 16:45: move the EOD drawdown, score consistency, pass."""
         r = self.rules
         if self.phase == "failed":
             return
         day = self.day_realized
         self.days += 1
         self.best_day = max(self.best_day, day)
-        if day >= r.payout_min_day:
-            self.winning_days += 1
+        if day > 0:
+            self.profitable_days += 1
+        # EOD drawdown: trails the highest close, locks at start + offset
         self.eod_high = max(self.eod_high, self.balance)
-        self.mll = max(self.mll, min(self.eod_high - r.max_loss, r.start_balance))
+        lock = r.start_balance + r.mll_lock_offset
+        if not self.mll_locked:
+            self.mll = max(self.mll, min(self.eod_high - r.max_loss, lock))
+            self.mll_locked = self.mll >= lock
         self._note(f"day {self.days}: {'+' if day >= 0 else '-'}${abs(day):,.0f} · balance ${self.balance:,.0f} · MLL ${self.mll:,.0f}")
 
-        if self.phase == "combine" and self.profit >= self.target_needed:
-            self._note(f"PASSED the Combine in {self.days} days (+${self.profit:,.0f}) → Express Funded Account")
+        if self.phase == "evaluation" and self.profit >= self.target_needed and self.days >= r.min_eval_days:
+            self._note(f"PASSED the evaluation in {self.days} days (+${self.profit:,.0f}) → funded")
             self.reset("funded")
-        elif self.phase == "funded" and self.winning_days >= r.payout_winning_days and self.profit > 0:
-            amount = min(self.profit * r.payout_pct, r.payout_cap)
-            self.balance -= amount
-            self.payouts.append(round(amount, 2))
-            self.winning_days = 0
-            self.mll = r.start_balance
-            self._note(f"PAYOUT ${amount:,.0f} requested · MLL locked at ${self.mll:,.0f}")
+            return
+        if self.payout_eligible:
+            self._note(f"payout eligible: {self.profitable_days} profitable days, +${self.profit:,.0f}")
 
         self.day_realized = self.day_open = 0.0
         self._start_day()
 
     def snapshot(self) -> dict:
-        r = self.rules
+        r, g = self.rules, self.guards
         return {
             "firm": r.name, "phase": self.phase, "balance": round(self.balance, 2),
             "equity": round(self.equity, 2), "profit": round(self.profit, 2),
-            "target": round(self.target_needed, 2) if self.phase == "combine" else None,
-            "mll": round(self.mll, 2), "day_pnl": round(self.day_pnl, 2),
-            "daily_stop": round(self.day_stop, 2), "profit_cap": self.guards.daily_profit_cap,
-            "halted": self.halted, "best_day": round(self.best_day, 2), "days": self.days,
-            "winning_days": self.winning_days, "payout_days_needed": r.payout_winning_days,
-            "payouts": self.payouts, "open_micros": sum(self.open_micros.values()),
+            "target": round(self.target_needed, 2) if self.phase == "evaluation" else None,
+            "mll": round(self.mll, 2), "mll_locked": self.mll_locked, "day_pnl": round(self.day_pnl, 2),
+            "daily_stop": round(self.day_stop, 2), "goal": g.daily_goal, "cap": g.daily_cap,
+            "goal_reached": self.goal_reached, "halted": self.halted,
+            "best_day": round(self.best_day, 2), "consistency": self.consistency, "days": self.days,
+            "profitable_days": self.profitable_days, "payout_days": r.payout_days,
+            "payout_eligible": self.payout_eligible, "open_micros": sum(self.open_micros.values()),
             "max_micros": self.max_micros, "log": self.log[-8:][::-1],
         }

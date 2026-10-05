@@ -74,16 +74,20 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .pos { color: var(--green); } .neg { color: var(--red); }
 .note { font-size: 11px; color: var(--muted); margin: 10px 0 0; }
 
-#account { left: 16px; top: 52px; width: 260px; padding: 12px 14px; font-size: 12px; }
+#account { left: 16px; top: 52px; width: 290px; padding: 12px 14px; font-size: 12px; }
 #account .acct-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
   font-family: var(--pixel); font-size: 8px; color: #d8d0ff; gap: 8px; }
 #account .phase { padding: 3px 6px; border-radius: 4px; background: #3a2c8f; }
 #account .phase.funded { background: #12684a; color: var(--green); }
+#account .phase.evaluation { background: #3a2c8f; }
 #account .phase.failed { background: #6b1426; color: #fff; }
-#account .row { display: flex; justify-content: space-between; padding: 2px 0; font-weight: 700; gap: 8px; }
+#account .row { display: flex; justify-content: space-between; padding: 2px 0; font-weight: 700; gap: 8px; white-space: nowrap; }
 #account .row span:first-child { color: var(--muted); font-weight: 500; }
 #account .bar { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .1); margin: 2px 0 6px; overflow: hidden; }
 #account .bar i { display: block; height: 100%; background: linear-gradient(90deg, #7c5cff, var(--gold)); }
+#account .bar.day { position: relative; overflow: visible; }
+#account .bar.day i { background: linear-gradient(90deg, #2bd47f, var(--green)); border-radius: 3px; }
+#account .bar.day em { position: absolute; top: -3px; width: 2px; height: 11px; background: #fff; opacity: .7; }
 #account .halt { margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: rgba(255, 84, 112, .15); color: #ffb3c0; }
 #account button.reset { margin-top: 8px; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: var(--gold);
   color: #2a1a00; font-family: var(--pixel); font-size: 9px; cursor: pointer; }

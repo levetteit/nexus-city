@@ -46,6 +46,10 @@ class Engine:
                    for b in self.bots.values() if b.position)
 
     def _risk_check(self) -> None:
+        if self.account.goal_reached:  # daily goal hit: flat bots clock out, open trades run on
+            for bot in self.bots.values():
+                if not bot.position and bot.status == "scanning":
+                    bot.status = "off_duty"
         reason = self.account.check(self._unrealized())
         if reason:
             self._halt_all(reason)
@@ -62,7 +66,7 @@ class Engine:
         for bot in self.bots.values():
             if bot.position:
                 bot._close("account reset", self.market)
-        self.account.reset("combine")
+        self.account.reset("evaluation")
         for bot in self.bots.values():
             bot.new_session()
 
@@ -90,6 +94,7 @@ class Engine:
         bots = [b.snapshot(self.market) for b in self.bots.values()]
         return {
             "clock": self.market.clock_str,
+            "session": self.market.session,
             "vault": round(sum(b["realized"] for b in bots), 2),
             "account": self.account.snapshot(),
             "on_shift": sum(1 for b in bots if b["status"] in ("scanning", "in_trade")),

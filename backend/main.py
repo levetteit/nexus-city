@@ -63,7 +63,7 @@ def toggle(bot_id: str, action: str) -> dict:
 
 @app.post("/api/account/reset")
 def reset_account() -> dict:
-    """Start a fresh Trading Combine (e.g. after a failed one)."""
+    """Start a fresh evaluation (e.g. after a failed one)."""
     engine.reset_account()
     return engine.account.snapshot()
 
