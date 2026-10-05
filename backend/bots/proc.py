@@ -298,6 +298,8 @@ DEFAULTS = {
     "min_gap_ticks": 0,
     "walk_after": 3,            # invalidated PROCs (pointer inverses) in one session before walking away
     "exit_on_invalidation": False,   # Macre: exit only on a pointer against
+    "add_on": "proc",           # when to add 3 contracts to a winner: 'proc' | 'pointer' (MNQ's own
+                                # 3-6m pointer) | 'partner_pointer' (a pointer on the confirming market)
     "exit_min_tf": False,       # only a PROC against on the entry's timeframe or higher closes the trade
     # Entries only in these killzones (None = any time). On 21 days of real data
     # (Sep 8 - Oct 5 2026) this beat trading every session: Asia entries lost money.
@@ -443,11 +445,16 @@ class ProcBot(Bot):
                 return "pointer against (PROC)"
             if kind == "invalidated" and p is self.my_proc and self.p["exit_on_invalidation"]:
                 return "PROC invalidated"
-        for p in self._new_procs(market):   # confirmed PROCs with the trade: size up while it works
-            pos = self.position
-            if p.side == self.plan.side and pos.pnl(self.broker.mark(pos, market)) > 0 \
-                    and self.add(market, f"{p.tf}m PROC with the trade"):
-                self.last_event = f"added to {pos.qty} contracts · {p.tf}m PROC with the trade"
+        pos, side = self.position, self.plan.side
+        triggers = [f"{p.tf}m PROC with the trade" for p in self._new_procs(market) if p.side == side]
+        mode = self.p["add_on"]
+        if mode in ("pointer", "partner_pointer"):
+            eng = self.engine if mode == "pointer" else self.partner
+            if eng is not None:
+                triggers += [f"{tf}m {'MES ' if mode == 'partner_pointer' else ''}pointer with the trade"
+                             for t, k, sd, tf in eng.recent if t == eng.last_t and k == "pointer" and sd == side]
+        if triggers and pos.pnl(self.broker.mark(pos, market)) > 0 and self.add(market, triggers[0]):
+            self.last_event = f"added to {pos.qty} contracts · {triggers[0]}"
         return None
 
     def on_position_closed(self, pnl: float) -> None:

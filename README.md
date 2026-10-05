@@ -6,7 +6,7 @@ pointer strategy**. All workers share **one prop firm account** whose rules
 (Lucid Trading, LucidFlex 50K by default) they're built to pass: first the
 evaluation, then the funded stage. They watch every session from the 18:00 ET
 open to the 16:45 ET flat deadline and take new entries in the **London,
-NY AM and NY PM killzones**, aiming for **$600–$1,000 a day**. When a worker is in a trade its
+NY AM and NY PM killzones**, aiming for **$600–$1,200 a day**. When a worker is in a trade its
 building fires a light beam into the sky. When it closes a trade, gold coins (or
 red ones) roll down its road to **The Vault** in the middle of town.
 
@@ -99,7 +99,8 @@ until a PROC against them), and flatten at 16:40.
 
 | Settings | Profitable days | Total | Profit factor | Evaluations |
 |---|---|---|---|---|
-| **Defaults**: MNQ only (MES confirms), killzones London + NY AM + NY PM, pointer confirmation, swing length 6, stop after 3 losers in a row | **76%** | **+$10,173** | **2.63** | 1 passed, 0 failed |
+| **Defaults**: MNQ only (MES confirms), killzones London + NY AM + NY PM, pointer confirmation, swing length 6, stop after 3 losers in a row, $1,200 daily cap | **76%** | **+$11,847** | **2.73** | 1 passed, 0 failed |
+| Same with a $1,000 daily cap | 76% | +$10,173 | 2.63 | 1 passed, 0 failed |
 | Same, with MES and M2K bots also trading | 71% | +$10,321 | 1.86 | 1 passed, 0 failed |
 | Same, but entering in every session | 45% | −$515 | 0.97 | 0 passed, 2 failed |
 | Original settings (all sessions, PROC confirmation, swing length 2) | 48% | −$127 | 0.97 | 1 passed, 2 failed |
@@ -116,8 +117,14 @@ What the trade-level breakdown showed, and what was tried:
 - Trades closed within 15 minutes lost (chop); trades held 60+ minutes won 72%.
 - Losing days went straight to the −$800 stop without ever being up much →
   stop after 3 losing trades in a row.
+- The daily cap does most of the profit-taking. $1,200 beat $1,000 (+16%, same
+  consistency); $1,500 made more but fewer profitable days and a best day over
+  Lucid's $1,500 consistency limit.
 - Tested and rejected (worse when re-run): dropping 5m pointers, exiting only
-  on an opposite PROC of the same or higher timeframe, a 2-loss streak stop. 21 days is a small sample:
+  on an opposite PROC of the same or higher timeframe, a 2-loss streak stop,
+  adding on MNQ's own pointers. Adding on an MES pointer (`add_on:
+  "partner_pointer"`) made more money but fewer profitable days and a best day
+  over $1,500: worth re-testing as more data comes in. 21 days is a small sample:
 keep fetching data and re-running the backtest as history grows.
 
 ### Daily goal
@@ -125,7 +132,7 @@ keep fetching data and re-running the backtest as history grows.
 | | Default | What happens |
 |---|---|---|
 | Daily goal | **$600** closed profit | no new trades; open trades keep running until a pointer forms against them |
-| Daily cap | **$1,000** open + closed | flatten everything, done for the day |
+| Daily cap | **$1,200** open + closed | flatten everything, done for the day |
 | Daily stop | **−$800** open + closed | flatten everything, done for the day (smaller when the account is near its drawdown) |
 
 ### Prop firm account (`backend/account.py`)
@@ -136,7 +143,7 @@ All bots trade one shared account with LucidFlex 50K rules:
 |---|---|---|
 | Profit target | $3,000, at least 2 trading days | stop for the day once it's in hand; pass at the 16:45 close |
 | Drawdown | **End-of-day**: $2,000 below the highest *closing* balance, only moves at the close, locks at $50,100 once the account closes at $52,100 | never let a day's loss reach it (keep a $100 cushion). Equity touching it during the day is treated as a breach (the safe reading) |
-| Consistency | evaluation: best day ≤ 50% of profit; funded: none | the $1,000 cap keeps the best day well under half the $3,000 target |
+| Consistency | evaluation: best day ≤ 50% of profit; funded: none | the $1,200 cap keeps the best day under half the $3,000 target |
 | Daily loss limit | none | our own −$800 daily stop |
 | Max size | 40 micros | at most 12 micros open, 3–6 per trade |
 | Flat rule | flat by 16:45 ET, no overnight/weekend holds | flatten at 16:40 |
