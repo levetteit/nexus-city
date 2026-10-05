@@ -1,7 +1,9 @@
 # Starnet City
 
 A live 3D "trading city": each Python bot is a **worker** living in its own
-building and trading options on one underlying. When a worker is in a trade its
+building and trading one underlying: options on QQQ, SPY, IWM, NVDA and TSLA, or
+**MNQ (Micro Nasdaq) futures**. Every worker runs the **Andrew Macre pointer
+strategy** on its own candle timeframe. When a worker is in a trade its
 building fires a light beam into the sky. When it closes a trade, gold coins (or
 red ones) roll down its road to **The Vault** in the middle of town.
 
@@ -24,10 +26,10 @@ uvicorn backend.main:app --reload
 
 ```
 backend/
-  market.py      simulated intraday prices (trend/chop regimes) + Black-Scholes 0DTE option pricing
-  broker.py      PaperBroker: fills with spread + fees. Implement buy/sell/mark to go live
-  bots/base.py   the worker lifecycle: scanning → in_trade → off_duty / stopped
-  bots/strategies.py  EMA cross, VWAP trend, RSI dip/rip, range breakout
+  market.py      simulated prices + 1-minute OHLC candles, Black-Scholes 0DTE option pricing, MNQ futures
+  broker.py      PaperBroker: options (spread + fees) and futures (tick slippage + fees). Implement open/close/mark to go live
+  bots/base.py   the worker lifecycle: scanning → in_trade → off_duty / stopped / walked; stops, targets, scale-outs
+  bots/pointer.py  the Macre pointer strategy
   config.py      who lives in the city + their risk limits
   engine.py      ticks the market and every bot, builds the snapshot
   main.py        FastAPI: WebSocket /ws, REST /api/state, /api/bots/{id}/{on|off}
@@ -35,28 +37,40 @@ frontend/
   city.js        Three.js scene: buildings, beams, halos, roads, coins, bloom, labels
 ```
 
+### The pointer strategy (`backend/bots/pointer.py`)
+
+Built from Andrew Macre's publicly posted rules. "Pointer" isn't formally
+defined anywhere public, so the definitions below are an interpretation; tune
+them as you study his videos.
+
+1. **Pointer**: a candle whose wick sweeps the lowest low (or highest high) of the last 10 candles and closes back the other way with a body in that direction.
+2. **FFVG**: the *first* fair value gap (3-candle imbalance) after the pointer, in its direction. It "sponsors" the move. No FFVG within 6 candles → reset.
+3. **Entry**: price comes back and tests the FFVG → enter (calls / MNQ long for bullish, puts / MNQ short for bearish).
+4. **Stop**: just past the pointer's swept wick.
+5. **Target**: the next opposing FVG ("every pointer guarantees the move to the next FFVG"), or 2R if there isn't one at least 1R away. Half comes off there and the runner's stop moves to breakeven.
+6. **Runner**: stays on until a pointer forms against it.
+7. **Inverse**: if a candle closes through the FFVG before the test, it's an IFFVG and the pointer failed. **3 inverses → the bot walks away for the day.**
+
 ### Worker rules (every bot)
 
 | Rule | Default | Effect |
 |---|---|---|
 | Profit brake | per bot, e.g. $1,800 | stops trading for the day once it's up this much ("off duty") |
-| Max daily loss | per bot, e.g. $700 | stops trading for the day ("sent home") |
-| Take profit / stop loss | +35% / −20% of premium | exits the option |
-| Time stop | 25 min | exits stale trades |
+| Max daily loss | per bot, e.g. $700 | stops trading for the day ("sent home"). It's checked after each trade closes, so one bad trade can overshoot it |
+| Premium stop | −50% (options only) | safety net on top of the structure stop |
+| Time stop | 90 min | exits stale trades |
 | End of day | 5 min before close | flattens everything |
 
 ### Add a worker
 
 ```python
-# backend/bots/strategies.py
-class MyBot(Bot):
-    strategy_name = "my idea"
-    def signal(self, u, market):
-        return "call" if u.history[-1] > u.history[-10] else None
-
 # backend/config.py
-(MyBot, BotConfig(id="my-bot", name="MY BOT", underlying="SPY", district="LAB", color="#ff00aa")),
+(PointerBot, BotConfig(id="es-5m", name="SPY 5M", underlying="SPY", district="LAB", timeframe=5,
+                       params={"lookback": 20, "walk_after": 2}, color="#ff00aa")),
 ```
+
+For futures, set `instrument="future"` and add the symbol's dollars-per-point to
+`FUTURES_MULTIPLIER` in `broker.py` (MNQ is $2 per point).
 
 The city lays itself out automatically for however many workers you register.
 
@@ -64,7 +78,7 @@ The city lays itself out automatically for however many workers you register.
 
 Everything runs on **simulated prices with a paper broker**. To trade for real
 you'd swap `Market` for a live data feed and `PaperBroker` for a broker API
-(Alpaca, Tradier, IBKR all support options). Paper trade for a long time first:
+(Alpaca, Tradier and IBKR for options; Tradovate, NinjaTrader and IBKR for MNQ). Paper trade for a long time first:
 0DTE options lose value fast, and the spread and fees count against every trade.
-Run the simulation a few times and you'll see most of these simple strategies
-lose money once those costs are in.
+Simulated prices are a random walk, so they don't prove the strategy works
+(or that it doesn't). To judge it, backtest it on real historical candles.

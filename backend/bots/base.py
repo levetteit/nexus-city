@@ -1,15 +1,17 @@
 """Base class for every worker that lives in the city.
 
-A bot owns one building, trades options on one underlying, and follows the
-same shift rules:
+A bot owns one building, trades one underlying (options or futures), and
+follows the same shift rules:
 
-* scanning  - on shift, waiting for its strategy to fire a signal
+* scanning  - on shift, waiting for its strategy to fire a setup
 * in_trade  - holding a position (the building's light beam turns on)
 * off_duty  - hit its daily profit brake, clocked out with the money
 * stopped   - hit its daily max loss, sent home
+* walked    - the strategy told it to walk away from the market for the day
 * disabled  - turned off by you
 
-Subclasses only implement `signal()` (and optionally `exit_signal()`).
+Strategies work on closed candles of the bot's timeframe. They implement
+`on_bar()` (return an `Entry` to open a trade) and optionally `exit_on_bar()`.
 """
 from __future__ import annotations
 
@@ -18,10 +20,20 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from ..broker import Broker, Position
-from ..market import Market, Underlying
+from ..market import Bar, Market, Underlying, aggregate
 
 Event = dict
 _trade_ids = itertools.count(1)
+DONE_FOR_DAY = ("off_duty", "stopped", "walked", "disabled")
+
+
+@dataclass
+class Entry:
+    """A trade plan, in underlying prices."""
+    side: str                 # 'long' | 'short'
+    stop: float               # invalidation level
+    target: Optional[float]   # first target (scale out half here)
+    note: str = ""
 
 
 @dataclass
@@ -43,16 +55,17 @@ class BotConfig:
     id: str
     name: str
     underlying: str
-    district: str                 # label for the street sign / UI
+    district: str                  # label for the street sign / UI
+    instrument: str = "option"     # 'option' | 'future'
+    timeframe: int = 1             # candle size in minutes
     contracts: int = 2
-    profit_brake: float = 1500.0  # stop for the day once realized P&L >= this
+    profit_brake: float = 1500.0   # stop for the day once realized P&L >= this
     max_daily_loss: float = 600.0
-    take_profit_pct: float = 0.35 # +35% on the option premium
-    stop_loss_pct: float = 0.20   # -20% on the option premium
-    max_hold_min: float = 25.0    # time stop, in sim minutes
-    cooldown_min: float = 3.0     # wait after a trade closes
-    otm_steps: int = 0            # 0 = ATM strikes
+    option_stop_pct: Optional[float] = 0.5   # hard stop on option premium (safety net)
+    max_hold_min: float = 90.0     # time stop, in sim minutes
+    otm_steps: int = 0             # 0 = ATM strikes
     color: str = "#7c5cff"
+    params: dict = field(default_factory=dict)   # strategy-specific settings
 
 
 class Bot:
@@ -64,73 +77,125 @@ class Bot:
         self.emit = emit
         self.status = "scanning"
         self.position: Optional[Position] = None
+        self.plan: Optional[Entry] = None
+        self.scaled = False
         self.realized = 0.0
         self.trades: list[TradeRecord] = []
-        self._cooldown_until = 0.0
         self._opened_clock = 0.0
+        self._last_bar_count = -1
+        self._entry_underlying = 0.0
 
     # ---- strategy hooks -------------------------------------------------
-    def signal(self, u: Underlying, market: Market) -> Optional[str]:
-        """Return 'call', 'put' or None."""
+    def on_bar(self, bars: list[Bar], market: Market) -> Optional[Entry]:
+        """Called on every closed candle while flat. Return an Entry to trade."""
         raise NotImplementedError
 
-    def exit_signal(self, u: Underlying, market: Market, pos: Position) -> bool:
-        return False
+    def exit_on_bar(self, bars: list[Bar], market: Market) -> Optional[str]:
+        """Called on every closed candle while in a trade. Return a reason to exit."""
+        return None
+
+    def on_position_closed(self, pnl: float) -> None:
+        pass
+
+    def reset_day(self) -> None:
+        pass
+
+    def info(self) -> dict:
+        """Extra strategy details for the UI."""
+        return {}
 
     # ---- lifecycle ------------------------------------------------------
     def on_tick(self, market: Market) -> None:
-        if self.status in ("off_duty", "stopped", "disabled"):
+        if self.status in DONE_FOR_DAY:
             return
         u = market.underlyings[self.cfg.underlying]
         if self.position:
-            self._manage(u, market)
-        elif market.clock_min >= self._cooldown_until and market.minutes_to_close > 10:
-            kind = self.signal(u, market)
-            if kind:
-                self._open(kind, u, market)
+            self._manage_tick(u, market)
 
-    def _open(self, kind: str, u: Underlying, market: Market) -> None:
-        strike = u.atm_strike(kind, self.cfg.otm_steps)
-        self.position = self.broker.buy(self.cfg.underlying, strike, kind, self.cfg.contracts, market)
+        new_bar = u.bar_count != self._last_bar_count and u.bar_count % self.cfg.timeframe == 0
+        if not new_bar or self.status in DONE_FOR_DAY:
+            return
+        self._last_bar_count = u.bar_count
+        bars = self._candles(u)
+        if self.position:
+            reason = self.exit_on_bar(bars, market)
+            if reason:
+                self._close(reason, market)
+        elif market.minutes_to_close > 10:
+            entry = self.on_bar(bars, market)
+            if entry and self.status not in DONE_FOR_DAY:
+                self._open(entry, u, market)
+
+    def _candles(self, u: Underlying) -> list[Bar]:
+        tf = self.cfg.timeframe
+        n = (len(u.bars) // tf) * tf
+        return aggregate(u.bars[len(u.bars) - n:], tf)
+
+    def _open(self, entry: Entry, u: Underlying, market: Market) -> None:
+        if self.cfg.instrument == "future":
+            self.position = self.broker.open(self.cfg.underlying, entry.side, self.cfg.contracts, market)
+        else:
+            kind = "call" if entry.side == "long" else "put"
+            strike = u.atm_strike(kind, self.cfg.otm_steps)
+            self.position = self.broker.open(self.cfg.underlying, kind, self.cfg.contracts, market, strike)
+        self.plan = entry
+        self.scaled = False
+        self._entry_underlying = u.price
         self._opened_clock = market.clock_min
         self.status = "in_trade"
         self.emit({"type": "trade_open", "bot": self.cfg.id, "contract": self.position.label,
-                   "qty": self.position.qty, "entry": round(self.position.entry, 2)})
+                   "qty": self.position.qty, "entry": round(self.position.entry, 2), "note": entry.note})
 
-    def _manage(self, u: Underlying, market: Market) -> None:
+    def _manage_tick(self, u: Underlying, market: Market) -> None:
+        pos, plan = self.position, self.plan
+        long = plan.side == "long"
+        price = u.price
+        if (long and price <= plan.stop) or (not long and price >= plan.stop):
+            return self._close("stop hit" if not self.scaled else "runner stopped", market)
+        if plan.target is not None and not self.scaled and ((long and price >= plan.target) or (not long and price <= plan.target)):
+            if pos.qty > 1:
+                self._scale_out(pos.qty // 2, market)
+            else:
+                return self._close("target hit", market)
+        if not pos.is_future and self.cfg.option_stop_pct is not None:
+            if self.broker.mark(pos, market) / pos.entry - 1 <= -self.cfg.option_stop_pct:
+                return self._close("premium stop", market)
+        if market.clock_min - self._opened_clock >= self.cfg.max_hold_min:
+            return self._close("time stop", market)
+        if market.minutes_to_close <= 5:
+            return self._close("end of day", market)
+
+    def _record(self, qty: int, exit_px: float, reason: str, market: Market) -> TradeRecord:
         pos = self.position
-        mark = self.broker.mark(pos, market)
-        change = mark / pos.entry - 1
-        held = market.clock_min - self._opened_clock
-        reason = None
-        if change >= self.cfg.take_profit_pct:
-            reason = "take profit"
-        elif change <= -self.cfg.stop_loss_pct:
-            reason = "stop loss"
-        elif held >= self.cfg.max_hold_min:
-            reason = "time stop"
-        elif market.minutes_to_close <= 5:
-            reason = "end of day"
-        elif self.exit_signal(u, market, pos):
-            reason = "signal exit"
-        if reason:
-            self._close(reason, market)
+        pnl = pos.pnl(exit_px, qty)
+        self.realized += pnl
+        rec = TradeRecord(next(_trade_ids), self.cfg.id, pos.label, qty, round(pos.entry, 2),
+                          round(exit_px, 2), round(pnl, 2), reason, pos.opened_at, market.clock_str)
+        self.trades.append(rec)
+        return rec
+
+    def _scale_out(self, qty: int, market: Market) -> None:
+        """Take part of the position off at the first target and move the runner's stop to breakeven."""
+        rec = self._record(qty, self.broker.close(self.position, market), "target · scaled out", market)
+        self.position.qty -= qty
+        self.scaled = True
+        self.plan.stop = self._entry_underlying
+        self.emit({"type": "trade_close", "bot": self.cfg.id, "pnl": rec.pnl, "reason": rec.reason,
+                   "contract": rec.contract, "status": self.status, "partial": True})
 
     def _close(self, reason: str, market: Market) -> None:
         pos = self.position
-        exit_px = self.broker.sell(pos, market)
-        pnl = (exit_px - pos.entry) * pos.qty * 100
-        self.realized += pnl
-        rec = TradeRecord(next(_trade_ids), self.cfg.id, pos.label, pos.qty, round(pos.entry, 2),
-                          round(exit_px, 2), round(pnl, 2), reason, pos.opened_at, market.clock_str)
-        self.trades.append(rec)
+        rec = self._record(pos.qty, self.broker.close(pos, market), reason, market)
+        total = sum(t.pnl for t in self.trades if t.opened_at == pos.opened_at and t.contract == pos.label)
         self.position = None
-        self._cooldown_until = market.clock_min + self.cfg.cooldown_min
+        self.plan = None
         self.status = "scanning"
-        if self.realized >= self.cfg.profit_brake:
-            self.status = "off_duty"
-        elif self.realized <= -self.cfg.max_daily_loss:
-            self.status = "stopped"
+        self.on_position_closed(total)
+        if self.status not in DONE_FOR_DAY:
+            if self.realized >= self.cfg.profit_brake:
+                self.status = "off_duty"
+            elif self.realized <= -self.cfg.max_daily_loss:
+                self.status = "stopped"
         self.emit({"type": "trade_close", "bot": self.cfg.id, "pnl": rec.pnl, "reason": reason,
                    "contract": rec.contract, "status": self.status})
 
@@ -145,6 +210,7 @@ class Bot:
     def new_session(self) -> None:
         self.realized = 0.0
         self.trades.clear()
+        self.reset_day()
         if self.status != "disabled":
             self.status = "scanning"
 
@@ -154,15 +220,20 @@ class Bot:
         pos = None
         if self.position:
             mark = self.broker.mark(self.position, market)
-            unreal = (mark - self.position.entry) * self.position.qty * 100
+            unreal = self.position.pnl(mark)
             pos = {"contract": self.position.label, "qty": self.position.qty,
-                   "entry": round(self.position.entry, 2), "mark": round(mark, 2)}
+                   "entry": round(self.position.entry, 2), "mark": round(mark, 2),
+                   "stop": round(self.plan.stop, 2),
+                   "target": round(self.plan.target, 2) if self.plan.target is not None else None,
+                   "note": self.plan.note}
         wins = sum(1 for t in self.trades if t.pnl > 0)
         return {
             "id": self.cfg.id, "name": self.cfg.name, "underlying": self.cfg.underlying,
             "district": self.cfg.district, "strategy": self.strategy_name, "color": self.cfg.color,
+            "instrument": self.cfg.instrument, "timeframe": self.cfg.timeframe,
             "status": self.status, "realized": round(self.realized, 2), "unrealized": round(unreal, 2),
             "trades": len(self.trades), "wins": wins, "position": pos,
             "profit_brake": self.cfg.profit_brake, "max_daily_loss": self.cfg.max_daily_loss,
+            "info": self.info(),
             "recent": [t.__dict__ for t in self.trades[-8:]][::-1],
         }

@@ -334,6 +334,7 @@ const STATUS_TEXT = {
   in_trade: (b) => `in trade · ${b.position?.contract ?? ""}`,
   off_duty: () => "profit brake hit · off duty",
   stopped: () => "max loss hit · sent home",
+  walked: (b) => `${b.info?.inverses ?? 3} pointer inverses · walked away`,
   disabled: () => "turned off",
 };
 const money = (v) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -346,15 +347,15 @@ function applyState(s) {
   for (const bot of s.bots) {
     const b = buildings.get(bot.id);
     if (!b) continue;
-    const statusCls = bot.status === "stopped" || bot.status === "disabled" ? "stopped" : bot.status === "off_duty" ? "off" : "";
+    const statusCls = ["stopped", "walked", "disabled"].includes(bot.status) ? "stopped" : bot.status === "off_duty" ? "off" : "";
     const star = bot.id === top.id && top.realized > 0 ? "★ " : "";
     const live = bot.status === "in_trade" ? ` <span class="earned ${bot.unrealized < 0 ? "neg" : ""}">(${money(bot.unrealized)} open)</span>` : "";
     b.tag.innerHTML = `<div class="name">${star}${bot.name}</div><div class="status ${statusCls}">${STATUS_TEXT[bot.status](bot)}</div><div class="earned ${bot.realized < 0 ? "neg" : ""}">earned ${money(bot.realized)}${live}</div>`;
     b.tag.classList.toggle("dim", bot.status === "disabled");
     b.status = bot.status;
-    const dark = bot.status === "disabled" || bot.status === "stopped";
+    const dark = ["disabled", "stopped", "walked"].includes(bot.status);
     b.mats.forEach((m) => (m.emissiveIntensity = dark ? 0.1 : bot.status === "off_duty" ? 0.35 : 0.6));
-    b.haloMat.color.set(bot.status === "stopped" ? "#ff4d6d" : bot.status === "off_duty" ? "#ffd34d" : "#ffffff");
+    b.haloMat.color.set(bot.status === "stopped" || bot.status === "walked" ? "#ff4d6d" : bot.status === "off_duty" ? "#ffd34d" : "#ffffff");
   }
 
   const vEl = vaultTag.querySelector(".v");
@@ -384,13 +385,17 @@ function renderWorker() {
   const enabled = bot.status !== "disabled";
   const pos = bot.position
     ? `<div class="row"><span>Holding</span><span>${bot.position.qty}× ${bot.position.contract}</span></div>
-       <div class="row"><span>Entry → mark</span><span>$${bot.position.entry} → $${bot.position.mark}</span></div>
+       <div class="row"><span>Entry → mark</span><span>${bot.position.entry} → ${bot.position.mark}</span></div>
+       <div class="row"><span>Stop / target (${bot.underlying})</span><span>${bot.position.stop} / ${bot.position.target ?? "—"}</span></div>
        <div class="row"><span>Open P&L</span><span class="${bot.unrealized >= 0 ? "pos" : "neg"}">${money(bot.unrealized)}</span></div>`
     : "";
   const trades = bot.recent.map((t) => `<tr><td>${t.closed_at}</td><td>${t.contract}</td><td>${t.reason}</td><td class="${t.pnl >= 0 ? "pos" : "neg"}">${money(t.pnl)}</td></tr>`).join("");
   document.getElementById("worker-body").innerHTML = `
     <h3 style="color:${bot.color}">${bot.name}</h3>
-    <div class="row"><span>Strategy</span><span>${bot.strategy}</span></div>
+    <div class="row"><span>Strategy</span><span>${bot.strategy} · ${bot.timeframe}m candles</span></div>
+    <div class="row"><span>Instrument</span><span>${bot.instrument === "future" ? `${bot.underlying} futures` : `${bot.underlying} options`}</span></div>
+    ${bot.info?.setup ? `<div class="row"><span>Setup</span><span style="text-align:right;max-width:65%">${bot.info.setup}</span></div>` : ""}
+    ${bot.info?.walk_after ? `<div class="row"><span>Pointer inverses</span><span>${bot.info.inverses} / ${bot.info.walk_after}</span></div>` : ""}
     <div class="row"><span>Status</span><span>${STATUS_TEXT[bot.status](bot)}</span></div>
     <div class="row"><span>Earned today</span><span class="${bot.realized >= 0 ? "pos" : "neg"}">${money(bot.realized)}</span></div>
     <div class="row"><span>Trades / wins</span><span>${bot.trades} / ${bot.wins}</span></div>

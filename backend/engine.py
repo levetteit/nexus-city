@@ -15,8 +15,8 @@ class Engine:
         self.bots: dict[str, Bot] = {}
         for cls, cfg in WORKERS:
             self.bots[cfg.id] = cls(cfg, self.broker, self.events.append)
-        # warm up price history so indicators work from the first tick
-        for _ in range(60):
+        # warm up ~2.5 hours of candles so every timeframe has history from the first tick
+        for _ in range(600):
             for u in self.market.underlyings.values():
                 u.step(SIM_MINUTES_PER_TICK)
         for u in self.market.underlyings.values():
