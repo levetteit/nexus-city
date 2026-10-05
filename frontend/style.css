@@ -26,7 +26,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #tickers { display: flex; gap: 14px; overflow: hidden; flex: 1; font-size: 12px; font-weight: 700; white-space: nowrap; }
 #tickers .up { color: var(--green); }
 #tickers .down { color: var(--red); }
-#clock { font-family: var(--pixel); font-size: 12px; color: #c9bfff; }
+#clock { font-family: var(--pixel); font-size: 12px; color: #c9bfff; white-space: nowrap; }
+#clock .live { color: #ff5470; text-shadow: 0 0 8px rgba(255, 84, 112, .8); font-weight: 400; }
+#clock small { font-family: Inter, sans-serif; font-size: 10px; color: var(--muted); }
 #conn { position: fixed; top: 52px; left: 50%; transform: translateX(-50%); background: var(--red); color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 12px; z-index: 6; }
 
 /* ---------- floating 3D labels ---------- */

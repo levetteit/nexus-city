@@ -46,6 +46,25 @@ def fetch(yahoo_symbol: str, days: int) -> dict[int, tuple]:
     return rows
 
 
+def fetch_recent(yahoo_symbol: str, rng: str = "1d") -> dict[int, tuple]:
+    """Latest closed 1m candles (Yahoo's CME futures data runs ~10 minutes behind)."""
+    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}?interval=1m&range={rng}&includePrePost=true"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.load(resp)
+    result = (data.get("chart", {}).get("result") or [None])[0]
+    rows: dict[int, tuple] = {}
+    if result and result.get("timestamp"):
+        q = result["indicators"]["quote"][0]
+        for i, ts in enumerate(result["timestamp"]):
+            o, h, l, c = q["open"][i], q["high"][i], q["low"][i], q["close"][i]
+            if None not in (o, h, l, c) and ts % 60 == 0:
+                rows[ts] = (o, h, l, c)
+    if rows:
+        rows.pop(max(rows))   # the newest candle may still be forming
+    return rows
+
+
 def merge_write(path: str, rows: dict[int, tuple]) -> int:
     if os.path.exists(path):
         with open(path, newline="") as f:

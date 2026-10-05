@@ -1,4 +1,7 @@
-"""Run with:  uvicorn backend.main:app --reload   then open http://localhost:8000"""
+"""Run with:  uvicorn backend.main:app --reload   then open http://localhost:8000
+
+STARNET_MODE=live runs the city on real candles with paper trading (see live.py).
+"""
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +19,9 @@ from .config import TICK_SECONDS
 from .bots.pointer import SIGNALS
 from .engine import Engine
 
-engine = Engine()
+MODE = os.getenv("STARNET_MODE", "sim")
+POLL_SECONDS = 20
+engine = Engine() if MODE != "live" else None   # live mode builds its engine at startup (needs a download)
 clients: set[WebSocket] = set()
 
 
@@ -34,13 +39,47 @@ async def broadcast(msg: dict) -> None:
 async def run_city() -> None:
     while True:
         events = engine.tick()
-        await broadcast({"type": "tick", "state": engine.snapshot(), "events": events})
+        await broadcast({"type": "tick", "state": state(), "events": events})
         await asyncio.sleep(TICK_SECONDS)
+
+
+async def run_live() -> None:
+    """Poll for new real candles and step the bots through each one."""
+    global engine
+    from . import live
+    market = await asyncio.to_thread(live.LiveMarket)
+    engine = Engine(market=market, account=live.load_account())
+    while market.i + 1 < market.warm_until:   # read history, don't trade it
+        engine.tick(trade=False)
+    last_poll = 0.0
+    while True:
+        loop = asyncio.get_running_loop()
+        if loop.time() - last_poll >= POLL_SECONDS:
+            last_poll = loop.time()
+            try:
+                await asyncio.to_thread(market.poll)
+            except Exception as exc:   # network hiccup: try again next poll
+                print(f"live poll failed: {exc}")
+        events = []
+        while market.has_next():
+            new = engine.tick()
+            live.record(engine, new)
+            events += new
+        await broadcast({"type": "tick", "state": state(), "events": events})
+        await asyncio.sleep(1)
+
+
+def state() -> dict:
+    snap = engine.snapshot()
+    snap["mode"] = MODE
+    if MODE == "live":
+        snap["delay_min"] = round(engine.market.delay_minutes, 1)
+    return snap
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(run_city())
+    task = asyncio.create_task(run_live() if MODE == "live" else run_city())
     yield
     task.cancel()
 
@@ -49,8 +88,10 @@ app = FastAPI(title="Starnet trading city", lifespan=lifespan)
 
 
 @app.get("/api/state")
-def state() -> dict:
-    return engine.snapshot()
+def get_state() -> dict:
+    if engine is None:
+        raise HTTPException(503, "loading live market data…")
+    return state()
 
 
 @app.post("/api/bots/{bot_id}/{action}")
@@ -105,7 +146,8 @@ async def tradingview(request: Request) -> dict:
 async def ws_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     clients.add(ws)
-    await ws.send_json({"type": "tick", "state": engine.snapshot(), "events": []})
+    if engine is not None:
+        await ws.send_json({"type": "tick", "state": state(), "events": []})
     try:
         while True:
             await ws.receive_text()

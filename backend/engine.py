@@ -36,9 +36,15 @@ class Engine:
             for u in self.market.underlyings.values():
                 u.open_price = u.price
 
-    def tick(self) -> list[dict]:
+    def tick(self, trade: bool = True) -> list[dict]:
+        """Advance one step. `trade=False` replays history into the bots without trading."""
         before = self.market.day
         self.market.step()
+        if not trade:
+            for bot in self.bots.values():
+                bot.on_tick(self.market, trade=False)
+            self.events.clear()
+            return []
         if self.market.day != before:
             phase = self.account.phase
             self.account.end_of_day()

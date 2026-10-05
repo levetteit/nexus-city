@@ -376,7 +376,9 @@ function applyState(s) {
   vEl.textContent = money(s.vault);
   vEl.classList.toggle("neg", s.vault < 0);
   vaultTag.querySelector(".s").textContent = `${s.on_shift} workers on shift · tap for payroll`;
-  document.getElementById("clock").textContent = `${s.session} · ${s.clock} ET`;
+  document.getElementById("clock").innerHTML = s.mode === "live"
+    ? `<b class="live">● LIVE PAPER</b> ${s.session} · ${s.clock} ET <small>(${Math.round(s.delay_min)} min behind)</small>`
+    : `SIM · ${s.session} · ${s.clock} ET`;
   document.getElementById("tickers").innerHTML = Object.entries(s.tickers)
     .map(([sym, t]) => `<span>${sym} ${t.price.toFixed(2)} <b class="${t.change_pct >= 0 ? "up" : "down"}">${t.change_pct >= 0 ? "+" : ""}${t.change_pct.toFixed(2)}%</b></span>`).join("");
 

@@ -114,13 +114,14 @@ class Bot:
 
     uses_htf = True   # build the bot's own-timeframe candles for on_bar/exit_on_bar
 
-    def on_tick(self, market: Market) -> None:
+    def on_tick(self, market: Market, trade: bool = True) -> None:
+        """`trade=False` only reads the candle (used to warm up on history before going live)."""
         u = market.underlyings[self.cfg.underlying]
         new_bar = bool(u.bars) and u.bar_count != self._last_bar_count
         if new_bar:
             self._last_bar_count = u.bar_count
             self.observe(u.bars[-1], market)
-        if self.status in DONE_FOR_DAY:
+        if not trade or self.status in DONE_FOR_DAY:
             return
         if self.position:
             self._manage_tick(u, market)

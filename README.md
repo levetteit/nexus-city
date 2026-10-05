@@ -37,6 +37,7 @@ backend/
   config.py      who lives in the city
   backtest.py    replay real 1m candles through the bots; walk-forward optimizer
   fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
+  live.py        live paper trading on real (10-min delayed) candles, with trade logs
   engine.py      ticks the market and every bot, builds the snapshot
   main.py        FastAPI: WebSocket /ws, REST /api/state, /api/bots/{id}/{on|off}
 frontend/
@@ -99,7 +100,8 @@ until a PROC against them), and flatten at 16:40.
 
 | Settings | Profitable days | Total | Profit factor | Evaluations |
 |---|---|---|---|---|
-| **Defaults**: MNQ only (MES confirms), killzones London + NY AM + NY PM, pointer confirmation, swing length 6, stop after 3 losers in a row, $1,200 daily cap | **76%** | **+$11,847** | **2.73** | 1 passed, 0 failed |
+| **Defaults**: MNQ only (MES confirms), killzones London + NY AM + NY PM, pointer confirmation, swing length 6, stop after 3 losers in a row, $1,200 daily cap, −$600 daily stop | **71%** | **+$13,224** | **2.9** | 1 passed, 0 failed |
+| Same with a −$800 daily stop | 76% | +$11,847 | 2.73 | 1 passed, 0 failed |
 | Same with a $1,000 daily cap | 76% | +$10,173 | 2.63 | 1 passed, 0 failed |
 | Same, with MES and M2K bots also trading | 71% | +$10,321 | 1.86 | 1 passed, 0 failed |
 | Same, but entering in every session | 45% | −$515 | 0.97 | 0 passed, 2 failed |
@@ -141,7 +143,7 @@ keep fetching data and re-running the backtest as history grows.
 |---|---|---|
 | Daily goal | **$600** closed profit | no new trades; open trades keep running until a pointer forms against them |
 | Daily cap | **$1,200** open + closed | flatten everything, done for the day |
-| Daily stop | **−$800** open + closed | flatten everything, done for the day (smaller when the account is near its drawdown) |
+| Daily stop | **−$600** open + closed | flatten everything, done for the day (smaller when the account is near its drawdown) |
 
 ### Prop firm account (`backend/account.py`)
 
@@ -152,7 +154,7 @@ All bots trade one shared account with LucidFlex 50K rules:
 | Profit target | $3,000, at least 2 trading days | stop for the day once it's in hand; pass at the 16:45 close |
 | Drawdown | **End-of-day**: $2,000 below the highest *closing* balance, only moves at the close, locks at $50,100 once the account closes at $52,100 | never let a day's loss reach it (keep a $100 cushion). Equity touching it during the day is treated as a breach (the safe reading) |
 | Consistency | evaluation: best day ≤ 50% of profit; funded: none | the $1,200 cap keeps the best day under half the $3,000 target |
-| Daily loss limit | none | our own −$800 daily stop |
+| Daily loss limit | none | our own −$600 daily stop |
 | Max size | 40 micros | at most 12 micros open, 3–6 per trade |
 | Flat rule | flat by 16:45 ET, no overnight/weekend holds | flatten at 16:40 |
 
@@ -184,6 +186,29 @@ To add another micro (e.g. MYM), add it to `Market.underlyings` and its dollars
 per point to `FUTURES_MULTIPLIER` in `broker.py` (MNQ $2, MES $5, M2K $5, MYM $0.50).
 
 The city lays itself out automatically for however many workers you register.
+
+## Live paper trading (`backend/live.py`)
+
+Run the city on real markets with paper money:
+
+```bash
+STARNET_MODE=live uvicorn backend.main:app
+```
+
+- Real MNQ / MES / M2K candles (via NQ=F / ES=F / RTY=F on Yahoo) step the
+  bots minute by minute. The header shows **● LIVE PAPER** and how far behind
+  the data is: Yahoo's free CME feed is **~10 minutes delayed**, so this is a
+  forward test, not something to mirror trades from.
+- On startup the bots read the last 2 days of candles without trading, so
+  their FFVG / PROC structure is ready before the first live candle.
+- Every closed trade goes to `data/paper_trades.csv`, every finished day to
+  `data/paper_days.csv`, and the prop account to `data/paper_account.json`, so
+  a restart resumes the same evaluation (open positions aren't carried over).
+- Leave it running on a small server or always-on computer for a few weeks:
+  forward-test results can't be overfit, unlike backtests.
+
+Going from paper to a real Lucid account needs a real-time data feed and order
+routing through the platform your account uses (see *Going live* below).
 
 ## Backtest and optimize on real data (`backend/backtest.py`)
 

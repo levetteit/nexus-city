@@ -23,7 +23,7 @@ Our safety layer (`Guards`), tighter than the firm so we never touch its lines:
     (open trades still run until a pointer forms against them)
   * daily cap $1,200: flatten everything at +$1,200 (open + closed); this also
     keeps the best day inside the 50% consistency rule ($1,500 max)
-  * daily stop -$800 (open + closed), shrunk on days the account starts close
+  * daily stop -$600 (open + closed), shrunk on days the account starts close
     to the MLL so a loss can never reach it (we keep a $250 cushion: real
     1-minute candles can move a few hundred dollars against 12 micros)
   * when today's stop is under $500 (little room left), only one 3-contract
@@ -71,7 +71,7 @@ LUCIDPRO_50K = PropRules(
 class Guards:
     daily_goal: float = 600.0          # no new trades once closed P&L reaches this
     daily_cap: float = 1_200.0         # flatten at this (open + closed); tested best on real data
-    daily_stop: float = 800.0          # flatten at -this (open + closed)
+    daily_stop: float = 600.0          # flatten at -this (open + closed); smaller losing days, tested on real data
     mll_cushion: float = 250.0         # never let a day's loss get closer than this to the MLL
     min_room: float = 150.0            # less room than this above the MLL -> stop trading
     max_loss_streak: int | None = 3      # stop for the day after this many losing trades in a row
