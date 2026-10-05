@@ -292,16 +292,18 @@ class ProcEngine:
 
 DEFAULTS = {
     "pointer_tfs": [3, 4, 5, 6],
-    "pivot_len": 2,             # swing = low/high beyond this many candles each side
+    "pivot_len": 6,             # swing = low/high beyond this many candles each side (your chart: 6)
     "sweep_proximity": 6,       # your chart's setting: FFVG within 6 candles of the swing
     "use_iffvg": True,          # your chart has Untapped IFFVGs on
     "min_gap_ticks": 0,
     "walk_after": 3,            # invalidated PROCs (pointer inverses) in one session before walking away
     "exit_on_invalidation": False,   # Macre: exit only on a pointer against
-    "killzones": None,          # e.g. ["LONDON", "NY AM"]: only enter during these
+    # Entries only in these killzones (None = any time). On 21 days of real data
+    # (Sep 8 - Oct 5 2026) this beat trading every session: Asia entries lost money.
+    "killzones": ["LONDON", "NY AM", "NY PM"],
     "require_liquidity_sweep": False,  # PROC must take an Asia/London/NY high or low
     "confirm_with": None,       # partner symbol, e.g. "MES" for an MNQ bot
-    "confirm_mode": "proc",     # 'proc' | 'pointer' | 'tap' | None (off)
+    "confirm_mode": "pointer",  # 'proc' | 'pointer' | 'tap' | None (off); 'pointer' tested best
     "confirm_window": 6,        # minutes before/after the PROC for the partner to agree
     "signals": "both",          # TradingView webhook orders still accepted
 }

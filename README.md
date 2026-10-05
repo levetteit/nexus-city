@@ -4,9 +4,9 @@ A live 3D "trading city": each Python bot is a **worker** living in its own
 building and trading micro futures (**MNQ, MES, M2K**) with the **Andrew Macre
 pointer strategy**. All workers share **one prop firm account** whose rules
 (Lucid Trading, LucidFlex 50K by default) they're built to pass: first the
-evaluation, then the funded stage. They trade **every session** (Asia, London,
-New York) from the 18:00 ET open to the 16:45 ET flat deadline, aiming for
-**$600–$1,000 a day**. When a worker is in a trade its
+evaluation, then the funded stage. They watch every session from the 18:00 ET
+open to the 16:45 ET flat deadline and take new entries in the **London,
+NY AM and NY PM killzones**, aiming for **$600–$1,000 a day**. When a worker is in a trade its
 building fires a light beam into the sky. When it closes a trade, gold coins (or
 red ones) roll down its road to **The Vault** in the middle of town.
 
@@ -90,9 +90,23 @@ opposite sides of the same contract.
 ### Trading day and sessions
 
 The simulated day matches the futures day under Lucid's flat rule: **18:00 ET
-open → Asia → London (03:00) → New York (09:30) → flat by 16:45 ET**. Bots trade
-whenever the market is open, in every session, and flatten at 16:40. Volatility
-is lowest in Asia, higher in London, and highest at the New York open.
+open → Asia → London (03:00) → New York (09:30) → flat by 16:45 ET**. Bots track
+market structure the whole time but only open trades in the killzones London
+02:00–05:00, NY AM 09:30–11:00 and NY PM 14:00–16:00 ET (open trades run on
+until a PROC against them), and flatten at 16:40.
+
+### Real-data results (Sep 8 – Oct 5 2026, 21 days of 1m NQ/ES/RTY)
+
+| Settings | Profitable days | Total | Profit factor | Evaluations |
+|---|---|---|---|---|
+| Defaults (killzones London + NY AM + NY PM, MNQ/MES pointer confirmation, swing length 6) | **71%** | **+$10,321** | 1.86 | 1 passed, 0 failed |
+| Same, but entering in every session | 45% | −$515 | 0.97 | 0 passed, 2 failed |
+| Original settings (all sessions, PROC confirmation, swing length 2) | 48% | −$127 | 0.97 | 1 passed, 2 failed |
+
+On the last 6 days, which the optimizer never tuned on, the defaults had 71%
+profitable days and +$3,202. Win rate is ~40%: winners average ~2.8× losers
+because trades only close on a PROC against them. 21 days is a small sample:
+keep fetching data and re-running the backtest as history grows.
 
 ### Daily goal
 
