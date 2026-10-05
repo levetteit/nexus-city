@@ -90,6 +90,7 @@ class PropAccount:
     days: int = 0
     profitable_days: int = 0
     log: list[str] = field(default_factory=list)
+    day_history: list[tuple[str, float]] = field(default_factory=list)   # (phase, closed P&L) per day
     open_micros: dict[str, int] = field(default_factory=dict)   # bot id -> contracts held
     symbol_owner: dict[str, str] = field(default_factory=dict)  # symbol -> bot id holding it
 
@@ -221,6 +222,7 @@ class PropAccount:
         if self.phase == "failed":
             return
         day = self.day_realized
+        self.day_history.append((self.phase, round(day, 2)))
         self.days += 1
         self.best_day = max(self.best_day, day)
         if day > 0:

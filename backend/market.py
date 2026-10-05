@@ -30,6 +30,11 @@ SESSIONS = [
 MINUTES_PER_YEAR = 252 * 390     # trading minutes
 
 
+def session_at(clock_min: float) -> tuple:
+    """(start, label, vol multiplier) of the session at `clock_min`."""
+    return [s for s in SESSIONS if clock_min >= s[0]][-1]
+
+
 def _norm_cdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
@@ -156,6 +161,7 @@ class Market:
     def __init__(self, sim_minutes_per_tick: float = 0.25) -> None:
         self.sim_minutes_per_tick = sim_minutes_per_tick
         self.clock_min = float(SESSION_OPEN_MIN)
+        self.day = 0
         self.underlyings: dict[str, Underlying] = {
             "MNQ": Underlying("MNQ", 24500.0, iv=0.20, vol=0.22, tick_size=0.25),  # Micro Nasdaq-100
             "MES": Underlying("MES", 6850.0, iv=0.15, vol=0.17, tick_size=0.25),   # Micro S&P 500
@@ -174,7 +180,7 @@ class Market:
 
     @property
     def _session(self) -> tuple:
-        return [s for s in SESSIONS if self.clock_min >= s[0]][-1]
+        return session_at(self.clock_min)
 
     @property
     def session(self) -> str:
@@ -182,6 +188,7 @@ class Market:
 
     def new_session(self) -> None:
         self.clock_min = float(SESSION_OPEN_MIN)
+        self.day += 1
         for u in self.underlyings.values():
             u.open_price = u.price
 

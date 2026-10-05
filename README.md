@@ -35,6 +35,7 @@ backend/
   bots/base.py   the worker lifecycle: scanning → in_trade → off_duty / stopped / walked; 3 → 6 contract sizing
   bots/pointer.py  the Macre pointer strategy
   config.py      who lives in the city
+  backtest.py    replay real 1m candles through the bots; walk-forward optimizer
   engine.py      ticks the market and every bot, builds the snapshot
   main.py        FastAPI: WebSocket /ws, REST /api/state, /api/bots/{id}/{on|off}
 frontend/
@@ -52,6 +53,37 @@ Untapped FFVGs & IFFVGs, Troop Toolkit).
 3. **Entry**: price comes back and tests the FFVG without closing through it → enter (calls / MNQ long for bullish, puts / MNQ short for bearish).
 4. **Exit**: there is **no stop loss and no take-profit**. The trade stays on until a pointer forms against it. The next opposing FVG ("every pointer guarantees the move to the next FFVG") is shown as the expected move only.
 5. **Inverse**: if a candle closes through the FFVG before the test, it's an IFFVG and the pointer failed. **3 inverses → the bot walks away for the day.**
+
+## Backtest and optimize on real data (`backend/backtest.py`)
+
+The live city runs on simulated, random prices, so it can't tell you if the
+strategy works. The backtester replays **real 1-minute candles** through the
+exact same bots, prop account rules and daily goal/cap/stop.
+
+1. **Export data from TradingView:** open a 1-minute chart (MNQ1!, MES1!, M2K1!),
+   scroll back as far as your plan loads, then chart menu → *Export chart data…*.
+   Put the symbol in each file name: `data/MNQ_1m.csv`, `data/MES_1m.csv`, `data/M2K_1m.csv`.
+2. **Backtest the current settings:**
+   ```bash
+   python -m backend.backtest data/*.csv
+   ```
+   You get days traded, **% profitable days**, days that reached the $600 goal,
+   win rate, average win/loss, profit factor, best/worst day, evaluations passed
+   and failed, and P&L by session.
+3. **Optimize:**
+   ```bash
+   python -m backend.backtest data/*.csv --optimize --out results.json
+   ```
+   It tries ~190 combinations of strategy settings (pointer sweep rule, liquidity
+   sweep of the previous session's high/low, which sessions to trade, FFVG and
+   test windows, walk-away count, minimum FFVG size) on the **first 70% of days**,
+   then re-runs the top 5 on the **last 30%** they never saw. Pick settings that
+   hold up on those unseen days, not the ones with the best tuned numbers.
+4. Put the winning settings in `params` in `backend/config.py`.
+
+More history gives more reliable answers; a few weeks of 1-minute data is a
+minimum. `--make-sample FOLDER` writes synthetic files if you just want to see
+it run.
 
 ## TradingView alerts (use your real indicators)
 

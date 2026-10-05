@@ -77,6 +77,10 @@ DEFAULTS = {
     "ffvg_window": 15,      # 1m candles after the pointer to find its FFVG
     "test_window": 20,      # 1m candles after the FFVG to get the test
     "walk_after": 3,        # pointer inverses before walking away
+    # confluence filters (off by default; the optimizer in backtest.py tries them)
+    "sessions": None,           # e.g. ["LONDON", "NEW YORK"]: only enter in these sessions
+    "liquidity_sweep": False,   # pointer must sweep a previous session's high/low and close back
+    "min_gap_ticks": 0,         # ignore FFVGs smaller than this many ticks
 }
 
 SIGNALS = {
@@ -102,6 +106,8 @@ class PointerBot(Bot):
         super().__init__(*args, **kwargs)
         self.p = {**DEFAULTS, **self.cfg.params}
         self.gaps: list[Gap] = []
+        self.levels: list[tuple[str, float, float]] = []   # finished sessions: (label, high, low)
+        self._session: Optional[list] = None               # [label, high, low] of the current one
         self._n = 0
         self.last_signal = ""
         self.reset_day()
@@ -117,10 +123,18 @@ class PointerBot(Bot):
         return self.p["signals"] in ("builtin", "both")
 
     # ---- candle reading ---------------------------------------------------
-    def _advance(self, ltf: list[Bar]) -> Optional[Gap]:
+    def _advance(self, ltf: list[Bar], market: Market) -> Optional[Gap]:
         """Process the newest 1m candle: retire filled gaps, return a new FVG if one formed."""
         self._n += 1
         bar = ltf[-1]
+        # session highs/lows = the liquidity a pointer can sweep
+        if self._session is None or self._session[0] != market.session:
+            if self._session:
+                self.levels = (self.levels + [tuple(self._session)])[-4:]
+            self._session = [market.session, bar.high, bar.low]
+        else:
+            self._session[1] = max(self._session[1], bar.high)
+            self._session[2] = min(self._session[2], bar.low)
         self.gaps = [g for g in self.gaps if not self._filled(g, bar)][-60:]
         if len(ltf) >= 3:
             c1, c3 = ltf[-3], ltf[-1]
@@ -139,9 +153,15 @@ class PointerBot(Bot):
     def _htf_pointer(self, htf: Optional[list[Bar]]) -> Optional[Pointer]:
         if not self.builtin or not htf or len(htf) < 2:
             return None
-        side = is_pointer(htf[-2], htf[-1], self.p["require_sweep"])
+        cur = htf[-1]
+        side = is_pointer(htf[-2], cur, self.p["require_sweep"])
         if not side:
             return None
+        if self.p["liquidity_sweep"]:
+            if side == "long" and not any(cur.low < lo < cur.close for _, _, lo in self.levels):
+                return None
+            if side == "short" and not any(cur.close < hi < cur.high for _, hi, _ in self.levels):
+                return None
         return Pointer(side, self._n, htf[-1].time)
 
     def _target(self, side: str, price: float) -> Optional[float]:
@@ -172,8 +192,9 @@ class PointerBot(Bot):
 
     # ---- bot hooks ----------------------------------------------------------
     def on_bar(self, htf: Optional[list[Bar]], ltf: list[Bar], market: Market) -> Optional[Entry]:
-        new_gap = self._advance(ltf)
+        new_gap = self._advance(ltf, market)
         bar, n = ltf[-1], self._n
+        allowed = not self.p["sessions"] or market.session in self.p["sessions"]
 
         if self.ffvg:  # waiting for the FFVG test on 1m
             g, long = self.ffvg, self.ffvg.side == "long"
@@ -181,13 +202,18 @@ class PointerBot(Bot):
                 self._inverse()
                 return None
             if n > g.n and ((long and bar.low <= g.top) or (not long and bar.high >= g.bottom)):
-                return self._enter(market)
+                if allowed:
+                    return self._enter(market)
+                self.last_event = f"FFVG tested in {market.session} · outside allowed sessions"
+                self.pointer = self.ffvg = None
             if n - g.n > self.p["test_window"]:
                 self.last_event = "FFVG never got tested · reset"
                 self.pointer = self.ffvg = None
 
         elif self.pointer:  # waiting for the pointer's FFVG on 1m
-            if new_gap and new_gap.side == self.pointer.side and new_gap.n > self.pointer.n:
+            tick = market.underlyings[self.cfg.underlying].tick_size
+            if new_gap and new_gap.side == self.pointer.side and new_gap.n > self.pointer.n \
+                    and new_gap.top - new_gap.bottom >= self.p["min_gap_ticks"] * tick:
                 self._set_ffvg(new_gap)
             elif n - self.pointer.n > self.p["ffvg_window"]:
                 self.last_event = "pointer had no FFVG · reset"
@@ -210,7 +236,7 @@ class PointerBot(Bot):
         return Entry(side, target, note=note)
 
     def exit_on_bar(self, htf: Optional[list[Bar]], ltf: list[Bar], market: Market) -> Optional[str]:
-        self._advance(ltf)
+        self._advance(ltf, market)
         ptr = self._htf_pointer(htf)
         if ptr and ptr.side != self.plan.side:
             self.last_event = f"pointer formed against the trade at {ptr.time}"

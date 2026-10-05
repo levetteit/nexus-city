@@ -1,33 +1,45 @@
 """The city's heartbeat: steps the market, runs every bot, collects events."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .account import PropAccount
 from .bots.base import Bot
 from .broker import Broker, PaperBroker
 from .config import SIM_MINUTES_PER_TICK, WORKERS
-from .market import SESSION_OPEN_MIN, Market
+from .market import Market
 
 
 class Engine:
-    def __init__(self, broker: Broker | None = None) -> None:
-        self.market = Market(SIM_MINUTES_PER_TICK)
+    """Runs the bots against a market: the live simulation by default, or a
+    `ReplayMarket` of real candles (see backtest.py)."""
+
+    def __init__(self, broker: Broker | None = None, market=None, account: PropAccount | None = None,
+                 workers=None, params: dict | None = None) -> None:
         self.broker = broker or PaperBroker()
         self.events: list[dict] = []
-        self.account = PropAccount()
+        self.account = account or PropAccount()
+        simulated = market is None
+        self.market = market or Market(SIM_MINUTES_PER_TICK)
         self.bots: dict[str, Bot] = {}
-        for cls, cfg in WORKERS:
+        for cls, cfg in workers or WORKERS:
+            if cfg.underlying not in self.market.underlyings:
+                continue
+            if params:
+                cfg = replace(cfg, params={**cfg.params, **params})
             self.bots[cfg.id] = cls(cfg, self.broker, self.events.append, self.account)
-        # warm up ~2.5 hours of candles so every timeframe has history from the first tick
-        for _ in range(600):
+        if simulated:
+            # warm up ~2.5 hours of candles so every timeframe has history from the first tick
+            for _ in range(600):
+                for u in self.market.underlyings.values():
+                    u.step(SIM_MINUTES_PER_TICK)
             for u in self.market.underlyings.values():
-                u.step(SIM_MINUTES_PER_TICK)
-        for u in self.market.underlyings.values():
-            u.open_price = u.price
+                u.open_price = u.price
 
     def tick(self) -> list[dict]:
-        before = self.market.clock_min
+        before = self.market.day
         self.market.step()
-        if self.market.clock_min == SESSION_OPEN_MIN and before != SESSION_OPEN_MIN:
+        if self.market.day != before:
             phase = self.account.phase
             self.account.end_of_day()
             for bot in self.bots.values():
