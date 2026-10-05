@@ -122,7 +122,7 @@ class ReplayMarket:
         self.clock_str = t.strftime("%H:%M")
         for sym, (_, o, h, l, c) in bars.items():
             u = self.underlyings[sym]
-            u.bars.append(Bar(o, h, l, c, self.clock_str))
+            u.bars.append(Bar(o, h, l, c, self.clock_str, int(t.timestamp() // 60)))
             if len(u.bars) > 1200:
                 u.bars = u.bars[-1200:]
             u.bar_count += 1
@@ -190,13 +190,13 @@ def run(data: dict[str, list], params: dict | None = None) -> dict:
 
 # ---------------------------------------------------------------- optimizer
 GRID = {
-    "require_sweep": [True, False],
-    "liquidity_sweep": [False, True],
-    "sessions": [None, ["LONDON", "NEW YORK"], ["NEW YORK"]],
-    "ffvg_window": [10, 20],
-    "test_window": [10, 20],
+    "pivot_len": [2, 3, 6],
+    "sweep_proximity": [3, 6],
+    "use_iffvg": [True, False],
+    "require_liquidity_sweep": [False, True],
+    "killzones": [None, ["LONDON", "NY AM"], ["NY AM", "NY PM"]],
     "walk_after": [2, 3],
-    "min_gap_ticks": [0, 4],
+    "exit_on_invalidation": [False, True],
 }
 
 

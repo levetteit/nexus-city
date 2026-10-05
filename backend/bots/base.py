@@ -107,17 +107,25 @@ class Bot:
         return {}
 
     # ---- lifecycle ------------------------------------------------------
+    def observe(self, bar: Bar, market: Market) -> None:
+        """Called on every closed 1m candle, even when the bot is done for the day,
+        so strategies that track market structure never miss a candle."""
+
+    uses_htf = True   # build the bot's own-timeframe candles for on_bar/exit_on_bar
+
     def on_tick(self, market: Market) -> None:
+        u = market.underlyings[self.cfg.underlying]
+        new_bar = bool(u.bars) and u.bar_count != self._last_bar_count
+        if new_bar:
+            self._last_bar_count = u.bar_count
+            self.observe(u.bars[-1], market)
         if self.status in DONE_FOR_DAY:
             return
-        u = market.underlyings[self.cfg.underlying]
         if self.position:
             self._manage_tick(u, market)
-
-        if u.bar_count == self._last_bar_count or not u.bars or self.status in DONE_FOR_DAY:
+        if not new_bar or self.status in DONE_FOR_DAY:
             return
-        self._last_bar_count = u.bar_count
-        htf = self._candles(u) if u.bar_count % self.cfg.timeframe == 0 else None
+        htf = self._candles(u) if self.uses_htf and u.bar_count % self.cfg.timeframe == 0 else None
         if self.position:
             reason = self.exit_on_bar(htf, u.bars, market)
             if reason:

@@ -436,7 +436,9 @@ function renderWorker() {
   const trades = bot.recent.map((t) => `<tr><td>${t.closed_at}</td><td>${t.contract}</td><td>${t.reason}</td><td class="${t.pnl >= 0 ? "pos" : "neg"}">${money(t.pnl)}</td></tr>`).join("");
   document.getElementById("worker-body").innerHTML = `
     <h3 style="color:${bot.color}">${bot.name}</h3>
-    <div class="row"><span>Strategy</span><span>${bot.strategy} · ${bot.timeframe}m candles</span></div>
+    <div class="row"><span>Strategy</span><span>${bot.strategy}${bot.info?.pointer_tfs ? ` · ${bot.info.pointer_tfs.map((t) => t + "m").join("/")} pointers` : ` · ${bot.timeframe}m candles`}</span></div>
+    ${bot.info?.proc !== undefined ? `<div class="row"><span>Current PROC</span><span>${bot.info.proc ?? "none"}</span></div>
+    <div class="row"><span>Untapped zones</span><span>${bot.info.untapped_zones}</span></div>` : ""}
     <div class="row"><span>Instrument</span><span>${bot.instrument === "future" ? `${bot.underlying} micro futures` : `${bot.underlying} options`}</span></div>
     <div class="row"><span>Size</span><span>${bot.contracts} contracts, adds to ${bot.max_contracts} max</span></div>
     ${bot.info?.setup ? `<div class="row"><span>Setup</span><span style="text-align:right;max-width:65%">${bot.info.setup}</span></div>` : ""}

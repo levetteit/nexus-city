@@ -59,6 +59,7 @@ class Bar:
     low: float
     close: float
     time: str = ""
+    t: int = 0          # absolute minute the candle opened (keeps higher timeframes clock-aligned)
 
     @property
     def bullish(self) -> bool:
@@ -130,6 +131,7 @@ class Underlying:
         self._bar_elapsed += minutes
         if self._bar_elapsed >= 1.0 - 1e-9:
             self._bar.time = clock
+            self._bar.t = self.bar_count
             self.bars.append(self._bar)
             self.bar_count += 1
             self._bar, self._bar_elapsed = None, 0.0

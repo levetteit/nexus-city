@@ -1,0 +1,379 @@
+"""PROC (Pointer Range of Control): the Macre pointer strategy as the indicators
+on your chart define it, rebuilt from 1-minute candles.
+
+Spec (from the "PROC - Pointer Range of Control" publication, with FFVG rules
+from Flux Charts' "Untapped FFVGs & IFFVGs" / "Troop Toolkit"):
+
+  * Synthetic 1-6 minute candles are built from 1-minute data, aligned to the clock.
+  * FFVG: the first fair value gap (3-candle imbalance) that forms after a
+    confirmed swing low (bullish) or swing high (bearish) on any of the 1-6
+    minute timeframes, within `sweep_proximity` candles of the swing.
+    A swing low is a low below the `pivot_len` candles on each side.
+  * Tapped: an FFVG is tapped the first time any 1-minute *wick* trades into
+    it (closes don't matter). Once tapped it can't start a PROC again.
+  * IFFVG: an FFVG that a candle on its own timeframe closes fully through
+    flips into an opposite-direction IFFVG, untapped from that close. Its
+    first wick can start a PROC like an FFVG. IFFVGs never re-invert.
+  * Pointer: on the 3, 4, 5 and 6 minute candles, a candle that closes inside
+    the previous candle's wick: above the previous body but at or below its
+    high (bullish), or below the body but at or above its low (bearish).
+  * PROC: a pointer whose candle - or the candle right before it - delivered
+    the first-ever wick into a same-direction untapped FFVG/IFFVG. The pointer
+    candle's range is the PROC box. Only one PROC exists at a time.
+  * PROC invalidation: on the PROC's own timeframe, an opposite candle closes
+    fully beyond the box (bearish close below a bullish box, and vice versa).
+
+How the bot trades it (Macre's rules):
+  * Enter on a PROC in its direction (3 contracts).
+  * Another PROC in the same direction while in profit -> add 3 (6 max).
+  * Exit only when a PROC forms against the trade: "a pointer against you on
+    another FFVG/IFFVG". No stop loss.
+  * An invalidated PROC counts as a pointer inverse; `walk_after` of them in a
+    day and the bot walks away.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+from ..market import Bar, Market
+from .base import DONE_FOR_DAY, Bot, Entry
+
+TIMEFRAMES = (1, 2, 3, 4, 5, 6)
+
+# Troop Toolkit liquidity sessions (ET, minutes of day), used by the liquidity-sweep filter
+KILLZONES = {
+    "ASIA": (20 * 60, 24 * 60),
+    "LONDON": (2 * 60, 5 * 60),
+    "NY AM": (9 * 60 + 30, 11 * 60),
+    "NY PM": (14 * 60, 16 * 60),
+}
+
+
+@dataclass
+class Candle:
+    open: float
+    high: float
+    low: float
+    close: float
+    start: int          # first minute
+    end: int            # last minute
+
+    @property
+    def bullish(self) -> bool:
+        return self.close > self.open
+
+    @property
+    def bearish(self) -> bool:
+        return self.close < self.open
+
+
+@dataclass
+class Zone:
+    side: str           # 'long' (bullish) | 'short' (bearish)
+    top: float
+    bottom: float
+    tf: int
+    kind: str           # 'FFVG' | 'IFFVG'
+    created: int        # minute it became active
+    tapped_at: Optional[int] = None
+    dead: bool = False  # inverted (FFVG) or closed through (IFFVG)
+
+    def label(self) -> str:
+        return f"{self.tf}m {self.kind} {self.bottom:,.2f}–{self.top:,.2f}"
+
+
+@dataclass
+class Proc:
+    side: str
+    tf: int
+    high: float
+    low: float
+    zone: Zone
+    time: int
+    swept: bool = False   # pointer candle (or the one before) took a killzone high/low
+
+
+@dataclass
+class _Frame:
+    tf: int
+    candles: list[Candle] = field(default_factory=list)
+    building: Optional[Candle] = None
+    fvgs: list[tuple[str, float, float, int]] = field(default_factory=list)   # side, top, bottom, candle idx
+    swings: list[tuple[str, int]] = field(default_factory=list)               # pending: side, candle idx
+    n: int = 0          # candles closed so far (absolute index)
+
+
+def is_pointer(prev: Candle, cur: Candle) -> Optional[str]:
+    if max(prev.open, prev.close) < cur.close <= prev.high:
+        return "long"
+    if prev.low <= cur.close < min(prev.open, prev.close):
+        return "short"
+    return None
+
+
+class ProcEngine:
+    """Feeds on 1-minute bars, emits ('proc', Proc) and ('invalidated', Proc) events."""
+
+    def __init__(self, pointer_tfs=(3, 4, 5, 6), pivot_len: int = 2, sweep_proximity: int = 6,
+                 use_iffvg: bool = True, min_gap: float = 0.0) -> None:
+        self.pointer_tfs = tuple(pointer_tfs)
+        self.pivot_len = pivot_len
+        self.prox = sweep_proximity
+        self.use_iffvg = use_iffvg
+        self.min_gap = min_gap
+        self.frames = {tf: _Frame(tf) for tf in TIMEFRAMES}
+        self.zones: list[Zone] = []
+        self.proc: Optional[Proc] = None
+        self.levels: dict[str, tuple[float, float, bool, bool]] = {}   # killzone -> (hi, lo, hi swept, lo swept)
+        self._kz: Optional[list] = None
+
+    # ---------------------------------------------------------------- feed
+    def update(self, bar: Bar, minute_of_day: int) -> list[tuple[str, Proc]]:
+        events: list[tuple[str, Proc]] = []
+        t = bar.t
+        # 1. first wick into an untapped zone
+        for z in self.zones:
+            if z.tapped_at is None and not z.dead and t > z.created:
+                if (z.side == "long" and bar.low <= z.top) or (z.side == "short" and bar.high >= z.bottom):
+                    z.tapped_at = t
+        self._track_liquidity(bar, minute_of_day)
+        # 2. synthetic candles
+        for tf in TIMEFRAMES:
+            for done in self._build(self.frames[tf], bar):
+                events += self._on_close(self.frames[tf], done)
+        cutoff = t - 3 * 24 * 60
+        self.zones = [z for z in self.zones if z.created > cutoff and not (z.dead and z.tapped_at)][-400:]
+        return events
+
+    def _build(self, f: _Frame, bar: Bar) -> list[Candle]:
+        """Add a 1m bar to this timeframe's candle; return any candles that closed."""
+        closed = []
+        if f.building and f.building.start // f.tf != bar.t // f.tf:   # missing minutes: close what we had
+            closed.append(f.building)
+            f.building = None
+        if f.building is None:
+            f.building = Candle(bar.open, bar.high, bar.low, bar.close, bar.t, bar.t)
+        else:
+            c = f.building
+            c.high, c.low, c.close, c.end = max(c.high, bar.high), min(c.low, bar.low), bar.close, bar.t
+        if (bar.t + 1) % f.tf == 0:   # its last minute just finished
+            closed.append(f.building)
+            f.building = None
+        return closed
+
+    def _on_close(self, f: _Frame, c: Candle) -> list[tuple[str, Proc]]:
+        events: list[tuple[str, Proc]] = []
+        f.candles.append(c)
+        f.n += 1
+        f.candles = f.candles[-60:]
+        idx = f.n - 1
+
+        # inversions on this timeframe
+        for z in self.zones:
+            if z.tf != f.tf or z.dead or z.created >= c.end:
+                continue
+            through = (z.side == "long" and c.close < z.bottom) or (z.side == "short" and c.close > z.top)
+            if through:
+                z.dead = True
+                if self.use_iffvg and z.kind == "FFVG":
+                    flip = "short" if z.side == "long" else "long"
+                    self.zones.append(Zone(flip, z.top, z.bottom, f.tf, "IFFVG", c.end))
+
+        # new FVG on this timeframe
+        if len(f.candles) >= 3:
+            c1, c3 = f.candles[-3], f.candles[-1]
+            if c1.high < c3.low and c3.low - c1.high >= self.min_gap:
+                f.fvgs.append(("long", c3.low, c1.high, idx))
+            elif c1.low > c3.high and c1.low - c3.high >= self.min_gap:
+                f.fvgs.append(("short", c1.low, c3.high, idx))
+            f.fvgs = f.fvgs[-30:]
+
+        # confirm a swing pivot_len candles back
+        L = self.pivot_len
+        if len(f.candles) >= 2 * L + 1:
+            mid = f.candles[-L - 1]
+            left, right = f.candles[-2 * L - 1:-L - 1], f.candles[-L:]
+            if all(mid.low < x.low for x in left + right):
+                f.swings.append(("long", idx - L))
+            if all(mid.high > x.high for x in left + right):
+                f.swings.append(("short", idx - L))
+        # first FVG after each pending swing, within the sweep proximity
+        keep = []
+        for side, k in f.swings:
+            first = next((g for g in f.fvgs if g[0] == side and k < g[3] <= k + self.prox), None)
+            if first:
+                _, top, bottom, gidx = first
+                if not any(z.tf == f.tf and z.kind == "FFVG" and z.top == top and z.bottom == bottom for z in self.zones):
+                    self.zones.append(Zone(side, top, bottom, f.tf, "FFVG", c.end))
+            elif idx < k + self.prox:
+                keep.append((side, k))
+        f.swings = keep
+
+        # pointer -> PROC
+        if f.tf in self.pointer_tfs and len(f.candles) >= 2:
+            prev = f.candles[-2]
+            side = is_pointer(prev, c)
+            if side:
+                hit = [z for z in self.zones if z.side == side and z.tapped_at is not None
+                       and prev.start <= z.tapped_at <= c.end and z.created < z.tapped_at]
+                if hit:
+                    z = max(hit, key=lambda z: z.tapped_at)
+                    swept = self._swept(side, prev, c)
+                    self.proc = Proc(side, f.tf, c.high, c.low, z, c.end, swept)
+                    events.append(("proc", self.proc))
+
+        # PROC invalidation on its own timeframe
+        p = self.proc
+        if p and p.tf == f.tf and p.time < c.end:
+            if (p.side == "long" and c.bearish and c.close < p.low) or (p.side == "short" and c.bullish and c.close > p.high):
+                events.append(("invalidated", p))
+                self.proc = None
+        return events
+
+    # ---------------------------------------------------------------- liquidity
+    def _track_liquidity(self, bar: Bar, mod: int) -> None:
+        kz = next((k for k, (a, b) in KILLZONES.items() if a <= mod < b), None)
+        if self._kz and self._kz[0] != kz:      # a killzone just finished: its high/low is liquidity
+            name, hi, lo = self._kz
+            self.levels[name] = (hi, lo, False, False)
+            self._kz = None
+        if kz:
+            if self._kz is None:
+                self._kz = [kz, bar.high, bar.low]
+            else:
+                self._kz[1], self._kz[2] = max(self._kz[1], bar.high), min(self._kz[2], bar.low)
+
+    def _swept(self, side: str, prev: Candle, c: Candle) -> bool:
+        lo, hi = min(prev.low, c.low), max(prev.high, c.high)
+        for name, (h, l, hs, ls) in self.levels.items():
+            if side == "long" and lo < l and not ls:
+                self.levels[name] = (h, l, hs, True)
+                return True
+            if side == "short" and hi > h and not hs:
+                self.levels[name] = (h, l, True, ls)
+                return True
+        return False
+
+    def next_zone(self, side: str, price: float) -> Optional[float]:
+        """Nearest opposite untapped zone in the trade's direction: where the move should run to."""
+        if side == "long":
+            lv = [z.bottom for z in self.zones if z.side == "short" and not z.dead and z.tapped_at is None and z.bottom > price]
+            return min(lv) if lv else None
+        lv = [z.top for z in self.zones if z.side == "long" and not z.dead and z.tapped_at is None and z.top < price]
+        return max(lv) if lv else None
+
+
+DEFAULTS = {
+    "pointer_tfs": [3, 4, 5, 6],
+    "pivot_len": 2,             # swing = low/high beyond this many candles each side
+    "sweep_proximity": 6,       # your chart's setting: FFVG within 6 candles of the swing
+    "use_iffvg": True,          # your chart has Untapped IFFVGs on
+    "min_gap_ticks": 0,
+    "walk_after": 3,            # invalidated PROCs (pointer inverses) before walking away
+    "exit_on_invalidation": False,   # Macre: exit only on a pointer against
+    "killzones": None,          # e.g. ["LONDON", "NY AM"]: only enter during these
+    "require_liquidity_sweep": False,  # PROC must take an Asia/London/NY high or low
+    "signals": "both",          # TradingView webhook orders still accepted
+}
+
+
+class ProcBot(Bot):
+    strategy_name = "Macre PROC"
+    uses_htf = False
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.p = {**DEFAULTS, **self.cfg.params}
+        self.engine: Optional[ProcEngine] = None
+        self._events: list[tuple[str, Proc]] = []
+        self.my_proc: Optional[Proc] = None
+        self.last_signal = ""
+        self.reset_day()
+
+    def reset_day(self) -> None:
+        self.inverses = 0
+        self.last_event = "waiting for a PROC"
+
+    def _engine(self, market: Market) -> ProcEngine:
+        if self.engine is None:
+            tick = market.underlyings[self.cfg.underlying].tick_size
+            self.engine = ProcEngine(self.p["pointer_tfs"], self.p["pivot_len"], self.p["sweep_proximity"],
+                                     self.p["use_iffvg"], self.p["min_gap_ticks"] * tick)
+        return self.engine
+
+    def observe(self, bar: Bar, market: Market) -> None:
+        mod = int(market.clock_min) % (24 * 60)
+        self._events = self._engine(market).update(bar, mod)
+        for kind, p in self._events:
+            if kind == "invalidated":
+                self.inverses += 1
+                if self.status not in DONE_FOR_DAY:
+                    self.last_event = f"{p.tf}m PROC invalidated ({self.inverses}/{self.p['walk_after']})"
+                if self.inverses >= self.p["walk_after"] and self.status == "scanning":
+                    self.status = "walked"
+                    self.last_event = f"{self.inverses} pointer inverses · walked away"
+
+    def _usable(self, p: Proc, market: Market) -> bool:
+        kz = self.p["killzones"]
+        if kz:
+            mod = int(market.clock_min) % (24 * 60)
+            if not any(KILLZONES[k][0] <= mod < KILLZONES[k][1] for k in kz):
+                return False
+        return p.swept or not self.p["require_liquidity_sweep"]
+
+    def on_bar(self, htf, ltf: list[Bar], market: Market) -> Optional[Entry]:
+        for kind, p in self._events:
+            if kind != "proc":
+                continue
+            arrow = "↑" if p.side == "long" else "↓"
+            if not self._usable(p, market):
+                self.last_event = f"{p.tf}m PROC {arrow} at {market.clock_str} · filtered out"
+                continue
+            self.my_proc = p
+            self.last_event = f"{p.tf}m PROC {arrow} off {p.zone.label()} · entered {p.side}"
+            price = market.underlyings[self.cfg.underlying].price
+            return Entry(p.side, self.engine.next_zone(p.side, price),
+                         note=f"{p.tf}m PROC off {p.zone.label()}")
+        return None
+
+    def exit_on_bar(self, htf, ltf: list[Bar], market: Market) -> Optional[str]:
+        for kind, p in self._events:
+            if kind == "proc" and p.side != self.plan.side:
+                self.last_event = f"{p.tf}m PROC against the trade at {market.clock_str}"
+                return "pointer against (PROC)"
+            if kind == "proc":
+                pos = self.position
+                if pos.pnl(self.broker.mark(pos, market)) > 0 and self.add(market, f"{p.tf}m PROC with the trade"):
+                    self.last_event = f"added to {pos.qty} contracts · {p.tf}m PROC with the trade"
+            if kind == "invalidated" and p is self.my_proc and self.p["exit_on_invalidation"]:
+                return "PROC invalidated"
+        return None
+
+    def on_position_closed(self, pnl: float) -> None:
+        self.my_proc = None
+        self.last_event = f"trade closed {'+' if pnl >= 0 else '-'}${abs(pnl):,.0f} · waiting for a PROC"
+
+    # TradingView: these indicators don't publish alert conditions, so only direct orders apply
+    def on_signal(self, sig: dict, market: Market) -> Optional[str]:
+        if self.p["signals"] == "builtin" or self.status in DONE_FOR_DAY:
+            return None
+        kind = sig["signal"]
+        self.last_signal = f"{kind.replace('_', ' ')} @ {market.clock_str}"
+        if kind == "exit" and self.position:
+            self._close("TradingView exit", market)
+            return "exit"
+        if kind in ("long", "short") and not self.position and market.minutes_to_close > 10:
+            u = market.underlyings[self.cfg.underlying]
+            self._open(Entry(kind, None, "TradingView alert"), u, market)
+            return f"{kind} order" if self.position else None
+        return None
+
+    def info(self) -> dict:
+        e = self.engine
+        live = [z for z in (e.zones if e else []) if not z.dead and z.tapped_at is None]
+        return {"setup": self.last_event, "inverses": self.inverses, "walk_after": self.p["walk_after"],
+                "signals": self.p["signals"], "last_signal": self.last_signal,
+                "untapped_zones": len(live), "pointer_tfs": self.p["pointer_tfs"],
+                "proc": (f"{e.proc.tf}m {'bullish' if e.proc.side == 'long' else 'bearish'} "
+                         f"{e.proc.low:,.2f}–{e.proc.high:,.2f}") if e and e.proc else None}

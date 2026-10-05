@@ -33,7 +33,7 @@ backend/
   broker.py      PaperBroker: micro futures (tick slippage + fees; options still supported). Implement open/close/mark to go live
   account.py     the shared prop firm account: LucidFlex / LucidPro 50K rules, EOD drawdown, daily goal / cap / stop, contract budget
   bots/base.py   the worker lifecycle: scanning → in_trade → off_duty / stopped / walked; 3 → 6 contract sizing
-  bots/pointer.py  the Macre pointer strategy
+  bots/proc.py   the Macre PROC strategy (FFVG/IFFVG taps + 3-6m pointers)
   config.py      who lives in the city
   backtest.py    replay real 1m candles through the bots; walk-forward optimizer
   engine.py      ticks the market and every bot, builds the snapshot
@@ -42,76 +42,34 @@ frontend/
   city.js        Three.js scene: buildings, beams, halos, roads, coins, bloom, labels
 ```
 
-### The pointer strategy (`backend/bots/pointer.py`)
+### The strategy: PROC (`backend/bots/proc.py`)
 
-Built from Andrew Macre's public rules, with the definitions used by the Flux
-Charts indicators made from his concepts (Pointer Closure Detection,
-Untapped FFVGs & IFFVGs, Troop Toolkit).
+A rebuild of the indicators on your TradingView chart (PROC – Pointer Range of
+Control, Untapped FFVGs & IFFVGs, Troop Toolkit), computed from 1-minute candles:
 
-1. **Pointer** (on the bot's 3–6 minute candles): a candle that closes back inside the previous candle's wick. Bullish = green, close above the previous body but at or below the previous high; bearish is the mirror. By default its wick must also sweep the previous candle's low/high.
-2. **FFVG** (on 1-minute candles): the first fair value gap after the pointer, in its direction. It "sponsors" the move. No FFVG within 15 minutes → reset.
-3. **Entry**: price comes back and tests the FFVG without closing through it → enter (calls / MNQ long for bullish, puts / MNQ short for bearish).
-4. **Exit**: there is **no stop loss and no take-profit**. The trade stays on until a pointer forms against it. The next opposing FVG ("every pointer guarantees the move to the next FFVG") is shown as the expected move only.
-5. **Inverse**: if a candle closes through the FFVG before the test, it's an IFFVG and the pointer failed. **3 inverses → the bot walks away for the day.**
+1. **FFVG**: the first fair value gap after a confirmed swing high/low on any
+   1–6 minute timeframe, within 6 candles of the swing (your "Sweep Proximity 6").
+2. **Tap**: the first time any 1-minute wick trades into an untapped FFVG.
+3. **IFFVG**: an FFVG that a candle on its own timeframe closes fully through
+   flips into an opposite zone that can be tapped the same way.
+4. **Pointer**: a 3/4/5/6-minute candle that closes inside the previous
+   candle's wick (beyond the body, within the high/low).
+5. **PROC = entry**: a pointer whose candle, or the one before it, made the
+   first-ever wick into a same-direction untapped FFVG/IFFVG. The bot enters
+   with 3 contracts and shows the next opposite zone as the expected move.
+6. **Add**: another PROC the same way while the trade is in profit → +3 (6 max).
+7. **Exit**: only on a PROC against the trade, i.e. a pointer against you on
+   another FFVG/IFFVG. No stop loss.
+8. **Walk away**: a PROC is invalidated when an opposite candle on its own
+   timeframe closes beyond its box; 3 of those in a day and the bot stops.
 
-## Backtest and optimize on real data (`backend/backtest.py`)
+Settings (`params` in `config.py`, all tried by the optimizer): `pointer_tfs`,
+`pivot_len`, `sweep_proximity`, `use_iffvg`, `walk_after`,
+`exit_on_invalidation`, `killzones` (Asia 20:00–00:00, London 02:00–05:00,
+NY AM 09:30–11:00, NY PM 14:00–16:00 ET), `require_liquidity_sweep` (the PROC
+must take one of those sessions' highs/lows, like Troop's liquidity levels).
 
-The live city runs on simulated, random prices, so it can't tell you if the
-strategy works. The backtester replays **real 1-minute candles** through the
-exact same bots, prop account rules and daily goal/cap/stop.
-
-1. **Export data from TradingView:** open a 1-minute chart (MNQ1!, MES1!, M2K1!),
-   scroll back as far as your plan loads, then chart menu → *Export chart data…*.
-   Put the symbol in each file name: `data/MNQ_1m.csv`, `data/MES_1m.csv`, `data/M2K_1m.csv`.
-2. **Backtest the current settings:**
-   ```bash
-   python -m backend.backtest data/*.csv
-   ```
-   You get days traded, **% profitable days**, days that reached the $600 goal,
-   win rate, average win/loss, profit factor, best/worst day, evaluations passed
-   and failed, and P&L by session.
-3. **Optimize:**
-   ```bash
-   python -m backend.backtest data/*.csv --optimize --out results.json
-   ```
-   It tries ~190 combinations of strategy settings (pointer sweep rule, liquidity
-   sweep of the previous session's high/low, which sessions to trade, FFVG and
-   test windows, walk-away count, minimum FFVG size) on the **first 70% of days**,
-   then re-runs the top 5 on the **last 30%** they never saw. Pick settings that
-   hold up on those unseen days, not the ones with the best tuned numbers.
-4. Put the winning settings in `params` in `backend/config.py`.
-
-More history gives more reliable answers; a few weeks of 1-minute data is a
-minimum. `--make-sample FOLDER` writes synthetic files if you just want to see
-it run.
-
-## TradingView alerts (use your real indicators)
-
-Your TradingView indicators can drive the bots through webhook alerts.
-
-1. **Start the server with a secret** (anyone who knows it can send signals):
-   ```bash
-   STARNET_WEBHOOK_SECRET=pick-a-long-random-string uvicorn backend.main:app --host 0.0.0.0 --port 8000
-   ```
-2. **Give it a public HTTPS address.** TradingView only sends to ports 80/443. Either run it on a small cloud server, or tunnel your laptop: `ngrok http 8000` gives you `https://xxxx.ngrok.app`.
-3. **In TradingView** (paid plan needed for webhooks): on your chart, open *Create alert*, set *Condition* to your indicator and the event (e.g. a bullish pointer on Pointer Closure Detection, or an FFVG/IFFVG from Untapped FFVGs & IFFVGs). Under *Notifications* tick **Webhook URL** and enter `https://xxxx.ngrok.app/api/tradingview`.
-4. **Message**: paste JSON like this, changing `signal` per alert:
-   ```json
-   {"secret": "pick-a-long-random-string", "ticker": "{{ticker}}", "signal": "bullish_pointer",
-    "price": {{close}}, "high": {{high}}, "low": {{low}}, "tf": "{{interval}}"}
-   ```
-
-| `signal` | What the bot does |
-|---|---|
-| `bullish_pointer` / `bearish_pointer` | starts a setup; if it's in a trade the other way, exits ("pointer against") |
-| `bullish_ffvg` / `bearish_ffvg` | marks the pointer's FFVG (send `top` and `bottom` if your alert has them, else uses the bot's own 1m FVG) and waits for the test |
-| `bullish_iffvg` / `bearish_iffvg` | the opposite FFVG was closed through → counts an inverse |
-| `long` / `short` | enters right away (optional `target`, shown only) |
-| `exit` | closes the position |
-
-Alerts go to every bot on that symbol (`MNQ1!`, `CME_MINI:MNQ1!`, `MNQZ2026` → MNQ; same for MES and M2K), or add `"bot": "mnq-3m"` to target one. A bullish pointer while already long adds to the position (3 → 6). Each bot's `signals` param picks `builtin`, `tradingview` or `both` (default). A building's halo flashes and shows "TV · …" when an alert lands.
-
-**Note:** the city still runs on simulated prices. Each alert's `price` snaps that symbol to the real price, but P&L between alerts is simulated until a live data feed and broker are connected.
+`backend/bots/pointer.py` is the earlier, simpler pointer bot, kept for reference.
 
 ### Position size
 
@@ -169,14 +127,61 @@ there are still **no per-trade stops**.
 
 ```python
 # backend/config.py
-(PointerBot, BotConfig(id="mes-5m", name="MES 5M", underlying="MES", district="LAB", timeframe=5,
-                       params={"signals": "tradingview", "walk_after": 2}, color="#ff00aa")),
+(ProcBot, BotConfig(id="mes-ny", name="MES NY", underlying="MES", district="LAB", timeframe=5,
+                    params={"pointer_tfs": [5], "killzones": ["NY AM"]}, color="#ff00aa")),
 ```
 
 To add another micro (e.g. MYM), add it to `Market.underlyings` and its dollars
 per point to `FUTURES_MULTIPLIER` in `broker.py` (MNQ $2, MES $5, M2K $5, MYM $0.50).
 
 The city lays itself out automatically for however many workers you register.
+
+## Backtest and optimize on real data (`backend/backtest.py`)
+
+The live city runs on simulated, random prices, so it can't tell you if the
+strategy works. The backtester replays **real 1-minute candles** through the
+exact same bots, prop account rules and daily goal/cap/stop.
+
+1. **Export data from TradingView:** open a 1-minute chart (MNQ1!, MES1!, M2K1!),
+   scroll back as far as your plan loads, then chart menu → *Export chart data…*.
+   Put the symbol in each file name: `data/MNQ_1m.csv`, `data/MES_1m.csv`, `data/M2K_1m.csv`.
+2. **Backtest the current settings:**
+   ```bash
+   python -m backend.backtest data/*.csv
+   ```
+   You get days traded, **% profitable days**, days that reached the $600 goal,
+   win rate, average win/loss, profit factor, best/worst day, evaluations passed
+   and failed, and P&L by session.
+3. **Optimize:**
+   ```bash
+   python -m backend.backtest data/*.csv --optimize --out results.json
+   ```
+   It tries ~290 combinations of the PROC settings (swing pivot length, sweep
+   proximity, IFFVGs on/off, liquidity sweep required, killzones, walk-away
+   count, exit on PROC invalidation) on the **first 70% of days**,
+   then re-runs the top 5 on the **last 30%** they never saw. Pick settings that
+   hold up on those unseen days, not the ones with the best tuned numbers.
+4. Put the winning settings in `params` in `backend/config.py`.
+
+More history gives more reliable answers; a few weeks of 1-minute data is a
+minimum. `--make-sample FOLDER` writes synthetic files if you just want to see
+it run.
+
+## TradingView alerts
+
+The PROC, Untapped FFVGs and Troop Toolkit indicators don't publish alert
+conditions, so they can't send webhooks. That's why the bots rebuild PROC
+themselves from price data. The webhook still accepts direct orders from any
+other alert you set up:
+
+1. Start the server with a secret: `STARNET_WEBHOOK_SECRET=<long random string> uvicorn backend.main:app --host 0.0.0.0`
+2. Give it a public HTTPS address (`ngrok http 8000`, or a cloud server).
+3. In the TradingView alert, tick **Webhook URL** → `https://<address>/api/tradingview`, message:
+   ```json
+   {"secret": "<your secret>", "ticker": "{{ticker}}", "signal": "long", "price": {{close}}}
+   ```
+   `signal` is `long`, `short` or `exit`. Alerts go to every bot on that symbol
+   (`MNQ1!`, `MES1!`, `M2K1!`), or add `"bot": "mnq-3m"` for one bot.
 
 ## Going live (read this first)
 
