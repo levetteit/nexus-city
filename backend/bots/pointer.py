@@ -33,12 +33,11 @@ Trade plan:
   1. Pointer closes on the bot's timeframe -> wait for its FFVG on 1m candles.
   2. Price comes back and tests the FFVG without closing through it -> enter
      (calls / long for bullish, puts / short for bearish).
-  3. Stop goes just past the pointer's wick.
-  4. Target = the next opposing FVG (the "next FFVG" the pointer guarantees).
-     If there is none, or it's closer than `min_rr` x risk, aim for 2R.
-  5. At the target, scale out half; the runner's stop moves to breakeven.
-  6. The runner stays on until a pointer forms against it.
-  7. If the FFVG gets closed through before the test, that's an inverse.
+  3. No stop loss. The only exit is a pointer forming against the trade
+     (plus flattening before the close).
+  4. The next opposing FVG (the "next FFVG" the pointer guarantees) is shown
+     as the expected move; it doesn't close the trade.
+  5. If the FFVG gets closed through before the test, that's an inverse.
      After `walk_after` inverses in a day, the bot walks away.
 
 Signals can come from this file's own detection ("builtin"), from your
@@ -56,7 +55,6 @@ from .base import Bot, Entry
 @dataclass
 class Pointer:
     side: str        # 'long' (bullish) | 'short' (bearish)
-    wick: float      # the pointer's wick extreme -> invalidation
     n: int           # 1m candle number it was seen on
     time: str
     source: str = "builtin"
@@ -75,9 +73,7 @@ DEFAULTS = {
     "require_sweep": True,  # pointer wick must take the previous candle's low/high
     "ffvg_window": 15,      # 1m candles after the pointer to find its FFVG
     "test_window": 20,      # 1m candles after the FFVG to get the test
-    "min_rr": 1.0,          # an FVG target closer than this x risk is ignored (2R used instead)
     "walk_after": 3,        # pointer inverses before walking away
-    "stop_ticks": 2,        # stop buffer past the pointer's wick, in ticks
 }
 
 SIGNALS = {
@@ -104,7 +100,6 @@ class PointerBot(Bot):
         self.p = {**DEFAULTS, **self.cfg.params}
         self.gaps: list[Gap] = []
         self._n = 0
-        self._last_1m: Optional[Bar] = None
         self.last_signal = ""
         self.reset_day()
 
@@ -123,7 +118,6 @@ class PointerBot(Bot):
         """Process the newest 1m candle: retire filled gaps, return a new FVG if one formed."""
         self._n += 1
         bar = ltf[-1]
-        self._last_1m = bar
         self.gaps = [g for g in self.gaps if not self._filled(g, bar)][-60:]
         if len(ltf) >= 3:
             c1, c3 = ltf[-3], ltf[-1]
@@ -145,8 +139,7 @@ class PointerBot(Bot):
         side = is_pointer(htf[-2], htf[-1], self.p["require_sweep"])
         if not side:
             return None
-        wick = htf[-1].low if side == "long" else htf[-1].high
-        return Pointer(side, wick, self._n, htf[-1].time)
+        return Pointer(side, self._n, htf[-1].time)
 
     def _target(self, side: str, price: float) -> Optional[float]:
         """The nearest opposing FVG in the trade's direction, if any."""
@@ -202,27 +195,16 @@ class PointerBot(Bot):
             self._set_pointer(ptr)
         return None
 
-    def _enter(self, market: Market) -> Optional[Entry]:
+    def _enter(self, market: Market) -> Entry:
         ptr, g = self.pointer, self.ffvg
         self.pointer = self.ffvg = None
-        u = market.underlyings[self.cfg.underlying]
-        buf = self.p["stop_ticks"] * u.tick_size
-        stop = ptr.wick - buf if ptr.side == "long" else ptr.wick + buf
-        entry = self._plan(ptr.side, stop, u.price, f"pointer {ptr.time} · FFVG {g.bottom:,.2f}–{g.top:,.2f}")
-        if entry:
-            self.last_event = f"FFVG tested · entered {ptr.side}"
-        return entry
+        self.last_event = f"FFVG tested · entered {ptr.side}"
+        return self._plan(ptr.side, market, f"pointer {ptr.time} · FFVG {g.bottom:,.2f}–{g.top:,.2f}")
 
-    def _plan(self, side: str, stop: float, price: float, note: str, target: Optional[float] = None) -> Optional[Entry]:
-        risk = abs(price - stop)
-        if risk <= 0 or (side == "long" and price <= stop) or (side == "short" and price >= stop):
-            self.last_event = "price already past the stop · skipped"
-            return None
+    def _plan(self, side: str, market: Market, note: str, target: Optional[float] = None) -> Entry:
         if target is None:
-            target = self._target(side, price)
-            if target is None or abs(target - price) < self.p["min_rr"] * risk:
-                target = price + 2 * risk if side == "long" else price - 2 * risk
-        return Entry(side, stop, target, note=note)
+            target = self._target(side, market.underlyings[self.cfg.underlying].price)
+        return Entry(side, target, note=note)
 
     def exit_on_bar(self, htf: Optional[list[Bar]], ltf: list[Bar], market: Market) -> Optional[str]:
         self._advance(ltf)
@@ -239,14 +221,13 @@ class PointerBot(Bot):
     def on_signal(self, sig: dict, market: Market) -> Optional[str]:
         """Handle one webhook alert. Returns a short description for the city, or None if ignored.
 
-        `sig` has `signal` (one of SIGNALS) and optionally `price`, `stop`,
-        `target`, `top`, `bottom`, `high`, `low`.
+        `sig` has `signal` (one of SIGNALS) and optionally `price`, `target`,
+        `top`, `bottom`.
         """
         if self.p["signals"] == "builtin" or self.status in ("off_duty", "stopped", "walked", "disabled"):
             return None
         kind = sig["signal"]
         u = market.underlyings[self.cfg.underlying]
-        price = u.price
         self.last_signal = f"{kind.replace('_', ' ')} @ {market.clock_str}"
 
         if kind == "exit":
@@ -263,11 +244,7 @@ class PointerBot(Bot):
                     self._close("pointer against (TradingView)", market)
                     return f"{kind.replace('_', ' ')} · exited"
                 return None
-            last = self._last_1m
-            wick = sig.get("low" if side == "long" else "high")
-            if wick is None:
-                wick = (last.low if side == "long" else last.high) if last else price
-            self._set_pointer(Pointer(side, float(wick), self._n, market.clock_str, "tradingview"))
+            self._set_pointer(Pointer(side, self._n, market.clock_str, "tradingview"))
             return kind.replace("_", " ")
 
         if kind.endswith("_ffvg"):
@@ -293,16 +270,8 @@ class PointerBot(Bot):
         # direct 'long' / 'short' orders
         if self.position or market.minutes_to_close <= 10:
             return None
-        stop = sig.get("stop")
-        if stop is None:  # no stop in the alert: just past the last 1m candle
-            if not self._last_1m:
-                return None
-            buf = self.p["stop_ticks"] * u.tick_size
-            stop = self._last_1m.low - buf if side == "long" else self._last_1m.high + buf
         target = float(sig["target"]) if sig.get("target") is not None else None
-        entry = self._plan(side, float(stop), price, "TradingView alert", target)
-        if not entry:
-            return None
+        entry = self._plan(side, market, "TradingView alert", target)
         self._open(entry, u, market)
         return f"{kind} order"
 

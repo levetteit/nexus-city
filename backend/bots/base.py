@@ -30,10 +30,9 @@ DONE_FOR_DAY = ("off_duty", "stopped", "walked", "disabled")
 
 @dataclass
 class Entry:
-    """A trade plan, in underlying prices."""
+    """A trade plan. There is no stop: the strategy decides when to get out."""
     side: str                 # 'long' | 'short'
-    stop: float               # invalidation level
-    target: Optional[float]   # first target (scale out half here)
+    target: Optional[float]   # where the move is expected to go (shown in the UI only)
     note: str = ""
 
 
@@ -62,8 +61,6 @@ class BotConfig:
     contracts: int = 2
     profit_brake: float = 1500.0   # stop for the day once realized P&L >= this
     max_daily_loss: float = 600.0
-    option_stop_pct: Optional[float] = 0.5   # hard stop on option premium (safety net)
-    max_hold_min: float = 90.0     # time stop, in sim minutes
     otm_steps: int = 0             # 0 = ATM strikes
     color: str = "#7c5cff"
     params: dict = field(default_factory=dict)   # strategy-specific settings
@@ -79,12 +76,9 @@ class Bot:
         self.status = "scanning"
         self.position: Optional[Position] = None
         self.plan: Optional[Entry] = None
-        self.scaled = False
         self.realized = 0.0
         self.trades: list[TradeRecord] = []
-        self._opened_clock = 0.0
         self._last_bar_count = -1
-        self._entry_underlying = 0.0
 
     # ---- strategy hooks -------------------------------------------------
     def on_bar(self, htf: Optional[list[Bar]], ltf: list[Bar], market: Market) -> Optional[Entry]:
@@ -144,31 +138,16 @@ class Bot:
             strike = u.atm_strike(kind, self.cfg.otm_steps)
             self.position = self.broker.open(self.cfg.underlying, kind, self.cfg.contracts, market, strike)
         self.plan = entry
-        self.scaled = False
-        self._entry_underlying = u.price
-        self._opened_clock = market.clock_min
         self.status = "in_trade"
         self.emit({"type": "trade_open", "bot": self.cfg.id, "contract": self.position.label,
                    "qty": self.position.qty, "entry": round(self.position.entry, 2), "note": entry.note})
 
     def _manage_tick(self, u: Underlying, market: Market) -> None:
-        pos, plan = self.position, self.plan
-        long = plan.side == "long"
-        price = u.price
-        if (long and price <= plan.stop) or (not long and price >= plan.stop):
-            return self._close("stop hit" if not self.scaled else "runner stopped", market)
-        if plan.target is not None and not self.scaled and ((long and price >= plan.target) or (not long and price <= plan.target)):
-            if pos.qty > 1:
-                self._scale_out(pos.qty // 2, market)
-            else:
-                return self._close("target hit", market)
-        if not pos.is_future and self.cfg.option_stop_pct is not None:
-            if self.broker.mark(pos, market) / pos.entry - 1 <= -self.cfg.option_stop_pct:
-                return self._close("premium stop", market)
-        if market.clock_min - self._opened_clock >= self.cfg.max_hold_min:
-            return self._close("time stop", market)
+        # No stop loss, target or time stop: exits come from the strategy
+        # (exit_on_bar / on_signal). The one forced exit is the close, since
+        # same-day options expire and positions aren't held overnight.
         if market.minutes_to_close <= 5:
-            return self._close("end of day", market)
+            self._close("end of day", market)
 
     def _record(self, qty: int, exit_px: float, reason: str, market: Market) -> TradeRecord:
         pos = self.position
@@ -178,15 +157,6 @@ class Bot:
                           round(exit_px, 2), round(pnl, 2), reason, pos.opened_at, market.clock_str)
         self.trades.append(rec)
         return rec
-
-    def _scale_out(self, qty: int, market: Market) -> None:
-        """Take part of the position off at the first target and move the runner's stop to breakeven."""
-        rec = self._record(qty, self.broker.close(self.position, market), "target · scaled out", market)
-        self.position.qty -= qty
-        self.scaled = True
-        self.plan.stop = self._entry_underlying
-        self.emit({"type": "trade_close", "bot": self.cfg.id, "pnl": rec.pnl, "reason": rec.reason,
-                   "contract": rec.contract, "status": self.status, "partial": True})
 
     def _close(self, reason: str, market: Market) -> None:
         pos = self.position
@@ -228,7 +198,6 @@ class Bot:
             unreal = self.position.pnl(mark)
             pos = {"contract": self.position.label, "qty": self.position.qty,
                    "entry": round(self.position.entry, 2), "mark": round(mark, 2),
-                   "stop": round(self.plan.stop, 2),
                    "target": round(self.plan.target, 2) if self.plan.target is not None else None,
                    "note": self.plan.note}
         wins = sum(1 for t in self.trades if t.pnl > 0)

@@ -400,7 +400,8 @@ function renderWorker() {
   const pos = bot.position
     ? `<div class="row"><span>Holding</span><span>${bot.position.qty}× ${bot.position.contract}</span></div>
        <div class="row"><span>Entry → mark</span><span>${bot.position.entry} → ${bot.position.mark}</span></div>
-       <div class="row"><span>Stop / target (${bot.underlying})</span><span>${bot.position.stop} / ${bot.position.target ?? "—"}</span></div>
+       <div class="row"><span>Next FFVG (${bot.underlying})</span><span>${bot.position.target ?? "—"}</span></div>
+       <div class="row"><span>Exit</span><span>pointer against</span></div>
        <div class="row"><span>Open P&L</span><span class="${bot.unrealized >= 0 ? "pos" : "neg"}">${money(bot.unrealized)}</span></div>`
     : "";
   const trades = bot.recent.map((t) => `<tr><td>${t.closed_at}</td><td>${t.contract}</td><td>${t.reason}</td><td class="${t.pnl >= 0 ? "pos" : "neg"}">${money(t.pnl)}</td></tr>`).join("");

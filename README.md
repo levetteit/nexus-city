@@ -46,10 +46,8 @@ Untapped FFVGs & IFFVGs, Troop Toolkit).
 1. **Pointer** (on the bot's 3–6 minute candles): a candle that closes back inside the previous candle's wick. Bullish = green, close above the previous body but at or below the previous high; bearish is the mirror. By default its wick must also sweep the previous candle's low/high.
 2. **FFVG** (on 1-minute candles): the first fair value gap after the pointer, in its direction. It "sponsors" the move. No FFVG within 15 minutes → reset.
 3. **Entry**: price comes back and tests the FFVG without closing through it → enter (calls / MNQ long for bullish, puts / MNQ short for bearish).
-4. **Stop**: just past the pointer's wick.
-5. **Target**: the next opposing FVG ("every pointer guarantees the move to the next FFVG"), or 2R if there isn't one at least 1R away. Half comes off there and the runner's stop moves to breakeven.
-6. **Runner**: stays on until a pointer forms against it.
-7. **Inverse**: if a candle closes through the FFVG before the test, it's an IFFVG and the pointer failed. **3 inverses → the bot walks away for the day.**
+4. **Exit**: there is **no stop loss and no take-profit**. The trade stays on until a pointer forms against it. The next opposing FVG ("every pointer guarantees the move to the next FFVG") is shown as the expected move only.
+5. **Inverse**: if a candle closes through the FFVG before the test, it's an IFFVG and the pointer failed. **3 inverses → the bot walks away for the day.**
 
 ## TradingView alerts (use your real indicators)
 
@@ -69,10 +67,10 @@ Your TradingView indicators can drive the bots through webhook alerts.
 
 | `signal` | What the bot does |
 |---|---|
-| `bullish_pointer` / `bearish_pointer` | starts a setup (wick = `low` / `high`); if it's in a trade the other way, exits ("pointer against") |
+| `bullish_pointer` / `bearish_pointer` | starts a setup; if it's in a trade the other way, exits ("pointer against") |
 | `bullish_ffvg` / `bearish_ffvg` | marks the pointer's FFVG (send `top` and `bottom` if your alert has them, else uses the bot's own 1m FVG) and waits for the test |
 | `bullish_iffvg` / `bearish_iffvg` | the opposite FFVG was closed through → counts an inverse |
-| `long` / `short` | enters right away (optional `stop`, `target`) |
+| `long` / `short` | enters right away (optional `target`, shown only) |
 | `exit` | closes the position |
 
 Alerts go to every bot on that symbol (`MNQ1!`, `CME_MINI:MNQ1!`, `MNQZ2026` → MNQ), or add `"bot": "mnq-3m"` to target one. Each bot's `signals` param picks `builtin`, `tradingview` or `both` (default). A building's halo flashes and shows "TV · …" when an alert lands.
@@ -84,10 +82,8 @@ Alerts go to every bot on that symbol (`MNQ1!`, `CME_MINI:MNQ1!`, `MNQZ2026` →
 | Rule | Default | Effect |
 |---|---|---|
 | Profit brake | per bot, e.g. $1,800 | stops trading for the day once it's up this much ("off duty") |
-| Max daily loss | per bot, e.g. $700 | stops trading for the day ("sent home"). It's checked after each trade closes, so one bad trade can overshoot it |
-| Premium stop | −50% (options only) | safety net on top of the structure stop |
-| Time stop | 90 min | exits stale trades |
-| End of day | 5 min before close | flattens everything |
+| Max daily loss | per bot, e.g. $700 | no new trades for the day ("sent home"). It's checked after a trade closes and never closes an open trade, so a single trade can lose more than this |
+| End of day | 5 min before close | flattens everything (same-day options expire; nothing is held overnight) |
 
 ### Add a worker
 
