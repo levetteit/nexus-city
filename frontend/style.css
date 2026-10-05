@@ -58,6 +58,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .pop { font-family: var(--pixel); font-size: 14px; font-weight: 900; animation: rise 2.2s ease-out forwards; text-shadow: 0 0 10px currentColor; }
 .pop.win { color: var(--green); }
 .pop.loss { color: var(--red); }
+.pop.tv { color: #5ee7ff; font-size: 11px; }
 @keyframes rise { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-70px); opacity: 0; } }
 
 /* ---------- panels ---------- */

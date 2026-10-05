@@ -10,8 +10,9 @@ follows the same shift rules:
 * walked    - the strategy told it to walk away from the market for the day
 * disabled  - turned off by you
 
-Strategies work on closed candles of the bot's timeframe. They implement
-`on_bar()` (return an `Entry` to open a trade) and optionally `exit_on_bar()`.
+Strategies see every closed 1-minute candle, plus the bot's own timeframe
+candles whenever one closes. They implement `on_bar()` (return an `Entry` to
+open a trade) and optionally `exit_on_bar()` and `on_signal()` (webhooks).
 """
 from __future__ import annotations
 
@@ -57,7 +58,7 @@ class BotConfig:
     underlying: str
     district: str                  # label for the street sign / UI
     instrument: str = "option"     # 'option' | 'future'
-    timeframe: int = 1             # candle size in minutes
+    timeframe: int = 3             # candle size in minutes for the bot's main signal
     contracts: int = 2
     profit_brake: float = 1500.0   # stop for the day once realized P&L >= this
     max_daily_loss: float = 600.0
@@ -86,12 +87,17 @@ class Bot:
         self._entry_underlying = 0.0
 
     # ---- strategy hooks -------------------------------------------------
-    def on_bar(self, bars: list[Bar], market: Market) -> Optional[Entry]:
-        """Called on every closed candle while flat. Return an Entry to trade."""
+    def on_bar(self, htf: Optional[list[Bar]], ltf: list[Bar], market: Market) -> Optional[Entry]:
+        """Called on every closed 1m candle while flat. `htf` holds the bot's
+        timeframe candles when one just closed, else None. Return an Entry to trade."""
         raise NotImplementedError
 
-    def exit_on_bar(self, bars: list[Bar], market: Market) -> Optional[str]:
-        """Called on every closed candle while in a trade. Return a reason to exit."""
+    def exit_on_bar(self, htf: Optional[list[Bar]], ltf: list[Bar], market: Market) -> Optional[str]:
+        """Called on every closed 1m candle while in a trade. Return a reason to exit."""
+        return None
+
+    def on_signal(self, sig: dict, market: Market) -> Optional[str]:
+        """An external alert (TradingView webhook). Return a description if acted on."""
         return None
 
     def on_position_closed(self, pnl: float) -> None:
@@ -112,17 +118,16 @@ class Bot:
         if self.position:
             self._manage_tick(u, market)
 
-        new_bar = u.bar_count != self._last_bar_count and u.bar_count % self.cfg.timeframe == 0
-        if not new_bar or self.status in DONE_FOR_DAY:
+        if u.bar_count == self._last_bar_count or not u.bars or self.status in DONE_FOR_DAY:
             return
         self._last_bar_count = u.bar_count
-        bars = self._candles(u)
+        htf = self._candles(u) if u.bar_count % self.cfg.timeframe == 0 else None
         if self.position:
-            reason = self.exit_on_bar(bars, market)
+            reason = self.exit_on_bar(htf, u.bars, market)
             if reason:
                 self._close(reason, market)
         elif market.minutes_to_close > 10:
-            entry = self.on_bar(bars, market)
+            entry = self.on_bar(htf, u.bars, market)
             if entry and self.status not in DONE_FOR_DAY:
                 self._open(entry, u, market)
 

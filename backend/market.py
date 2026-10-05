@@ -116,6 +116,15 @@ class Underlying:
             if len(self.bars) > 1200:
                 self.bars = self.bars[-1200:]
 
+    def anchor(self, price: float) -> None:
+        """Snap the simulation to a real price (e.g. the close sent in a TradingView alert)."""
+        self.price = round(price / self.tick_size) * self.tick_size
+        self.history.append(self.price)
+        if self._bar:
+            self._bar.high = max(self._bar.high, self.price)
+            self._bar.low = min(self._bar.low, self.price)
+            self._bar.close = self.price
+
     def atm_strike(self, kind: str, otm_steps: int = 0) -> float:
         base = round(self.price / self.strike_step) * self.strike_step
         offset = otm_steps * self.strike_step

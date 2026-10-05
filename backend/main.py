@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import json
+import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from .config import TICK_SECONDS
+from .bots.pointer import SIGNALS
 from .engine import Engine
 
 engine = Engine()
@@ -54,6 +59,39 @@ def toggle(bot_id: str, action: str) -> dict:
         raise HTTPException(404)
     engine.set_enabled(bot_id, action == "on")
     return engine.bots[bot_id].snapshot(engine.market)
+
+
+def normalize_symbol(ticker: str) -> str:
+    """'CME_MINI:MNQ1!' / 'MNQZ2026' / 'NASDAQ:QQQ' -> 'MNQ' / 'MNQ' / 'QQQ'."""
+    t = ticker.split(":")[-1].upper()
+    t = re.sub(r"\d+!$", "", t)                      # continuous futures: MNQ1!
+    m = re.match(r"^(MNQ|MES|NQ|ES)[FGHJKMNQUVXZ]\d{2,4}$", t)  # dated futures: MNQZ2026
+    return m.group(1) if m else t
+
+
+@app.post("/api/tradingview")
+async def tradingview(request: Request) -> dict:
+    """TradingView alert webhook. Put a JSON message in the alert, for example:
+
+    {"secret": "<STARNET_WEBHOOK_SECRET>", "ticker": "{{ticker}}", "signal": "bullish_pointer",
+     "price": {{close}}, "high": {{high}}, "low": {{low}}, "tf": "{{interval}}"}
+    """
+    secret = os.getenv("STARNET_WEBHOOK_SECRET")
+    if not secret:
+        raise HTTPException(503, "set STARNET_WEBHOOK_SECRET to enable the TradingView webhook")
+    try:
+        payload = json.loads(await request.body())
+    except ValueError:
+        raise HTTPException(400, "alert message must be JSON")
+    if not isinstance(payload, dict) or not hmac.compare_digest(str(payload.get("secret", "")), secret):
+        raise HTTPException(401, "bad secret")
+    signal = str(payload.get("signal", "")).lower()
+    if signal not in SIGNALS:
+        raise HTTPException(400, f"signal must be one of {sorted(SIGNALS)}")
+    payload["signal"] = signal
+    if "ticker" in payload:
+        payload["symbol"] = normalize_symbol(str(payload["ticker"]))
+    return {"ok": True, "symbol": payload.get("symbol"), "results": engine.signal(payload)}
 
 
 @app.websocket("/ws")

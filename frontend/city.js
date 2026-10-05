@@ -307,6 +307,20 @@ function popText(b, pnl) {
   setTimeout(() => { b.group.remove(obj); el.remove(); }, 2300);
 }
 
+// a TradingView alert landed: flash the building's halo and show what arrived
+function tvPing(ev) {
+  const b = buildings.get(ev.bot);
+  if (!b) return;
+  const el = document.createElement("div");
+  el.className = "pop tv";
+  el.textContent = `TV · ${ev.action}`;
+  const obj = new CSS2DObject(el);
+  obj.position.set(0, b.hero + 8, 0);
+  b.group.add(obj);
+  b.tvFlash = 1;
+  setTimeout(() => { b.group.remove(obj); el.remove(); }, 2300);
+}
+
 function updateCoins(dt) {
   for (let i = coins.length - 1; i >= 0; i--) {
     const c = coins[i];
@@ -395,6 +409,8 @@ function renderWorker() {
     <div class="row"><span>Strategy</span><span>${bot.strategy} · ${bot.timeframe}m candles</span></div>
     <div class="row"><span>Instrument</span><span>${bot.instrument === "future" ? `${bot.underlying} futures` : `${bot.underlying} options`}</span></div>
     ${bot.info?.setup ? `<div class="row"><span>Setup</span><span style="text-align:right;max-width:65%">${bot.info.setup}</span></div>` : ""}
+    ${bot.info?.signals ? `<div class="row"><span>Signals from</span><span>${{ builtin: "built-in detection", tradingview: "TradingView alerts", both: "built-in + TradingView" }[bot.info.signals]}</span></div>` : ""}
+    ${bot.info?.last_signal ? `<div class="row"><span>Last TV alert</span><span>${bot.info.last_signal}</span></div>` : ""}
     ${bot.info?.walk_after ? `<div class="row"><span>Pointer inverses</span><span>${bot.info.inverses} / ${bot.info.walk_after}</span></div>` : ""}
     <div class="row"><span>Status</span><span>${STATUS_TEXT[bot.status](bot)}</span></div>
     <div class="row"><span>Earned today</span><span class="${bot.realized >= 0 ? "pos" : "neg"}">${money(bot.realized)}</span></div>
@@ -440,7 +456,10 @@ function connect() {
     const msg = JSON.parse(m.data);
     if (msg.type !== "tick") return;
     applyState(msg.state);
-    for (const ev of msg.events) if (ev.type === "trade_close") sendCoins(ev.bot, ev.pnl);
+    for (const ev of msg.events) {
+      if (ev.type === "trade_close") sendCoins(ev.bot, ev.pnl);
+      if (ev.type === "tv_signal") tvPing(ev);
+    }
   };
   ws.onclose = () => { conn.classList.remove("hidden"); setTimeout(connect, 1500); };
 }
@@ -462,6 +481,10 @@ function frame() {
     b.halo.rotation.z += dt * (active ? 2.5 : 0.6);
     b.halo.position.y = b.hero + 6 + Math.sin(t * 1.5 + b.pos.x) * 0.4;
     b.haloMat.opacity = b.status === "disabled" ? 0.15 : active ? 1 : 0.6;
+    if (b.tvFlash > 0) {
+      b.tvFlash = Math.max(0, b.tvFlash - dt * 0.8);
+      b.halo.scale.setScalar(1 + b.tvFlash * 0.8);
+    }
   }
 
   vaultPulse = Math.max(0, vaultPulse - dt * 1.5);

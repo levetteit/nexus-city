@@ -34,6 +34,23 @@ class Engine:
         out, self.events[:] = list(self.events), []
         return out
 
+    def signal(self, payload: dict) -> list[dict]:
+        """Route a TradingView alert to the bot(s) it's for. Returns what each bot did."""
+        targets = [self.bots[payload["bot"]]] if payload.get("bot") in self.bots else [
+            b for b in self.bots.values() if b.cfg.underlying == payload.get("symbol")]
+        if not targets:
+            return []
+        if payload.get("price") is not None:
+            self.market.underlyings[targets[0].cfg.underlying].anchor(float(payload["price"]))
+        results = []
+        for bot in targets:
+            did = bot.on_signal(payload, self.market)
+            if did:
+                ev = {"type": "tv_signal", "bot": bot.cfg.id, "signal": payload["signal"], "action": did}
+                self.events.append(ev)
+                results.append(ev)
+        return results
+
     def set_enabled(self, bot_id: str, enabled: bool) -> None:
         self.bots[bot_id].set_enabled(enabled, self.market)
 
