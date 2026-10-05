@@ -492,6 +492,30 @@ class ProcBot(Bot):
         out["confirm_with"] = self.p["confirm_with"] if self._confirming else None
         return out
 
+    def chart(self, market: Market, tf: int = 1, count: int = 180) -> dict:
+        out = super().chart(market, tf, count)
+        e = self.engine
+        if not e or not out["candles"]:
+            return out
+        first = out["candles"][0][0]
+        out["zones"] = [{"side": z.side, "top": z.top, "bottom": z.bottom, "kind": z.kind, "tf": z.tf,
+                         "from": max(z.created, first), "tapped": z.tapped_at is not None}
+                        for z in e.zones if not z.dead and (z.tapped_at is None or z.tapped_at >= first)][-40:]
+        mine = set(self.p["pointer_tfs"])
+        out["procs"] = [{"t": t - t % tf, "kind": k, "side": sd, "tf": ptf}
+                        for t, k, sd, ptf in e.recent if k in ("proc", "pointer") and ptf in mine and t >= first]
+        if e.proc:
+            p = e.proc
+            out["proc"] = {"side": p.side, "tf": p.tf, "high": p.high, "low": p.low, "t": p.time - p.time % tf,
+                           "zone": p.zone.label()}
+        if self._confirming and self.partner:
+            out["partner"] = {"symbol": self.p["confirm_with"], "mode": self.p["confirm_mode"],
+                              "marks": [{"t": t - t % tf, "kind": k, "side": sd, "tf": ptf}
+                                        for t, k, sd, ptf in self.partner.recent
+                                        if k in ("proc", "pointer") and t >= first]}
+        out["setup"] = self.last_event
+        return out
+
     def info(self) -> dict:
         e = self.engine
         live = [z for z in (e.zones if e else []) if not z.dead and z.tapped_at is None]

@@ -6,6 +6,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { Room, moodEmoji, tierOf, GADGETS } from "./room.js";
+import { ChartView } from "./chart.js";
 
 // ---------------------------------------------------------------- setup
 const app = document.getElementById("app");
@@ -353,6 +354,7 @@ const STATUS_TEXT = {
   walked: (b) => `${b.info?.inverses ?? 3} pointer inverses · walked away`,
   disabled: () => "turned off",
 };
+const fmt = (v) => `$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const money = (v) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 function applyState(s) {
@@ -462,7 +464,6 @@ function execRows(s) {
 const PHASES = { evaluation: "EVALUATION", funded: "FUNDED", failed: "FAILED" };
 function renderAccount(a) {
   if (!a) return;
-  const fmt = (v) => `$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
   document.getElementById("acct-firm").textContent = a.firm.toUpperCase();
   const phase = document.getElementById("acct-phase");
   phase.textContent = PHASES[a.phase];
@@ -488,6 +489,7 @@ function renderAccount(a) {
     <div class="row"><span>Day stop</span><span>-${fmt(a.daily_stop)}</span></div>
     <div class="row"><span>Micros open</span><span>${a.open_micros} / ${a.max_micros}</span></div>
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
+    ${state.mode === "live" ? `<button class="reports-btn" data-reports>📒 DAILY REPORTS</button>` : ""}
     ${scoreRows(state)}
     ${newsRows(state)}
     ${alertRows(state)}
@@ -522,6 +524,67 @@ function newsRows(s) {
     : `<div class="row"><span>News</span><span>no high-impact USD news ahead</span></div>`;
   return `<div class="row"><span><b>📰 News filter</b></span><span>${n.error ? "using saved calendar" : "on"}</span></div>${hold}${next}`;
 }
+
+// ---------------------------------------------------------------- daily reports
+async function openReports(day = null) {
+  const panel = document.getElementById("reports"), body = document.getElementById("reports-body");
+  panel.classList.remove("hidden");
+  body.innerHTML = `<p class="note">loading…</p>`;
+  let list = [];
+  try { list = await (await fetch("/api/reports")).json(); } catch { /* shown as empty */ }
+  if (!Array.isArray(list) || !list.length) {
+    body.innerHTML = `<p class="note">The first report arrives after the first full trading day (it's pushed to your phone around 6pm ET).</p>`;
+    return;
+  }
+  body.innerHTML = list.map((r) => `
+    <div class="day" data-report-day="${r.day}">
+      <div class="row"><span><b>${new Date(r.day + "T12:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</b>
+        ${r.passed ? `<span class="tag2">PASSED</span>` : ""}${r.goal_hit ? `<span class="tag2">GOAL</span>` : ""}</span>
+        <span><b class="${r.pnl >= 0 ? "pos" : "neg"}">${money(r.pnl)}</b> · ${r.trades} trade${r.trades === 1 ? "" : "s"}${r.check ? ` · replay ${r.check === "match" ? "✅" : "⚠️"}` : ""}</span></div>
+      <div class="detail hidden" id="report-${r.day}"></div>
+    </div>`).join("");
+  if (day) toggleReport(day, true);
+}
+
+async function toggleReport(day, open = false) {
+  const el = document.getElementById(`report-${day}`);
+  if (!el) return;
+  if (!el.classList.contains("hidden") && !open) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  el.innerHTML = `<p class="note">loading…</p>`;
+  const r = await (await fetch(`/api/reports/${day}`)).json();
+  const a = r.account;
+  const progress = a.phase === "evaluation" && a.target
+    ? `Evaluation ${money(a.profit)} / ${fmt(a.target)} (${Math.max(0, Math.round((100 * a.profit) / a.target))}%)`
+    : `Funded ${money(a.profit)} · ${a.profitable_days}/${a.payout_days} payout days${a.payout_eligible ? " · payout eligible" : ""}`;
+  const c = r.check;
+  const check = c
+    ? `<div class="row"><span>Replay check</span><span class="${c.verdict === "match" ? "pos" : "neg"}">${c.verdict === "match" ? "✅ matched" : "⚠️ drift"} · ${c.matched}/${Math.max(c.live_trades, c.replay_trades)} trades · replay ${money(c.replay_pnl)}</span></div>
+       ${c.explained_by.length ? `<small class="note">${c.explained_by.join("; ")}</small>` : ""}
+       ${c.only_replay.length ? `<small class="note">replay only: ${c.only_replay.join(", ")}</small>` : ""}
+       ${c.only_live.length ? `<small class="note">paper only: ${c.only_live.join(", ")}</small>` : ""}`
+    : `<div class="row"><span>Replay check</span><span>pending</span></div>`;
+  const trades = r.trades.map((t) => `
+    <div class="trade"><b class="${t.pnl >= 0 ? "pos" : "neg"}">${money(t.pnl)}</b> · ${t.handle} ${t.side.toUpperCase()} ×${t.qty} · ${t.opened}→${t.closed}
+      <small>in: ${t.why || "—"} @ ${t.entry}${t.adds.length ? ` · added: ${t.adds.join(", ")}` : ""}</small>
+      <small>out: ${t.exit_reason} @ ${t.exit}</small></div>`).join("");
+  el.innerHTML = `
+    <div class="row"><span>Day</span><span><b class="${r.pnl >= 0 ? "pos" : "neg"}">${money(r.pnl)}</b> · ${r.wins}W ${r.losses}L${r.goal_hit ? " · goal ✓" : ""}</span></div>
+    <div class="row"><span>Account</span><span>${progress}</span></div>
+    <div class="row"><span>Room to MLL</span><span>${fmt(r.room)}</span></div>
+    ${check}
+    ${r.news.length ? `<div class="row"><span>News pauses</span><span>${r.news.join(", ")}</span></div>` : ""}
+    ${r.halts.length ? `<div class="row"><span>Stopped</span><span>${r.halts.join(", ")}</span></div>` : ""}
+    ${r.partial ? `<small class="note">the server restarted during this day, so some trades may be missing</small>` : ""}
+    ${trades || `<p class="note">no trades</p>`}`;
+}
+
+const wantReport = new URLSearchParams(location.search).get("report");
+if (wantReport) setTimeout(() => openReports(wantReport), 1500);
+navigator.serviceWorker?.addEventListener("message", (e) => {
+  const day = e.data?.open && new URL(e.data.open, location.href).searchParams.get("report");
+  if (day) openReports(day);
+});
 
 // ---------------------------------------------------------------- activity feed
 const lastSetup = new Map();
@@ -593,6 +656,12 @@ function closeRoom() {
   openWorkerId = null;
 }
 document.getElementById("room-close").onclick = closeRoom;
+const chartView = new ChartView(document.getElementById("chart"));
+document.getElementById("room-chart").onclick = () => {
+  const bot = state?.bots.find((b) => b.id === roomBotId);
+  if (bot) chartView.open(bot);
+};
+document.getElementById("chart-close").onclick = () => chartView.close();
 document.getElementById("room-stats").onclick = () => {
   const w = document.getElementById("worker");
   w.classList.toggle("hidden");
@@ -648,6 +717,9 @@ document.addEventListener("click", async (e) => {
     if (close.dataset.close === "worker") openWorkerId = null;
   }
   if (e.target.closest("[data-reset]")) await fetch("/api/account/reset", { method: "POST" });
+  if (e.target.closest("[data-reports]")) openReports();
+  const rd = e.target.closest("[data-report-day]");
+  if (rd) toggleReport(rd.dataset.reportDay);
   const pb = e.target.closest("[data-push]");
   if (pb) {
     const act = pb.dataset.push;

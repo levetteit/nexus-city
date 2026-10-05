@@ -50,6 +50,8 @@ class TradeRecord:
     reason: str
     opened_at: str
     closed_at: str
+    t_open: int = 0     # candle minute the trade opened / closed (chart markers)
+    t_close: int = 0
 
 
 @dataclass
@@ -151,6 +153,38 @@ class Bot:
         kind = "call" if side == "long" else "put"
         return self.broker.open(self.cfg.underlying, kind, qty, market, u.atm_strike(kind, self.cfg.otm_steps))
 
+    _t_open = 0
+
+    def _last_t(self, market: Market) -> int:
+        bars = market.underlyings[self.cfg.underlying].bars
+        return bars[-1].t if bars else 0
+
+    def chart(self, market: Market, tf: int = 1, count: int = 180) -> dict:
+        """Clock-aligned candles on `tf` minutes plus today's trades, for the full-screen chart."""
+        u = market.underlyings[self.cfg.underlying]
+        candles: list[list] = []
+        for b in u.bars[-(count + 1) * tf:]:
+            start = b.t - b.t % tf
+            if candles and candles[-1][0] == start:
+                c = candles[-1]
+                c[2], c[3], c[4] = max(c[2], b.high), min(c[3], b.low), b.close
+            else:
+                candles.append([start, b.open, b.high, b.low, b.close, b.time])
+        candles = candles[-count:]
+        trades = [{"side": "long" if t.contract.endswith("LONG") else "short", "qty": t.qty, "entry": t.entry,
+                   "exit": t.exit, "pnl": t.pnl, "t_open": t.t_open - t.t_open % tf,
+                   "t_close": t.t_close - t.t_close % tf, "reason": t.reason, "opened": t.opened_at,
+                   "closed": t.closed_at} for t in self.trades]
+        pos = None
+        if self.position:
+            mark = self.broker.mark(self.position, market)
+            pos = {"side": self.plan.side, "qty": self.position.qty, "entry": self.position.entry,
+                   "pnl": round(self.position.pnl(mark), 2), "t_open": self._t_open - self._t_open % tf,
+                   "why": self.plan.note}
+        return {"symbol": self.cfg.underlying, "name": self.cfg.name, "color": self.cfg.color, "tf": tf,
+                "clock": market.clock_str, "price": u.price, "candles": candles, "trades": trades,
+                "position": pos, "zones": [], "procs": [], "partner": None, "status": self.status}
+
     news_hold = None   # a NewsEvent while the engine's news filter blocks new trades (see news.py)
 
     def _news_blocked(self, what: str) -> bool:
@@ -167,6 +201,7 @@ class Bot:
         if qty < self.cfg.contracts:   # never open undersized; wait for room in the budget
             return
         self.position = self._buy(entry.side, qty, u, market)
+        self._t_open = self._last_t(market)
         self.account.filled(self.cfg.id, self.cfg.underlying, qty)
         self.plan = entry
         self.status = "in_trade"
@@ -203,7 +238,8 @@ class Bot:
         self.career += pnl
         self.career_best = max(self.career_best, self.career)
         rec = TradeRecord(next(_trade_ids), self.cfg.id, pos.label, qty, round(pos.entry, 2),
-                          round(exit_px, 2), round(pnl, 2), reason, pos.opened_at, market.clock_str)
+                          round(exit_px, 2), round(pnl, 2), reason, pos.opened_at, market.clock_str,
+                          t_open=self._t_open, t_close=self._last_t(market))
         self.trades.append(rec)
         return rec
 

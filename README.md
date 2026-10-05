@@ -283,6 +283,38 @@ Before you connect real money, look for:
 - **Replay match:** close to 100% on days without a restart.
 - **Green days and average day:** near the backtest after 15–20 days.
 
+## Daily report (`backend/report.py`)
+
+When each trading day ends (around 6pm ET in live mode), the app saves a report
+of the day. Once the paper-vs-backtest replay has checked the day, it pushes a
+summary to your phone, for example:
+
+> 📊 Tue Oct 6 · +$640 · 3 trades
+> 2W 1L · goal ✓
+> Eval +$1,840 / $3,000 (61%) · $2,450 room
+> Replay ✅ 3/3 trades matched
+> Best: OG_Pointer +$520 (3m PROC + MES)
+
+Tap the push, or 📒 Daily reports in the account panel, to see each trade's
+entry reason, adds, exit reason and prices. The panel also shows news pauses and
+daily stops. Reports are saved in `data/reports/` and served at `/api/reports`.
+For ntfy, set `STARNET_PUBLIC_URL` (Render sets `RENDER_EXTERNAL_URL` for you)
+so that tapping the notification opens the report.
+
+## Full-screen chart
+
+In any bot's room, tap **CHART** to open a full-screen chart of what the bot sees:
+
+- 1m, 3m, 6m or 15m candles, aligned to the clock
+- The untapped FFVG and IFFVG zones (✓ marks a zone that has been tapped)
+- The live PROC box
+- Every pointer (small arrow) and PROC (big arrow) on the bot's timeframes
+- The MES pointers that confirm entries, in the strip at the bottom
+- Today's entries (yellow arrow), exits (✕ with P&L) and the open position with live P&L
+
+Drag to scroll back, pinch or scroll to zoom, and double-tap to return to now.
+The chart refreshes every 3 seconds.
+
 ## Watch it from your phone, 24/7 (deploy to Render)
 
 The repo is ready to host: `Dockerfile` + `render.yaml` run the city in live

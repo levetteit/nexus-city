@@ -10,14 +10,18 @@ self.addEventListener("push", (e) => {
     icon: "icon-192.png",
     badge: "icon-192.png",
     tag: `${d.tag || "starnet"}-${Date.now()}`,   // every trade gets its own notification
-    data: { url: "/" },
+    data: { url: d.url || "/" },
   }));
 });
 
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
+  const url = e.notification.data?.url || "/";
   e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
-    for (const w of wins) if ("focus" in w) return w.focus();
-    return self.clients.openWindow("/");
+    for (const w of wins) if ("focus" in w) {
+      if (url !== "/") w.postMessage({ open: url });   // e.g. the day's report
+      return w.focus();
+    }
+    return self.clients.openWindow(url);
   }));
 });
