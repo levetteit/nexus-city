@@ -17,7 +17,7 @@ from typing import Optional, Protocol
 
 from .market import Market
 
-FUTURES_MULTIPLIER = {"MNQ": 2.0}   # dollars per index point
+FUTURES_MULTIPLIER = {"MNQ": 2.0, "MES": 5.0, "M2K": 5.0, "MYM": 0.5}   # dollars per index point
 
 
 @dataclass

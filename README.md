@@ -1,9 +1,10 @@
 # Starnet City
 
 A live 3D "trading city": each Python bot is a **worker** living in its own
-building and trading one underlying: options on QQQ, SPY, IWM, NVDA and TSLA, or
-**MNQ (Micro Nasdaq) futures**. Every worker runs the **Andrew Macre pointer
-strategy** on its own candle timeframe. When a worker is in a trade its
+building and trading micro futures (**MNQ, MES, M2K**) with the **Andrew Macre
+pointer strategy**. All workers share **one prop firm account** whose rules
+(Topstep 50K by default) they're built to pass: first the Trading Combine,
+then the funded stage. When a worker is in a trade its
 building fires a light beam into the sky. When it closes a trade, gold coins (or
 red ones) roll down its road to **The Vault** in the middle of town.
 
@@ -26,11 +27,12 @@ uvicorn backend.main:app --reload
 
 ```
 backend/
-  market.py      simulated prices + 1-minute OHLC candles, Black-Scholes 0DTE option pricing, MNQ futures
-  broker.py      PaperBroker: options (spread + fees) and futures (tick slippage + fees). Implement open/close/mark to go live
-  bots/base.py   the worker lifecycle: scanning → in_trade → off_duty / stopped / walked; stops, targets, scale-outs
+  market.py      simulated MNQ / MES / M2K prices with 1-minute OHLC candles
+  broker.py      PaperBroker: micro futures (tick slippage + fees; options still supported). Implement open/close/mark to go live
+  account.py     the shared prop firm account: Topstep 50K rules, daily stop / profit cap, contract budget, payouts
+  bots/base.py   the worker lifecycle: scanning → in_trade → off_duty / stopped / walked; 3 → 6 contract sizing
   bots/pointer.py  the Macre pointer strategy
-  config.py      who lives in the city + their risk limits
+  config.py      who lives in the city
   engine.py      ticks the market and every bot, builds the snapshot
   main.py        FastAPI: WebSocket /ws, REST /api/state, /api/bots/{id}/{on|off}
 frontend/
@@ -73,36 +75,63 @@ Your TradingView indicators can drive the bots through webhook alerts.
 | `long` / `short` | enters right away (optional `target`, shown only) |
 | `exit` | closes the position |
 
-Alerts go to every bot on that symbol (`MNQ1!`, `CME_MINI:MNQ1!`, `MNQZ2026` → MNQ), or add `"bot": "mnq-3m"` to target one. Each bot's `signals` param picks `builtin`, `tradingview` or `both` (default). A building's halo flashes and shows "TV · …" when an alert lands.
+Alerts go to every bot on that symbol (`MNQ1!`, `CME_MINI:MNQ1!`, `MNQZ2026` → MNQ; same for MES and M2K), or add `"bot": "mnq-3m"` to target one. A bullish pointer while already long adds to the position (3 → 6). Each bot's `signals` param picks `builtin`, `tradingview` or `both` (default). A building's halo flashes and shows "TV · …" when an alert lands.
 
 **Note:** the city still runs on simulated prices. Each alert's `price` snaps that symbol to the real price, but P&L between alerts is simulated until a live data feed and broker are connected.
 
-### Worker rules (every bot)
+### Position size
 
-| Rule | Default | Effect |
+Every trade **starts at 3 contracts**. When another pointer forms in the trade's
+direction and the trade is in profit, the bot **adds 3 more, up to 6, never
+more**. The whole account holds at most **12 micros** at once (two bots at full
+size), and only one bot can hold a given symbol at a time, so they never take
+opposite sides of the same contract.
+
+### Prop firm account (`backend/account.py`)
+
+All bots trade one shared account with Topstep 50K rules:
+
+| Rule | Topstep 50K | What the bots do |
 |---|---|---|
-| Profit brake | per bot, e.g. $1,800 | stops trading for the day once it's up this much ("off duty") |
-| Max daily loss | per bot, e.g. $700 | no new trades for the day ("sent home"). It's checked after a trade closes and never closes an open trade, so a single trade can lose more than this |
-| End of day | 5 min before close | flattens everything (same-day options expire; nothing is held overnight) |
+| Profit target (Combine) | $3,000 | stop for the day once it's in hand; pass at end of day |
+| Maximum Loss Limit | $2,000 below the highest end-of-day balance, locks at $50,000, counts open P&L | never let a day's loss reach it (keep a $100 cushion) |
+| Daily loss limit (optional) | $1,000 | **daily stop at −$800** (open + closed): flatten everything, done for the day |
+| Consistency | best day ≤ 50% of profit | **daily profit cap at +$1,400** (open + closed): flatten, done for the day |
+| Max size | 50 micros (Combine); funded: 20 → 30 at +$1,500 → 50 at +$2,000 | at most 12 micros open, and never above the firm's limit |
+| Payouts (funded) | 5 days of ≥ $150, then 50% of profit up to $2,000 | requested automatically; locks the MLL at $50,000 |
+
+After passing, the account switches to the funded stage. If it fails, or ends
+up with under $150 of room above the MLL, the bots stop and the panel shows
+**Reset Combine**. Change the numbers in `TOPSTEP_50K` / `Guards` for another
+firm or account size.
+
+The account's limits are the only exits besides a pointer against the trade:
+there are still **no per-trade stops**. They exist because breaking a firm rule
+fails the account.
+
+| Bot rule | Effect |
+|---|---|
+| End of day | flattens everything 5 minutes before the close |
+| Walk away | 3 pointer inverses in a day and that bot stops for the day |
 
 ### Add a worker
 
 ```python
 # backend/config.py
-(PointerBot, BotConfig(id="spy-5m", name="SPY 5M", underlying="SPY", district="LAB", timeframe=5,
+(PointerBot, BotConfig(id="mes-5m", name="MES 5M", underlying="MES", district="LAB", timeframe=5,
                        params={"signals": "tradingview", "walk_after": 2}, color="#ff00aa")),
 ```
 
-For futures, set `instrument="future"` and add the symbol's dollars-per-point to
-`FUTURES_MULTIPLIER` in `broker.py` (MNQ is $2 per point).
+To add another micro (e.g. MYM), add it to `Market.underlyings` and its dollars
+per point to `FUTURES_MULTIPLIER` in `broker.py` (MNQ $2, MES $5, M2K $5, MYM $0.50).
 
 The city lays itself out automatically for however many workers you register.
 
 ## Going live (read this first)
 
 Everything runs on **simulated prices with a paper broker**. To trade for real
-you'd swap `Market` for a live data feed and `PaperBroker` for a broker API
-(Alpaca, Tradier and IBKR for options; Tradovate, NinjaTrader and IBKR for MNQ). Paper trade for a long time first:
-0DTE options lose value fast, and the spread and fees count against every trade.
+you'd swap `Market` for a live data feed and `PaperBroker` for the platform your
+prop firm uses (Topstep runs on TopstepX / ProjectX; Tradovate and NinjaTrader
+are common elsewhere). Check your firm allows automated trading first.
 Simulated prices are a random walk, so they don't prove the strategy works
 (or that it doesn't). To judge it, backtest it on real historical candles.

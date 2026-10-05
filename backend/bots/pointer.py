@@ -33,11 +33,14 @@ Trade plan:
   1. Pointer closes on the bot's timeframe -> wait for its FFVG on 1m candles.
   2. Price comes back and tests the FFVG without closing through it -> enter
      (calls / long for bullish, puts / short for bearish).
-  3. No stop loss. The only exit is a pointer forming against the trade
-     (plus flattening before the close).
-  4. The next opposing FVG (the "next FFVG" the pointer guarantees) is shown
+  3. Size: enter with 3 contracts. Each new pointer in the trade's direction
+     while the trade is in profit adds 3 more, up to 6. The prop account
+     (`account.py`) can refuse or cap any of this.
+  4. No stop loss. The only exit is a pointer forming against the trade
+     (plus flattening before the close, and the account's own risk limits).
+  5. The next opposing FVG (the "next FFVG" the pointer guarantees) is shown
      as the expected move; it doesn't close the trade.
-  5. If the FFVG gets closed through before the test, that's an inverse.
+  6. If the FFVG gets closed through before the test, that's an inverse.
      After `walk_after` inverses in a day, the bot walks away.
 
 Signals can come from this file's own detection ("builtin"), from your
@@ -49,7 +52,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..market import Bar, Market
-from .base import Bot, Entry
+from .base import DONE_FOR_DAY, Bot, Entry
 
 
 @dataclass
@@ -212,7 +215,16 @@ class PointerBot(Bot):
         if ptr and ptr.side != self.plan.side:
             self.last_event = f"pointer formed against the trade at {ptr.time}"
             return "pointer against"
+        if ptr:
+            self._maybe_add(market, f"pointer with the trade at {ptr.time}")
         return None
+
+    def _maybe_add(self, market: Market, why: str) -> None:
+        """A new pointer in the trade's direction: size up (3 -> 6) if the trade is working."""
+        pos = self.position
+        if pos.pnl(self.broker.mark(pos, market)) > 0:
+            if self.add(market, why):
+                self.last_event = f"added to {pos.qty} contracts · {why}"
 
     def on_position_closed(self, pnl: float) -> None:
         self.last_event = f"trade closed {'+' if pnl >= 0 else '-'}${abs(pnl):,.0f} · waiting for a pointer"
@@ -224,7 +236,7 @@ class PointerBot(Bot):
         `sig` has `signal` (one of SIGNALS) and optionally `price`, `target`,
         `top`, `bottom`.
         """
-        if self.p["signals"] == "builtin" or self.status in ("off_duty", "stopped", "walked", "disabled"):
+        if self.p["signals"] == "builtin" or self.status in DONE_FOR_DAY:
             return None
         kind = sig["signal"]
         u = market.underlyings[self.cfg.underlying]
@@ -243,7 +255,9 @@ class PointerBot(Bot):
                 if side != self.plan.side:
                     self._close("pointer against (TradingView)", market)
                     return f"{kind.replace('_', ' ')} · exited"
-                return None
+                before = self.position.qty
+                self._maybe_add(market, "TradingView pointer with the trade")
+                return f"{kind.replace('_', ' ')} · added" if self.position.qty > before else None
             self._set_pointer(Pointer(side, self._n, market.clock_str, "tradingview"))
             return kind.replace("_", " ")
 

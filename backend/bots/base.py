@@ -1,12 +1,13 @@
 """Base class for every worker that lives in the city.
 
-A bot owns one building, trades one underlying (options or futures), and
-follows the same shift rules:
+A bot owns one building, trades one symbol, and shares a single prop firm
+account (`backend/account.py`) with every other bot. It follows the same
+shift rules:
 
 * scanning  - on shift, waiting for its strategy to fire a setup
 * in_trade  - holding a position (the building's light beam turns on)
-* off_duty  - hit its daily profit brake, clocked out with the money
-* stopped   - hit its daily max loss, sent home
+* off_duty  - the account hit its daily profit cap / profit target, clocked out
+* stopped   - the account hit its daily stop (or failed), sent home
 * walked    - the strategy told it to walk away from the market for the day
 * disabled  - turned off by you
 
@@ -20,6 +21,7 @@ import itertools
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from ..account import PropAccount
 from ..broker import Broker, Position
 from ..market import Bar, Market, Underlying, aggregate
 
@@ -56,11 +58,10 @@ class BotConfig:
     name: str
     underlying: str
     district: str                  # label for the street sign / UI
-    instrument: str = "option"     # 'option' | 'future'
+    instrument: str = "future"     # 'future' | 'option'
     timeframe: int = 3             # candle size in minutes for the bot's main signal
-    contracts: int = 2
-    profit_brake: float = 1500.0   # stop for the day once realized P&L >= this
-    max_daily_loss: float = 600.0
+    contracts: int = 3             # size of the first entry and of each add
+    max_contracts: int = 6         # never hold more than this
     otm_steps: int = 0             # 0 = ATM strikes
     color: str = "#7c5cff"
     params: dict = field(default_factory=dict)   # strategy-specific settings
@@ -69,10 +70,11 @@ class BotConfig:
 class Bot:
     strategy_name = "base"
 
-    def __init__(self, cfg: BotConfig, broker: Broker, emit: Callable[[Event], None]) -> None:
+    def __init__(self, cfg: BotConfig, broker: Broker, emit: Callable[[Event], None], account: PropAccount) -> None:
         self.cfg = cfg
         self.broker = broker
         self.emit = emit
+        self.account = account
         self.status = "scanning"
         self.position: Optional[Position] = None
         self.plan: Optional[Entry] = None
@@ -130,17 +132,36 @@ class Bot:
         n = (len(u.bars) // tf) * tf
         return aggregate(u.bars[len(u.bars) - n:], tf)
 
-    def _open(self, entry: Entry, u: Underlying, market: Market) -> None:
+    def _buy(self, side: str, qty: int, u: Underlying, market: Market) -> Position:
         if self.cfg.instrument == "future":
-            self.position = self.broker.open(self.cfg.underlying, entry.side, self.cfg.contracts, market)
-        else:
-            kind = "call" if entry.side == "long" else "put"
-            strike = u.atm_strike(kind, self.cfg.otm_steps)
-            self.position = self.broker.open(self.cfg.underlying, kind, self.cfg.contracts, market, strike)
+            return self.broker.open(self.cfg.underlying, side, qty, market)
+        kind = "call" if side == "long" else "put"
+        return self.broker.open(self.cfg.underlying, kind, qty, market, u.atm_strike(kind, self.cfg.otm_steps))
+
+    def _open(self, entry: Entry, u: Underlying, market: Market) -> None:
+        qty = self.account.request(self.cfg.id, self.cfg.underlying, self.cfg.contracts)
+        if qty < self.cfg.contracts:   # never open undersized; wait for room in the budget
+            return
+        self.position = self._buy(entry.side, qty, u, market)
+        self.account.filled(self.cfg.id, self.cfg.underlying, qty)
         self.plan = entry
         self.status = "in_trade"
         self.emit({"type": "trade_open", "bot": self.cfg.id, "contract": self.position.label,
                    "qty": self.position.qty, "entry": round(self.position.entry, 2), "note": entry.note})
+
+    def add(self, market: Market, why: str) -> bool:
+        """Size up the open position by `contracts`, up to `max_contracts`."""
+        pos = self.position
+        want = min(self.cfg.contracts, self.cfg.max_contracts - pos.qty)
+        qty = self.account.request(self.cfg.id, self.cfg.underlying, want) if want > 0 else 0
+        if qty <= 0:
+            return False
+        extra = self._buy(self.plan.side, qty, market.underlyings[self.cfg.underlying], market)
+        pos.entry = (pos.entry * pos.qty + extra.entry * qty) / (pos.qty + qty)
+        pos.qty += qty
+        self.account.filled(self.cfg.id, self.cfg.underlying, qty)
+        self.emit({"type": "trade_add", "bot": self.cfg.id, "qty": qty, "total": pos.qty, "why": why})
+        return True
 
     def _manage_tick(self, u: Underlying, market: Market) -> None:
         # No stop loss, target or time stop: exits come from the strategy
@@ -161,18 +182,22 @@ class Bot:
     def _close(self, reason: str, market: Market) -> None:
         pos = self.position
         rec = self._record(pos.qty, self.broker.close(pos, market), reason, market)
-        total = sum(t.pnl for t in self.trades if t.opened_at == pos.opened_at and t.contract == pos.label)
+        self.account.closed(self.cfg.id, self.cfg.underlying, rec.pnl)
         self.position = None
         self.plan = None
-        self.status = "scanning"
-        self.on_position_closed(total)
         if self.status not in DONE_FOR_DAY:
-            if self.realized >= self.cfg.profit_brake:
-                self.status = "off_duty"
-            elif self.realized <= -self.cfg.max_daily_loss:
-                self.status = "stopped"
+            self.status = "scanning"
+        self.on_position_closed(rec.pnl)
         self.emit({"type": "trade_close", "bot": self.cfg.id, "pnl": rec.pnl, "reason": reason,
                    "contract": rec.contract, "status": self.status})
+
+    def halt(self, reason: str, status: str, market: Market) -> None:
+        """The account stopped trading: flatten and clock out."""
+        if self.status == "disabled":
+            return
+        self.status = status
+        if self.position:
+            self._close(f"account: {reason}", market)
 
     def set_enabled(self, enabled: bool, market: Market) -> None:
         if not enabled:
@@ -207,7 +232,7 @@ class Bot:
             "instrument": self.cfg.instrument, "timeframe": self.cfg.timeframe,
             "status": self.status, "realized": round(self.realized, 2), "unrealized": round(unreal, 2),
             "trades": len(self.trades), "wins": wins, "position": pos,
-            "profit_brake": self.cfg.profit_brake, "max_daily_loss": self.cfg.max_daily_loss,
+            "contracts": self.cfg.contracts, "max_contracts": self.cfg.max_contracts,
             "info": self.info(),
             "recent": [t.__dict__ for t in self.trades[-8:]][::-1],
         }

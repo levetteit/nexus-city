@@ -61,11 +61,18 @@ def toggle(bot_id: str, action: str) -> dict:
     return engine.bots[bot_id].snapshot(engine.market)
 
 
+@app.post("/api/account/reset")
+def reset_account() -> dict:
+    """Start a fresh Trading Combine (e.g. after a failed one)."""
+    engine.reset_account()
+    return engine.account.snapshot()
+
+
 def normalize_symbol(ticker: str) -> str:
-    """'CME_MINI:MNQ1!' / 'MNQZ2026' / 'NASDAQ:QQQ' -> 'MNQ' / 'MNQ' / 'QQQ'."""
+    """'CME_MINI:MNQ1!' / 'MNQZ2026' / 'CME_MINI:MES1!' -> 'MNQ' / 'MNQ' / 'MES'."""
     t = ticker.split(":")[-1].upper()
     t = re.sub(r"\d+!$", "", t)                      # continuous futures: MNQ1!
-    m = re.match(r"^(MNQ|MES|NQ|ES)[FGHJKMNQUVXZ]\d{2,4}$", t)  # dated futures: MNQZ2026
+    m = re.match(r"^(MNQ|MES|M2K|MYM|NQ|ES)[FGHJKMNQUVXZ]\d{2,4}$", t)  # dated futures: MNQZ2026
     return m.group(1) if m else t
 
 

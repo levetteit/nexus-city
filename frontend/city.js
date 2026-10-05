@@ -346,8 +346,8 @@ let openWorkerId = null;
 const STATUS_TEXT = {
   scanning: () => "on shift · scanning",
   in_trade: (b) => `in trade · ${b.position?.contract ?? ""}`,
-  off_duty: () => "profit brake hit · off duty",
-  stopped: () => "max loss hit · sent home",
+  off_duty: () => "profit locked · off duty",
+  stopped: () => "account stop · sent home",
   walked: (b) => `${b.info?.inverses ?? 3} pointer inverses · walked away`,
   disabled: () => "turned off",
 };
@@ -384,7 +384,33 @@ function applyState(s) {
     .map((b) => `<tr><td><span class="dot" style="background:${b.color}"></span>${b.id === top.id && top.realized > 0 ? "👑 " : ""}${b.name}</td><td>${b.trades}</td><td>${b.wins}</td><td class="${b.realized >= 0 ? "pos" : "neg"}">${money(b.realized)}</td></tr>`)
     .join("");
 
+  renderAccount(s.account);
   if (openWorkerId) renderWorker();
+}
+
+const PHASES = { combine: "TRADING COMBINE", funded: "FUNDED (XFA)", failed: "FAILED" };
+function renderAccount(a) {
+  if (!a) return;
+  document.getElementById("acct-firm").textContent = a.firm.toUpperCase();
+  const phase = document.getElementById("acct-phase");
+  phase.textContent = PHASES[a.phase];
+  phase.className = `phase ${a.phase}`;
+  const room = a.equity - a.mll;
+  const goal = a.target
+    ? `<div class="row"><span>Target</span><span>${money(a.profit)} / $${a.target.toLocaleString()}</span></div>
+       <div class="bar"><i style="width:${Math.max(0, Math.min(100, (a.profit / a.target) * 100))}%"></i></div>`
+    : `<div class="row"><span>Payout days</span><span>${a.winning_days} / ${a.payout_days_needed} (≥ $150)</span></div>
+       ${a.payouts.length ? `<div class="row"><span>Paid out</span><span class="pos">$${a.payouts.reduce((x, y) => x + y, 0).toLocaleString()}</span></div>` : ""}`;
+  document.getElementById("acct-body").innerHTML = `
+    <div class="row"><span>Balance</span><span>$${a.balance.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+    ${goal}
+    <div class="row"><span>MLL</span><span>$${a.mll.toLocaleString()} · <b class="${room < 500 ? "neg" : ""}">$${Math.max(0, room).toLocaleString(undefined, { maximumFractionDigits: 0 })} room</b></span></div>
+    <div class="row"><span>Today</span><span class="${a.day_pnl >= 0 ? "pos" : "neg"}">${money(a.day_pnl)}</span></div>
+    <div class="row"><span>Day stop / cap</span><span>-$${a.daily_stop.toLocaleString()} / +$${a.profit_cap.toLocaleString()}</span></div>
+    <div class="row"><span>Micros open</span><span>${a.open_micros} / ${a.max_micros}</span></div>
+    <div class="row"><span>Best day</span><span>$${a.best_day.toLocaleString(undefined, { maximumFractionDigits: 0 })} · day ${a.days}</span></div>
+    ${a.halted ? `<div class="halt">${a.halted}</div>` : ""}
+    ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET COMBINE</button>` : ""}`;
 }
 
 function openWorker(id) {
@@ -408,7 +434,8 @@ function renderWorker() {
   document.getElementById("worker-body").innerHTML = `
     <h3 style="color:${bot.color}">${bot.name}</h3>
     <div class="row"><span>Strategy</span><span>${bot.strategy} · ${bot.timeframe}m candles</span></div>
-    <div class="row"><span>Instrument</span><span>${bot.instrument === "future" ? `${bot.underlying} futures` : `${bot.underlying} options`}</span></div>
+    <div class="row"><span>Instrument</span><span>${bot.instrument === "future" ? `${bot.underlying} micro futures` : `${bot.underlying} options`}</span></div>
+    <div class="row"><span>Size</span><span>${bot.contracts} contracts, adds to ${bot.max_contracts} max</span></div>
     ${bot.info?.setup ? `<div class="row"><span>Setup</span><span style="text-align:right;max-width:65%">${bot.info.setup}</span></div>` : ""}
     ${bot.info?.signals ? `<div class="row"><span>Signals from</span><span>${{ builtin: "built-in detection", tradingview: "TradingView alerts", both: "built-in + TradingView" }[bot.info.signals]}</span></div>` : ""}
     ${bot.info?.last_signal ? `<div class="row"><span>Last TV alert</span><span>${bot.info.last_signal}</span></div>` : ""}
@@ -416,8 +443,6 @@ function renderWorker() {
     <div class="row"><span>Status</span><span>${STATUS_TEXT[bot.status](bot)}</span></div>
     <div class="row"><span>Earned today</span><span class="${bot.realized >= 0 ? "pos" : "neg"}">${money(bot.realized)}</span></div>
     <div class="row"><span>Trades / wins</span><span>${bot.trades} / ${bot.wins}</span></div>
-    <div class="row"><span>Profit brake</span><span>$${bot.profit_brake}</span></div>
-    <div class="row"><span>Max daily loss</span><span>$${bot.max_daily_loss}</span></div>
     ${pos}
     ${trades ? `<table style="margin-top:10px"><thead><tr><th>Time</th><th>Contract</th><th>Why</th><th>P&L</th></tr></thead><tbody>${trades}</tbody></table>` : ""}
     <button class="toggle ${enabled ? "off" : "on"}" data-bot="${bot.id}" data-action="${enabled ? "off" : "on"}">${enabled ? "SEND HOME" : "PUT ON SHIFT"}</button>`;
@@ -429,6 +454,7 @@ document.addEventListener("click", async (e) => {
     document.getElementById(close.dataset.close).classList.add("hidden");
     if (close.dataset.close === "worker") openWorkerId = null;
   }
+  if (e.target.closest("[data-reset]")) await fetch("/api/account/reset", { method: "POST" });
   const btn = e.target.closest("button.toggle");
   if (btn) {
     await fetch(`/api/bots/${btn.dataset.bot}/${btn.dataset.action}`, { method: "POST" });

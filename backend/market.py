@@ -142,12 +142,9 @@ class Market:
         self.sim_minutes_per_tick = sim_minutes_per_tick
         self.clock_min = float(SESSION_OPEN_MIN)
         self.underlyings: dict[str, Underlying] = {
-            "QQQ": Underlying("QQQ", 512.0, iv=0.19, vol=0.22),
-            "SPY": Underlying("SPY", 578.0, iv=0.15, vol=0.17),
-            "MNQ": Underlying("MNQ", 24500.0, iv=0.20, vol=0.22, tick_size=0.25),  # Micro Nasdaq futures
-            "IWM": Underlying("IWM", 221.0, iv=0.24, vol=0.27),
-            "NVDA": Underlying("NVDA", 138.0, iv=0.48, vol=0.50),
-            "TSLA": Underlying("TSLA", 251.0, iv=0.55, vol=0.58, strike_step=2.5),
+            "MNQ": Underlying("MNQ", 24500.0, iv=0.20, vol=0.22, tick_size=0.25),  # Micro Nasdaq-100
+            "MES": Underlying("MES", 6850.0, iv=0.15, vol=0.17, tick_size=0.25),   # Micro S&P 500
+            "M2K": Underlying("M2K", 2480.0, iv=0.22, vol=0.24, tick_size=0.10),   # Micro Russell 2000
         }
 
     def step(self) -> None:
