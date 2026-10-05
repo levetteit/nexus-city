@@ -62,8 +62,15 @@ Control, Untapped FFVGs & IFFVGs, Troop Toolkit), computed from 1-minute candles
    another FFVG/IFFVG. No stop loss.
 8. **Walk away**: a PROC is invalidated when an opposite candle on its own
    timeframe closes beyond its box; 3 of those in a day and the bot stops.
+9. **MNQ/MES correlation**: an MNQ PROC is only taken (or added to) when MES
+   agrees within 6 minutes before or after it, and vice versa. `confirm_mode`
+   sets how strict "agrees" is: `proc` (MES printed its own PROC the same way,
+   the default), `pointer` (a same-way 3–6m pointer) or `tap` (a wick into a
+   same-way FFVG/IFFVG). Exits never wait for confirmation. The bots keep both
+   markets' structure up to date even if only one of them is being traded.
 
-Settings (`params` in `config.py`, all tried by the optimizer): `pointer_tfs`,
+Settings (`params` in `config.py`, most tried by the optimizer): `confirm_with`,
+`confirm_mode`, `confirm_window`, `pointer_tfs`,
 `pivot_len`, `sweep_proximity`, `use_iffvg`, `walk_after`,
 `exit_on_invalidation`, `killzones` (Asia 20:00–00:00, London 02:00–05:00,
 NY AM 09:30–11:00, NY PM 14:00–16:00 ET), `require_liquidity_sweep` (the PROC
@@ -156,9 +163,10 @@ exact same bots, prop account rules and daily goal/cap/stop.
    ```bash
    python -m backend.backtest data/*.csv --optimize --out results.json
    ```
-   It tries ~290 combinations of the PROC settings (swing pivot length, sweep
-   proximity, IFFVGs on/off, liquidity sweep required, killzones, walk-away
-   count, exit on PROC invalidation) on the **first 70% of days**,
+   It tries ~190 combinations of the PROC settings (MNQ/MES confirmation off /
+   tap / pointer / PROC and its window, swing pivot length, IFFVGs on/off,
+   liquidity sweep required, killzones). Export **both MNQ and MES** so the
+   confirmation can be tested on the **first 70% of days**,
    then re-runs the top 5 on the **last 30%** they never saw. Pick settings that
    hold up on those unseen days, not the ones with the best tuned numbers.
 4. Put the winning settings in `params` in `backend/config.py`.

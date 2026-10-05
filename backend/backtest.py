@@ -190,13 +190,12 @@ def run(data: dict[str, list], params: dict | None = None) -> dict:
 
 # ---------------------------------------------------------------- optimizer
 GRID = {
-    "pivot_len": [2, 3, 6],
-    "sweep_proximity": [3, 6],
+    "confirm_mode": [None, "tap", "pointer", "proc"],   # MNQ/MES correlation (None = off)
+    "confirm_window": [3, 6],
+    "pivot_len": [2, 6],
     "use_iffvg": [True, False],
     "require_liquidity_sweep": [False, True],
     "killzones": [None, ["LONDON", "NY AM"], ["NY AM", "NY PM"]],
-    "walk_after": [2, 3],
-    "exit_on_invalidation": [False, True],
 }
 
 

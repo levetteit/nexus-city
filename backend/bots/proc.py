@@ -30,9 +30,18 @@ How the bot trades it (Macre's rules):
     another FFVG/IFFVG". No stop loss.
   * An invalidated PROC counts as a pointer inverse; `walk_after` of them in a
     day and the bot walks away.
+
+MNQ/MES correlation (`confirm_with`): a PROC only becomes an entry (or an add)
+when the partner market shows the same direction within `confirm_window`
+minutes before or after it. `confirm_mode` sets how strict that is:
+  "proc"     the partner printed its own PROC the same way (strictest)
+  "pointer"  the partner printed a pointer the same way on 3-6m
+  "tap"      the partner's wick tapped a same-direction FFVG/IFFVG
+Exits never wait for confirmation.
 """
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -127,9 +136,15 @@ class ProcEngine:
         self.proc: Optional[Proc] = None
         self.levels: dict[str, tuple[float, float, bool, bool]] = {}   # killzone -> (hi, lo, hi swept, lo swept)
         self._kz: Optional[list] = None
+        self.recent: list[tuple[int, str, str, int]] = []   # (minute, 'tap'|'pointer'|'proc', side, tf)
+        self.last_t: Optional[int] = None
+        self._last_events: list[tuple[str, Proc]] = []
 
     # ---------------------------------------------------------------- feed
     def update(self, bar: Bar, minute_of_day: int) -> list[tuple[str, Proc]]:
+        """Feed one 1m bar. Engines are shared, so a bar already fed returns the same events."""
+        if self.last_t is not None and bar.t <= self.last_t:
+            return self._last_events if bar.t == self.last_t else []
         events: list[tuple[str, Proc]] = []
         t = bar.t
         # 1. first wick into an untapped zone
@@ -137,6 +152,7 @@ class ProcEngine:
             if z.tapped_at is None and not z.dead and t > z.created:
                 if (z.side == "long" and bar.low <= z.top) or (z.side == "short" and bar.high >= z.bottom):
                     z.tapped_at = t
+                    self.recent.append((t, "tap", z.side, z.tf))
         self._track_liquidity(bar, minute_of_day)
         # 2. synthetic candles
         for tf in TIMEFRAMES:
@@ -144,7 +160,14 @@ class ProcEngine:
                 events += self._on_close(self.frames[tf], done)
         cutoff = t - 3 * 24 * 60
         self.zones = [z for z in self.zones if z.created > cutoff and not (z.dead and z.tapped_at)][-400:]
+        self.recent = [r for r in self.recent if r[0] > t - 120]
+        self.last_t, self._last_events = t, events
         return events
+
+    def confirms(self, side: str, since: int, mode: str) -> bool:
+        """Did this market show `side` since minute `since`? (for MNQ/MES correlation)"""
+        kinds = {"proc": ("proc",), "pointer": ("pointer", "proc"), "tap": ("tap", "proc")}[mode]
+        return any(t >= since and k in kinds and sd == side for t, k, sd, _ in self.recent)
 
     def _build(self, f: _Frame, bar: Bar) -> list[Candle]:
         """Add a 1m bar to this timeframe's candle; return any candles that closed."""
@@ -215,12 +238,14 @@ class ProcEngine:
             prev = f.candles[-2]
             side = is_pointer(prev, c)
             if side:
+                self.recent.append((c.end, "pointer", side, f.tf))
                 hit = [z for z in self.zones if z.side == side and z.tapped_at is not None
                        and prev.start <= z.tapped_at <= c.end and z.created < z.tapped_at]
                 if hit:
                     z = max(hit, key=lambda z: z.tapped_at)
                     swept = self._swept(side, prev, c)
                     self.proc = Proc(side, f.tf, c.high, c.low, z, c.end, swept)
+                    self.recent.append((c.end, "proc", side, f.tf))
                     events.append(("proc", self.proc))
 
         # PROC invalidation on its own timeframe
@@ -274,8 +299,24 @@ DEFAULTS = {
     "exit_on_invalidation": False,   # Macre: exit only on a pointer against
     "killzones": None,          # e.g. ["LONDON", "NY AM"]: only enter during these
     "require_liquidity_sweep": False,  # PROC must take an Asia/London/NY high or low
+    "confirm_with": None,       # partner symbol, e.g. "MES" for an MNQ bot
+    "confirm_mode": "proc",     # 'proc' | 'pointer' | 'tap' | None (off)
+    "confirm_window": 6,        # minutes before/after the PROC for the partner to agree
     "signals": "both",          # TradingView webhook orders still accepted
 }
+
+# One engine per (market, symbol, settings), shared by every bot that needs it
+_ENGINES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def shared_engine(market: Market, symbol: str, p: dict) -> ProcEngine:
+    engines = _ENGINES.setdefault(market, {})
+    tick = market.underlyings[symbol].tick_size
+    key = (symbol, p["pivot_len"], p["sweep_proximity"], p["use_iffvg"], p["min_gap_ticks"])
+    if key not in engines:
+        engines[key] = ProcEngine((3, 4, 5, 6), p["pivot_len"], p["sweep_proximity"],
+                                  p["use_iffvg"], p["min_gap_ticks"] * tick)
+    return engines[key]
 
 
 class ProcBot(Bot):
@@ -286,25 +327,31 @@ class ProcBot(Bot):
         super().__init__(*args, **kwargs)
         self.p = {**DEFAULTS, **self.cfg.params}
         self.engine: Optional[ProcEngine] = None
+        self.partner: Optional[ProcEngine] = None
         self._events: list[tuple[str, Proc]] = []
+        self.pending: list[Proc] = []    # PROCs waiting for the partner market to confirm
         self.my_proc: Optional[Proc] = None
         self.last_signal = ""
         self.reset_day()
 
     def reset_day(self) -> None:
         self.inverses = 0
+        self.pending = []
         self.last_event = "waiting for a PROC"
 
-    def _engine(self, market: Market) -> ProcEngine:
-        if self.engine is None:
-            tick = market.underlyings[self.cfg.underlying].tick_size
-            self.engine = ProcEngine(self.p["pointer_tfs"], self.p["pivot_len"], self.p["sweep_proximity"],
-                                     self.p["use_iffvg"], self.p["min_gap_ticks"] * tick)
-        return self.engine
+    @property
+    def _confirming(self) -> bool:
+        return bool(self.p["confirm_with"] and self.p["confirm_mode"])
 
     def observe(self, bar: Bar, market: Market) -> None:
         mod = int(market.clock_min) % (24 * 60)
-        self._events = self._engine(market).update(bar, mod)
+        self.engine = shared_engine(market, self.cfg.underlying, self.p)
+        tfs = self.p["pointer_tfs"]
+        self._events = [(k, p) for k, p in self.engine.update(bar, mod) if p.tf in tfs]
+        partner = self.p["confirm_with"]
+        if self._confirming and partner in market.underlyings and market.underlyings[partner].bars:
+            self.partner = shared_engine(market, partner, self.p)
+            self.partner.update(market.underlyings[partner].bars[-1], mod)
         for kind, p in self._events:
             if kind == "invalidated":
                 self.inverses += 1
@@ -322,7 +369,17 @@ class ProcBot(Bot):
                 return False
         return p.swept or not self.p["require_liquidity_sweep"]
 
-    def on_bar(self, htf, ltf: list[Bar], market: Market) -> Optional[Entry]:
+    def _confirmed(self, p: Proc) -> bool:
+        if not self._confirming:
+            return True
+        if self.partner is None:      # no partner data (e.g. a backtest with one symbol): can't filter
+            return True
+        return self.partner.confirms(p.side, p.time - self.p["confirm_window"], self.p["confirm_mode"])
+
+    def _new_procs(self, market: Market) -> list[Proc]:
+        """PROCs ready to act on: new confirmed ones, plus pending ones the partner just confirmed."""
+        now = self.engine.last_t or 0
+        ready = []
         for kind, p in self._events:
             if kind != "proc":
                 continue
@@ -330,11 +387,36 @@ class ProcBot(Bot):
             if not self._usable(p, market):
                 self.last_event = f"{p.tf}m PROC {arrow} at {market.clock_str} · filtered out"
                 continue
+            self.pending = [q for q in self.pending if q.side == p.side]   # an opposite PROC cancels waiting ones
+            if self._confirmed(p):
+                ready.append(p)
+            else:
+                self.pending.append(p)
+                self.last_event = (f"{p.tf}m PROC {arrow} at {market.clock_str} · waiting for "
+                                   f"{self.p['confirm_with']} to confirm ({self.p['confirm_mode']})")
+        still = []
+        for q in self.pending:
+            if q in ready:
+                continue
+            if self._confirmed(q):
+                ready.append(q)
+            elif now - q.time < self.p["confirm_window"]:
+                still.append(q)
+            else:
+                self.last_event = f"{q.tf}m PROC not confirmed by {self.p['confirm_with']} · skipped"
+        self.pending = still
+        return ready
+
+    def on_bar(self, htf, ltf: list[Bar], market: Market) -> Optional[Entry]:
+        for p in self._new_procs(market):
+            self.pending = []
             self.my_proc = p
-            self.last_event = f"{p.tf}m PROC {arrow} off {p.zone.label()} · entered {p.side}"
+            arrow = "↑" if p.side == "long" else "↓"
+            both = f" + {self.p['confirm_with']}" if self._confirming and self.partner else ""
+            self.last_event = f"{p.tf}m PROC {arrow}{both} off {p.zone.label()} · entered {p.side}"
             price = market.underlyings[self.cfg.underlying].price
             return Entry(p.side, self.engine.next_zone(p.side, price),
-                         note=f"{p.tf}m PROC off {p.zone.label()}")
+                         note=f"{p.tf}m PROC off {p.zone.label()}{both}")
         return None
 
     def exit_on_bar(self, htf, ltf: list[Bar], market: Market) -> Optional[str]:
@@ -342,12 +424,13 @@ class ProcBot(Bot):
             if kind == "proc" and p.side != self.plan.side:
                 self.last_event = f"{p.tf}m PROC against the trade at {market.clock_str}"
                 return "pointer against (PROC)"
-            if kind == "proc":
-                pos = self.position
-                if pos.pnl(self.broker.mark(pos, market)) > 0 and self.add(market, f"{p.tf}m PROC with the trade"):
-                    self.last_event = f"added to {pos.qty} contracts · {p.tf}m PROC with the trade"
             if kind == "invalidated" and p is self.my_proc and self.p["exit_on_invalidation"]:
                 return "PROC invalidated"
+        for p in self._new_procs(market):   # confirmed PROCs with the trade: size up while it works
+            pos = self.position
+            if p.side == self.plan.side and pos.pnl(self.broker.mark(pos, market)) > 0 \
+                    and self.add(market, f"{p.tf}m PROC with the trade"):
+                self.last_event = f"added to {pos.qty} contracts · {p.tf}m PROC with the trade"
         return None
 
     def on_position_closed(self, pnl: float) -> None:
@@ -375,5 +458,8 @@ class ProcBot(Bot):
         return {"setup": self.last_event, "inverses": self.inverses, "walk_after": self.p["walk_after"],
                 "signals": self.p["signals"], "last_signal": self.last_signal,
                 "untapped_zones": len(live), "pointer_tfs": self.p["pointer_tfs"],
+                "confirm": (f"{self.p['confirm_with']} {self.p['confirm_mode']} within {self.p['confirm_window']}m"
+                            if self._confirming else None),
+                "waiting": len(self.pending),
                 "proc": (f"{e.proc.tf}m {'bullish' if e.proc.side == 'long' else 'bearish'} "
                          f"{e.proc.low:,.2f}–{e.proc.high:,.2f}") if e and e.proc else None}
