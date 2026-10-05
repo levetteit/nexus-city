@@ -63,6 +63,7 @@ class BotConfig:
     contracts: int = 3             # size of the first entry and of each add
     max_contracts: int = 6         # never hold more than this
     otm_steps: int = 0             # 0 = ATM strikes
+    enabled: bool = True           # False: the building stands, the bot starts switched off
     color: str = "#7c5cff"
     params: dict = field(default_factory=dict)   # strategy-specific settings
 
@@ -75,7 +76,7 @@ class Bot:
         self.broker = broker
         self.emit = emit
         self.account = account
-        self.status = "scanning"
+        self.status = "scanning" if cfg.enabled else "disabled"
         self.position: Optional[Position] = None
         self.plan: Optional[Entry] = None
         self.realized = 0.0

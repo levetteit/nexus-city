@@ -99,13 +99,25 @@ until a PROC against them), and flatten at 16:40.
 
 | Settings | Profitable days | Total | Profit factor | Evaluations |
 |---|---|---|---|---|
-| Defaults (killzones London + NY AM + NY PM, MNQ/MES pointer confirmation, swing length 6) | **71%** | **+$10,321** | 1.86 | 1 passed, 0 failed |
+| **Defaults**: MNQ only (MES confirms), killzones London + NY AM + NY PM, pointer confirmation, swing length 6, stop after 3 losers in a row | **76%** | **+$10,173** | **2.63** | 1 passed, 0 failed |
+| Same, with MES and M2K bots also trading | 71% | +$10,321 | 1.86 | 1 passed, 0 failed |
 | Same, but entering in every session | 45% | −$515 | 0.97 | 0 passed, 2 failed |
 | Original settings (all sessions, PROC confirmation, swing length 2) | 48% | −$127 | 0.97 | 1 passed, 2 failed |
 
-On the last 6 days, which the optimizer never tuned on, the defaults had 71%
-profitable days and +$3,202. Win rate is ~40%: winners average ~2.8× losers
-because trades only close on a PROC against them. 21 days is a small sample:
+On the last 7 days, which were never used for tuning, MNQ-only had 86%
+profitable days and +$4,252. Win rate is ~48%: winners average ~2.9× losers
+because trades only close on a PROC against them (or the daily cap).
+
+What the trade-level breakdown showed, and what was tried:
+
+- MNQ made +$9,645 while MES (−$197) and M2K (−$154) were breakeven → MNQ only.
+- Trades that grew to 6 contracts made +$11,047; trades that stayed at 3 lost
+  −$1,752. The edge is in adding to winners.
+- Trades closed within 15 minutes lost (chop); trades held 60+ minutes won 72%.
+- Losing days went straight to the −$800 stop without ever being up much →
+  stop after 3 losing trades in a row.
+- Tested and rejected (worse when re-run): dropping 5m pointers, exiting only
+  on an opposite PROC of the same or higher timeframe, a 2-loss streak stop. 21 days is a small sample:
 keep fetching data and re-running the backtest as history grows.
 
 ### Daily goal

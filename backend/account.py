@@ -28,6 +28,7 @@ Our safety layer (`Guards`), tighter than the firm so we never touch its lines:
     1-minute candles can move a few hundred dollars against 12 micros)
   * when today's stop is under $500 (little room left), only one 3-contract
     position at a time
+  * 3 losing trades in a row -> stop for the day (losing days are chop)
   * less than $150 of room above the MLL -> stop trading, ask for a reset
   * contract budget: at most 12 micros open across all bots (each trade is 3-6)
   * one bot per symbol at a time, so bots never hold opposite sides of the same contract
@@ -73,6 +74,7 @@ class Guards:
     daily_stop: float = 800.0          # flatten at -this (open + closed)
     mll_cushion: float = 250.0         # never let a day's loss get closer than this to the MLL
     min_room: float = 150.0            # less room than this above the MLL -> stop trading
+    max_loss_streak: int | None = 3      # stop for the day after this many losing trades in a row
     thin_room: float = 500.0           # a day stop below this -> only one 3-contract position at a time
     thin_micros: int = 3
     max_open_micros: int = 12          # e.g. two bots at the full 6
@@ -91,6 +93,7 @@ class PropAccount:
     day_open: float = 0.0              # unrealized, refreshed each tick by the engine
     halted: str = ""                   # why trading stopped for the day, if it did
     day_stop: float = 0.0              # today's loss limit (daily_stop, or less near the MLL)
+    loss_streak: int = 0
     best_day: float = 0.0
     days: int = 0
     profitable_days: int = 0
@@ -123,6 +126,7 @@ class PropAccount:
         room = self.balance - self.mll - g.mll_cushion
         self.day_stop = min(g.daily_stop, room)
         self.halted = ""
+        self.loss_streak = 0
         if room < g.min_room:
             self.halted = f"only ${self.balance - self.mll:,.0f} above the MLL · reset recommended"
             self._note(self.halted)
@@ -199,6 +203,7 @@ class PropAccount:
             del self.symbol_owner[symbol]
         self.balance += pnl
         self.day_realized += pnl
+        self.loss_streak = self.loss_streak + 1 if pnl <= 0 else 0
 
     # ---- risk checks (engine calls this every tick) --------------------------
     def check(self, unrealized: float) -> Optional[str]:
@@ -215,6 +220,8 @@ class PropAccount:
         g = self.guards
         if self.day_pnl <= -self.day_stop:
             self.halted = f"daily stop -${self.day_stop:,.0f}"
+        elif g.max_loss_streak and self.loss_streak >= g.max_loss_streak:
+            self.halted = f"{self.loss_streak} losing trades in a row · stop for the day"
         elif self.day_pnl >= g.daily_cap:
             self.halted = f"daily cap +${g.daily_cap:,.0f} locked in"
         elif self.phase == "evaluation" and self.profit + self.day_open >= self.target_needed \

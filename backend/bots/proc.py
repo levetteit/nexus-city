@@ -298,6 +298,7 @@ DEFAULTS = {
     "min_gap_ticks": 0,
     "walk_after": 3,            # invalidated PROCs (pointer inverses) in one session before walking away
     "exit_on_invalidation": False,   # Macre: exit only on a pointer against
+    "exit_min_tf": False,       # only a PROC against on the entry's timeframe or higher closes the trade
     # Entries only in these killzones (None = any time). On 21 days of real data
     # (Sep 8 - Oct 5 2026) this beat trading every session: Asia entries lost money.
     "killzones": ["LONDON", "NY AM", "NY PM"],
@@ -435,6 +436,9 @@ class ProcBot(Bot):
     def exit_on_bar(self, htf, ltf: list[Bar], market: Market) -> Optional[str]:
         for kind, p in self._events:
             if kind == "proc" and p.side != self.plan.side:
+                if self.p["exit_min_tf"] and self.my_proc and p.tf < self.my_proc.tf:
+                    self.last_event = f"{p.tf}m PROC against, below the {self.my_proc.tf}m entry · held"
+                    continue
                 self.last_event = f"{p.tf}m PROC against the trade at {market.clock_str}"
                 return "pointer against (PROC)"
             if kind == "invalidated" and p is self.my_proc and self.p["exit_on_invalidation"]:

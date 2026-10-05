@@ -21,15 +21,18 @@ SIM_MINUTES_PER_TICK = 0.25   # market minutes per tick (an 18:00-16:45 day ~ 91
 
 # All bots trade micro futures in ONE prop firm account (see account.py).
 # Each trade starts at 3 contracts and can grow to 6, never more.
+# On 21 days of real data MNQ made the money while MES and M2K were breakeven,
+# so only the MNQ bots trade by default. MES still confirms every MNQ entry;
+# the MES and M2K bots start switched off (turn them on from their building).
 WORKERS = [
     (ProcBot, BotConfig(id="mnq-3m", name="MNQ OG", underlying="MNQ", district="NASDAQ", timeframe=3,
                         params={"pointer_tfs": [3, 4], "confirm_with": "MES"}, color="#ffcc33")),
     (ProcBot, BotConfig(id="mnq-6m", name="MNQ 6M", underlying="MNQ", district="6M POINTERS", timeframe=6,
                         params={"pointer_tfs": [5, 6], "confirm_with": "MES"}, color="#ff3df2")),
     (ProcBot, BotConfig(id="mes-3m", name="MES 3M", underlying="MES", district="S&P ST", timeframe=3,
-                        params={"pointer_tfs": [3, 4], "confirm_with": "MNQ"}, color="#43f0a0")),
+                        params={"pointer_tfs": [3, 4], "confirm_with": "MNQ"}, color="#43f0a0", enabled=False)),
     (ProcBot, BotConfig(id="mes-6m", name="MES 6M", underlying="MES", district="SWEEP ALLEY", timeframe=6,
-                        params={"pointer_tfs": [5, 6], "confirm_with": "MNQ"}, color="#3dd6ff")),
+                        params={"pointer_tfs": [5, 6], "confirm_with": "MNQ"}, color="#3dd6ff", enabled=False)),
     (ProcBot, BotConfig(id="m2k", name="M2K PROC", underlying="M2K", district="SMALL CAPS", timeframe=3,
-                        params={"pointer_tfs": [3, 4, 5, 6]}, color="#b18cff")),
+                        params={"pointer_tfs": [3, 4, 5, 6]}, color="#b18cff", enabled=False)),
 ]
