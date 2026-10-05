@@ -383,8 +383,9 @@ function applyState(s) {
   const short = innerWidth < 640;
   const sess = short ? { "NEW YORK": "NY", LONDON: "LDN", ASIA: "ASIA" }[s.session] ?? s.session : s.session;
   const lag = s.delay_min > 2.5 ? ` <small class="lag">${Math.round(s.delay_min)}m delayed</small>` : "";
+  const armed = s.execution?.armed;
   document.getElementById("clock").innerHTML = s.mode === "live"
-    ? `<b class="live">● ${short ? "LIVE" : "LIVE PAPER"}</b> ${sess} ${s.clock}${short ? "" : " ET"}${lag}`
+    ? `<b class="live">● ${armed ? "REAL ORDERS" : short ? "LIVE" : "LIVE PAPER"}</b> ${sess} ${s.clock}${short ? "" : " ET"}${lag}`
     : `SIM · ${sess} · ${s.clock}${short ? "" : " ET"}`;
   document.getElementById("tickers").innerHTML = Object.entries(s.tickers)
     .map(([sym, t]) => `<span>${sym} ${t.price.toFixed(2)} <b class="${t.change_pct >= 0 ? "up" : "down"}">${t.change_pct >= 0 ? "+" : ""}${t.change_pct.toFixed(2)}%</b></span>`).join("");
@@ -395,6 +396,24 @@ function applyState(s) {
 
   renderAccount(s.account);
   if (openWorkerId) renderWorker();
+}
+
+// real orders on your Lucid accounts (live mode only)
+function execRows(s) {
+  if (s?.mode !== "live") return "";
+  const x = s.execution, live = s.feed === "tradingview";
+  const data = `<div class="row"><span>Price data</span><span class="${live ? "pos" : ""}">${live ? "TradingView · real-time" : `Yahoo · ${Math.round(s.delay_min)}m delayed`}</span></div>`;
+  if (!x) return data;
+  if (!x.configured) return data + `<div class="row"><span>Real orders</span><span>not connected</span></div>`;
+  const open = Object.entries(x.open).map(([sym, p]) => `${p.side === "buy" ? "LONG" : "SHORT"} ${p.qty} ${p.contract}`).join(", ");
+  return data + `
+    <div class="row"><span>Real orders</span><span class="${x.armed ? "neg" : ""}">${x.armed ? "● ARMED" : "off (paper only)"}</span></div>
+    ${x.armed && !x.data_ok ? `<div class="halt">entries paused: price data is over ${x.max_delay} min old</div>` : ""}
+    ${open ? `<div class="row"><span>On your accounts</span><span>${open}</span></div>` : ""}
+    ${x.last_error ? `<div class="halt">last order failed: ${x.last_error}</div>` : ""}
+    <div class="exec-btns">${x.armed
+      ? `<button data-exec="disarm">DISARM</button><button class="danger" data-exec="flatten">FLATTEN ALL</button>`
+      : `<button class="arm" data-exec="arm">ARM REAL ORDERS</button>`}</div>`;
 }
 
 const PHASES = { evaluation: "EVALUATION", funded: "FUNDED", failed: "FAILED" };
@@ -426,6 +445,7 @@ function renderAccount(a) {
     <div class="row"><span>Day stop</span><span>-${fmt(a.daily_stop)}</span></div>
     <div class="row"><span>Micros open</span><span>${a.open_micros} / ${a.max_micros}</span></div>
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
+    ${execRows(state)}
     ${a.halted ? `<div class="halt">${a.halted}</div>` : ""}
     ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET EVALUATION</button>` : ""}`;
 }
@@ -554,6 +574,22 @@ document.addEventListener("click", async (e) => {
     if (close.dataset.close === "worker") openWorkerId = null;
   }
   if (e.target.closest("[data-reset]")) await fetch("/api/account/reset", { method: "POST" });
+  const ex = e.target.closest("[data-exec]");
+  if (ex) {
+    const act = ex.dataset.exec;
+    let res;
+    if (act === "arm") {
+      const typed = prompt("Real orders will be placed on your Lucid account(s) through TradersPost whenever a bot trades.\n\nType ARM to confirm.");
+      if (typed !== "ARM") return;
+      res = await fetch("/api/execution", { method: "POST", body: JSON.stringify({ armed: true, confirm: "ARM" }) });
+    } else if (act === "disarm") {
+      res = await fetch("/api/execution", { method: "POST", body: JSON.stringify({ armed: false }) });
+    } else if (act === "flatten") {
+      if (!confirm("Exit every position on your Lucid accounts now and disarm?")) return;
+      res = await fetch("/api/execution/flatten", { method: "POST" });
+    }
+    if (res && !res.ok) alert((await res.json()).detail ?? "failed");
+  }
   const btn = e.target.closest("button.toggle");
   if (btn) {
     await fetch(`/api/bots/${btn.dataset.bot}/${btn.dataset.action}`, { method: "POST" });

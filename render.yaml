@@ -13,6 +13,10 @@ services:
         sync: false        # Render asks you for this when you create the Blueprint
       - key: STARNET_WEBHOOK_SECRET
         generateValue: true
+      - key: STARNET_FEED_SECRET          # paste into the Starnet feed script on TradingView
+        generateValue: true
+      - key: STARNET_TRADERSPOST_WEBHOOKS # your TradersPost strategy webhook URL (real orders)
+        sync: false
     disk:                  # keeps data/paper_trades.csv, paper_days.csv and the paper account across deploys
       name: starnet-data
       mountPath: /app/data

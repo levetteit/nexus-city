@@ -24,6 +24,7 @@ from .engine import Engine
 MODE = os.getenv("STARNET_MODE", "sim")
 POLL_SECONDS = 20
 engine = Engine() if MODE != "live" else None   # live mode builds its engine at startup (needs a download)
+router = None   # real-order router (live mode only), see execution.py
 clients: set[WebSocket] = set()
 
 
@@ -47,11 +48,13 @@ async def run_city() -> None:
 
 async def run_live() -> None:
     """Poll for new real candles and step the bots through each one."""
-    global engine
-    from . import live
+    global engine, router
+    from . import execution, live
     market = await asyncio.to_thread(live.LiveMarket)
     engine = Engine(market=market, account=live.load_account())
     live.load_careers(engine)
+    router = execution.TradersPostRouter(live.DATA_DIR)
+    router.start()
     while market.i + 1 < market.warm_until:   # read history, don't trade it
         engine.tick(trade=False)
     last_poll = 0.0
@@ -63,10 +66,12 @@ async def run_live() -> None:
                 await asyncio.to_thread(market.poll)
             except Exception as exc:   # network hiccup: try again next poll
                 print(f"live poll failed: {exc}")
+        market.release()   # candles pushed by the real-time TradingView feed
         events = []
         while market.has_next():
             new = engine.tick()
             live.record(engine, new)
+            router.handle(engine, new, market.delay_minutes)   # real orders, if armed
             events += new
         await broadcast({"type": "tick", "state": state(), "events": events})
         await asyncio.sleep(1)
@@ -77,6 +82,9 @@ def state() -> dict:
     snap["mode"] = MODE
     if MODE == "live":
         snap["delay_min"] = round(engine.market.delay_minutes, 1)
+        snap["feed"] = engine.market.feed
+        if router:
+            snap["execution"] = router.status(engine.market.delay_minutes)
     return snap
 
 
@@ -90,7 +98,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Starnet trading city", lifespan=lifespan)
 
 PASSWORD = os.getenv("STARNET_PASSWORD")   # set this whenever the city is reachable from the internet
-OPEN_PATHS = ("/healthz", "/api/tradingview")   # health checks, and the webhook (it has its own secret)
+OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed")   # health checks, and webhooks (they have their own secret)
 
 
 class PasswordGate:
@@ -168,6 +176,72 @@ def bot_room(bot_id: str) -> dict:
     return engine.bots[bot_id].room(engine.market)
 
 
+FULL_SIZE = {"NQ": "MNQ", "ES": "MES", "RTY": "M2K", "YM": "MYM"}   # full-size charts feed their micro
+
+
+@app.post("/api/feed")
+async def feed(request: Request) -> dict:
+    """Real-time 1m candles from the Starnet feed script on TradingView (tradingview/starnet_feed.pine)."""
+    secret = os.getenv("STARNET_FEED_SECRET") or os.getenv("STARNET_WEBHOOK_SECRET")
+    if not secret:
+        raise HTTPException(503, "set STARNET_FEED_SECRET to enable the real-time feed")
+    try:
+        p = json.loads(await request.body())
+    except ValueError:
+        raise HTTPException(400, "body must be JSON")
+    if not isinstance(p, dict) or not hmac.compare_digest(str(p.get("secret", "")), secret):
+        raise HTTPException(401, "bad secret")
+    if engine is None or MODE != "live":
+        raise HTTPException(503, "live mode is still starting")
+    sym = normalize_symbol(str(p.get("ticker", "")))
+    sym = FULL_SIZE.get(sym, sym)
+    try:
+        ts = int(float(p["t"]))
+        ts = ts // 1000 if ts > 10**12 else ts
+        o, h, l, c = (float(p[k]) for k in ("o", "h", "l", "c"))
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(400, "need t, o, h, l, c")
+    engine.market.push(sym, ts, o, h, l, c)
+    return {"ok": True, "symbol": sym}
+
+
+def _router():
+    if router is None:
+        raise HTTPException(503, "real execution is only available in live mode")
+    return router
+
+
+@app.get("/api/execution")
+def execution_status() -> dict:
+    return _router().status(engine.market.delay_minutes)
+
+
+@app.post("/api/execution")
+async def execution_arm(request: Request) -> dict:
+    """Arm or disarm real orders. Arming needs {"armed": true, "confirm": "ARM"}."""
+    r = _router()
+    body = json.loads(await request.body() or b"{}")
+    on = bool(body.get("armed"))
+    if on and body.get("confirm") != "ARM":
+        raise HTTPException(400, 'to arm real orders send {"armed": true, "confirm": "ARM"}')
+    try:
+        r.arm(on)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return r.status(engine.market.delay_minutes)
+
+
+@app.post("/api/execution/flatten")
+def execution_flatten() -> dict:
+    """Kill switch: exit every real position, close the paper ones, disarm."""
+    r = _router()
+    for bot in engine.bots.values():
+        if bot.position:
+            bot._close("flatten all", engine.market)
+    r.flatten_all([b.cfg.underlying for b in engine.bots.values()])
+    return r.status(engine.market.delay_minutes)
+
+
 @app.post("/api/account/reset")
 def reset_account() -> dict:
     """Start a fresh evaluation (e.g. after a failed one)."""
@@ -179,7 +253,7 @@ def normalize_symbol(ticker: str) -> str:
     """'CME_MINI:MNQ1!' / 'MNQZ2026' / 'CME_MINI:MES1!' -> 'MNQ' / 'MNQ' / 'MES'."""
     t = ticker.split(":")[-1].upper()
     t = re.sub(r"\d+!$", "", t)                      # continuous futures: MNQ1!
-    m = re.match(r"^(MNQ|MES|M2K|MYM|NQ|ES)[FGHJKMNQUVXZ]\d{2,4}$", t)  # dated futures: MNQZ2026
+    m = re.match(r"^(MNQ|MES|M2K|MYM|NQ|ES|RTY|YM)[FGHJKMNQUVXZ]\d{2,4}$", t)  # dated futures: MNQZ2026
     return m.group(1) if m else t
 
 
