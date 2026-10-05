@@ -28,10 +28,11 @@ scene.fog = new THREE.Fog("#22127a", 90, 230);
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 600);
 camera.position.set(0, 52, 88);
-if (innerWidth < innerHeight) camera.position.set(0, 120, 95); // phones: higher, more top-down view so the whole city fits
+const PORTRAIT = innerWidth < innerHeight;
+if (PORTRAIT) camera.position.set(0, 112, 112); // phones: pulled back so the whole city fits between the panels
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 6, 0);
+controls.target.set(0, PORTRAIT ? -14 : 6, 0);   // phones: aim lower so the city sits mid-screen
 controls.enableDamping = true;
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.35;
@@ -253,7 +254,7 @@ function makeBuilding(bot, index, total) {
   tag.style.setProperty("--accent", bot.color);
   tag.onclick = () => openRoom(bot.id);
   const label = new CSS2DObject(tag);
-  label.position.set(0, hero + 12, 0);
+  label.position.set(0, hero + 12 + (index % 2) * 7, 0);   // stagger heights so neighbours' labels don't collide
   group.add(label);
 
   // neon district sign at street level
@@ -368,6 +369,7 @@ function applyState(s) {
     const gadget = tierOf(bot.career_best) > 0 ? ` <span title="${GADGETS[tierOf(bot.career_best)][2]}">${"💎".repeat(Math.min(3, Math.ceil(tierOf(bot.career_best) / 3)))}</span>` : "";
     b.tag.innerHTML = `<div class="name">${moodEmoji(bot)} ${star}${bot.name}${gadget}</div><div class="status ${statusCls}">${STATUS_TEXT[bot.status](bot)}</div><div class="earned ${bot.realized < 0 ? "neg" : ""}">earned ${money(bot.realized)}${live}</div>`;
     b.tag.classList.toggle("dim", bot.status === "disabled");
+    b.tag.classList.toggle("off", bot.status === "disabled");
     b.status = bot.status;
     const dark = ["disabled", "stopped", "walked"].includes(bot.status);
     b.mats.forEach((m) => (m.emissiveIntensity = dark ? 0.1 : bot.status === "off_duty" ? 0.35 : 0.6));
@@ -378,9 +380,12 @@ function applyState(s) {
   vEl.textContent = money(s.vault);
   vEl.classList.toggle("neg", s.vault < 0);
   vaultTag.querySelector(".s").textContent = `${s.on_shift} workers on shift · tap for payroll`;
+  const short = innerWidth < 640;
+  const sess = short ? { "NEW YORK": "NY", LONDON: "LDN", ASIA: "ASIA" }[s.session] ?? s.session : s.session;
+  const lag = s.delay_min > 2.5 ? ` <small class="lag">${Math.round(s.delay_min)}m delayed</small>` : "";
   document.getElementById("clock").innerHTML = s.mode === "live"
-    ? `<b class="live">● LIVE PAPER</b> ${s.session} · ${s.clock} ET <small>(${Math.round(s.delay_min)} min behind)</small>`
-    : `SIM · ${s.session} · ${s.clock} ET`;
+    ? `<b class="live">● ${short ? "LIVE" : "LIVE PAPER"}</b> ${sess} ${s.clock}${short ? "" : " ET"}${lag}`
+    : `SIM · ${sess} · ${s.clock}${short ? "" : " ET"}`;
   document.getElementById("tickers").innerHTML = Object.entries(s.tickers)
     .map(([sym, t]) => `<span>${sym} ${t.price.toFixed(2)} <b class="${t.change_pct >= 0 ? "up" : "down"}">${t.change_pct >= 0 ? "+" : ""}${t.change_pct.toFixed(2)}%</b></span>`).join("");
 
