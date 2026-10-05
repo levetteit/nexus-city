@@ -28,8 +28,9 @@ How the bot trades it (Macre's rules):
   * Another PROC in the same direction while in profit -> add 3 (6 max).
   * Exit only when a PROC forms against the trade: "a pointer against you on
     another FFVG/IFFVG". No stop loss.
-  * An invalidated PROC counts as a pointer inverse; `walk_after` of them in a
-    day and the bot walks away.
+  * An invalidated PROC the bot could have traded counts as a pointer inverse;
+    `walk_after` of them in a session (Asia / London / New York) and the bot
+    walks away until the next session.
 
 MNQ/MES correlation (`confirm_with`): a PROC only becomes an entry (or an add)
 when the partner market shows the same direction within `confirm_window`
@@ -295,7 +296,7 @@ DEFAULTS = {
     "sweep_proximity": 6,       # your chart's setting: FFVG within 6 candles of the swing
     "use_iffvg": True,          # your chart has Untapped IFFVGs on
     "min_gap_ticks": 0,
-    "walk_after": 3,            # invalidated PROCs (pointer inverses) before walking away
+    "walk_after": 3,            # invalidated PROCs (pointer inverses) in one session before walking away
     "exit_on_invalidation": False,   # Macre: exit only on a pointer against
     "killzones": None,          # e.g. ["LONDON", "NY AM"]: only enter during these
     "require_liquidity_sweep": False,  # PROC must take an Asia/London/NY high or low
@@ -330,7 +331,9 @@ class ProcBot(Bot):
         self.partner: Optional[ProcEngine] = None
         self._events: list[tuple[str, Proc]] = []
         self.pending: list[Proc] = []    # PROCs waiting for the partner market to confirm
+        self.candidates: list[Proc] = [] # PROCs that passed this bot's filters (for counting inverses)
         self.my_proc: Optional[Proc] = None
+        self._session = ""
         self.last_signal = ""
         self.reset_day()
 
@@ -352,14 +355,21 @@ class ProcBot(Bot):
         if self._confirming and partner in market.underlyings and market.underlyings[partner].bars:
             self.partner = shared_engine(market, partner, self.p)
             self.partner.update(market.underlyings[partner].bars[-1], mod)
+        if market.session != self._session:   # each session starts with a clean walk-away count
+            self._session = market.session
+            self.inverses = 0
+            if self.status == "walked":
+                self.status = "scanning"
+                self.last_event = f"{market.session} open · back on shift"
         for kind, p in self._events:
-            if kind == "invalidated":
+            if kind == "invalidated" and p in self.candidates:
+                self.candidates.remove(p)
                 self.inverses += 1
                 if self.status not in DONE_FOR_DAY:
                     self.last_event = f"{p.tf}m PROC invalidated ({self.inverses}/{self.p['walk_after']})"
                 if self.inverses >= self.p["walk_after"] and self.status == "scanning":
                     self.status = "walked"
-                    self.last_event = f"{self.inverses} pointer inverses · walked away"
+                    self.last_event = f"{self.inverses} pointer inverses · walked away until next session"
 
     def _usable(self, p: Proc, market: Market) -> bool:
         kz = self.p["killzones"]
@@ -387,6 +397,7 @@ class ProcBot(Bot):
             if not self._usable(p, market):
                 self.last_event = f"{p.tf}m PROC {arrow} at {market.clock_str} · filtered out"
                 continue
+            self.candidates = (self.candidates + [p])[-10:]
             self.pending = [q for q in self.pending if q.side == p.side]   # an opposite PROC cancels waiting ones
             if self._confirmed(p):
                 ready.append(p)

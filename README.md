@@ -36,6 +36,7 @@ backend/
   bots/proc.py   the Macre PROC strategy (FFVG/IFFVG taps + 3-6m pointers)
   config.py      who lives in the city
   backtest.py    replay real 1m candles through the bots; walk-forward optimizer
+  fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
   engine.py      ticks the market and every bot, builds the snapshot
   main.py        FastAPI: WebSocket /ws, REST /api/state, /api/bots/{id}/{on|off}
 frontend/
@@ -149,9 +150,12 @@ The live city runs on simulated, random prices, so it can't tell you if the
 strategy works. The backtester replays **real 1-minute candles** through the
 exact same bots, prop account rules and daily goal/cap/stop.
 
-1. **Export data from TradingView:** open a 1-minute chart (MNQ1!, MES1!, M2K1!),
-   scroll back as far as your plan loads, then chart menu → *Export chart data…*.
-   Put the symbol in each file name: `data/MNQ_1m.csv`, `data/MES_1m.csv`, `data/M2K_1m.csv`.
+1. **Get data.** Free: `python -m backend.fetch_data` downloads the last ~30
+   days of real 1-minute NQ / ES / RTY futures from Yahoo Finance into
+   `data/MNQ_1m.csv`, `data/MES_1m.csv`, `data/M2K_1m.csv` (micros track the
+   full-size contracts exactly). Run it every few weeks: it merges new candles
+   in, so your history keeps growing. A paid TradingView plan can also export
+   1-minute charts (chart menu → *Export chart data…*); name the files the same way.
 2. **Backtest the current settings:**
    ```bash
    python -m backend.backtest data/*.csv

@@ -167,7 +167,7 @@ def run(data: dict[str, list], params: dict | None = None) -> dict:
             if acct.phase == "failed" or "reset" in acct.halted:
                 fails += 1
                 engine.reset_account()   # keeps day_history
-    days = [pnl for _, pnl in acct.day_history]
+    days = [pnl for _, pnl in acct.day_history] + ([round(acct.day_realized, 2)] if acct.day_realized else [])
     traded = [d for d in days if d != 0]
     wins = [t for t in trades if t > 0]
     losses = [t for t in trades if t <= 0]

@@ -24,7 +24,10 @@ Our safety layer (`Guards`), tighter than the firm so we never touch its lines:
   * daily cap $1,000: flatten everything at +$1,000 (open + closed); this also
     keeps the best day well inside the 50% consistency rule ($1,500 max)
   * daily stop -$800 (open + closed), shrunk on days the account starts close
-    to the MLL so a loss can never reach it (we keep a $100 cushion)
+    to the MLL so a loss can never reach it (we keep a $250 cushion: real
+    1-minute candles can move a few hundred dollars against 12 micros)
+  * when today's stop is under $500 (little room left), only one 3-contract
+    position at a time
   * less than $150 of room above the MLL -> stop trading, ask for a reset
   * contract budget: at most 12 micros open across all bots (each trade is 3-6)
   * one bot per symbol at a time, so bots never hold opposite sides of the same contract
@@ -68,8 +71,10 @@ class Guards:
     daily_goal: float = 600.0          # no new trades once closed P&L reaches this
     daily_cap: float = 1_000.0         # flatten at this (open + closed)
     daily_stop: float = 800.0          # flatten at -this (open + closed)
-    mll_cushion: float = 100.0         # never let a day's loss get closer than this to the MLL
+    mll_cushion: float = 250.0         # never let a day's loss get closer than this to the MLL
     min_room: float = 150.0            # less room than this above the MLL -> stop trading
+    thin_room: float = 500.0           # a day stop below this -> only one 3-contract position at a time
+    thin_micros: int = 3
     max_open_micros: int = 12          # e.g. two bots at the full 6
 
 
@@ -100,6 +105,8 @@ class PropAccount:
     # ---- lifecycle ----------------------------------------------------------
     def reset(self, phase: str = "evaluation") -> None:
         r = self.rules
+        if self.day_realized:   # a day cut short by a reset still counts in the history
+            self.day_history.append((self.phase, round(self.day_realized, 2)))
         self.phase = phase
         self.balance = self.eod_high = r.start_balance
         self.mll = r.start_balance - r.max_loss
@@ -149,7 +156,9 @@ class PropAccount:
 
     @property
     def max_micros(self) -> int:
-        return min(self.rules.max_micros, self.guards.max_open_micros)
+        g = self.guards
+        cap = g.thin_micros if self.day_stop < g.thin_room else g.max_open_micros   # near the MLL: size down
+        return min(self.rules.max_micros, cap)
 
     @property
     def goal_reached(self) -> bool:
