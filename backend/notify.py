@@ -8,8 +8,8 @@ Two ways, use either or both:
 * ntfy (free app, App Store / Play Store): set STARNET_NTFY_TOPIC to a long,
   hard-to-guess topic name and subscribe to it in the ntfy app.
 
-Sent for: entries, adds, exits (with P&L), account stops/caps, and real-order
-failures. Only in live mode, so the simulation doesn't spam you.
+Sent for: entries, adds, exits (with P&L), account stops/caps, news pauses, and
+real-order failures. Only in live mode, so the simulation doesn't spam you.
 """
 from __future__ import annotations
 
@@ -104,6 +104,8 @@ class Notifier:
             day = engine.account.day_pnl
             icon = "💰" if ev["pnl"] >= 0 else "🔻"
             return (f"{icon} {who} closed {money(ev['pnl'])}{tag}", f"{ev['reason']} · today {money(day)}", "trade")
+        if ev["type"] == "news_hold":
+            return (f"📰 {ev['title']} at {ev['at']} ET", f"bots paused for news · no new trades until {ev['until']}", "news")
         if ev["type"] == "account_halt":
             good = any(k in ev["reason"] for k in ("cap", "target"))
             return (f"{'🏁' if good else '🛑'} Account: done for the day", ev["reason"], "account")

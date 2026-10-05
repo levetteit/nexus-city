@@ -241,6 +241,48 @@ STARNET_MODE=live uvicorn backend.main:app
 Going from paper to a real Lucid account needs a real-time data feed and order
 routing through the platform your account uses (see *Going live* below).
 
+## News filter (`backend/news.py`)
+
+These bots trade without a stop loss, so a CPI, FOMC or NFP candle is the
+quickest way to lose a prop account. For every high-impact USD release on the
+ForexFactory calendar:
+
+- **No new trades** from 10 minutes before the release until 15 minutes after it, or 45 minutes after for FOMC.
+- **Open trades are closed** 2 minutes before the release.
+
+The account panel lists the next releases, the activity feed shows each pause,
+and your phone gets an alert. The calendar refreshes every 6 hours and is saved
+to `data/news_calendar.json`. Add your own events in `data/news_extra.json`.
+
+Settings (environment variables):
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `STARNET_NEWS_BEFORE` | 10 | Minutes before a release with no new trades |
+| `STARNET_NEWS_AFTER` | 15 | Minutes after a release with no new trades |
+| `STARNET_NEWS_AFTER_FOMC` | 45 | Minutes after an FOMC release with no new trades |
+| `STARNET_NEWS_FLATTEN` | 2 | Minutes before a release to close open trades; `0` holds them instead |
+
+To backtest with a calendar: `--news data/news_calendar.json`.
+
+## Paper vs backtest check (`backend/scorecard.py`)
+
+When each trading day ends, live mode downloads that day's candles again and
+replays them through the same bots, settings and account state. It then checks
+that paper trading took the same trades. A mismatch means the live pipeline
+changed the result (late or missing candles, a restart, a bot switched on or
+off), so backtest numbers won't carry over to real money yet.
+
+The account panel also compares the paper days so far with the backtest: green
+days, average day and profit factor. After each day you get a push such as
+"📊 Day done +$640 · replay +$640 ✅". The full history is at `/api/scorecard`
+and in `data/paper_checks.json`.
+
+Before you connect real money, look for:
+
+- **Replay match:** close to 100% on days without a restart.
+- **Green days and average day:** near the backtest after 15–20 days.
+
 ## Watch it from your phone, 24/7 (deploy to Render)
 
 The repo is ready to host: `Dockerfile` + `render.yaml` run the city in live

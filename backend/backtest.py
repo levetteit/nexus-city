@@ -141,10 +141,11 @@ class ReplayMarket:
 
 
 # ---------------------------------------------------------------- one run
-def run(data: dict[str, list], params: dict | None = None) -> dict:
-    """Replay `data` once. Failed or stuck evaluations are reset and counted, like buying a new one."""
+def run(data: dict[str, list], params: dict | None = None, news=None) -> dict:
+    """Replay `data` once. Failed or stuck evaluations are reset and counted, like buying a new one.
+    `news` is an optional NewsCalendar (news.py): no trades around high-impact releases."""
     market = ReplayMarket(data)
-    engine = Engine(market=market, account=PropAccount(), params=params)
+    engine = Engine(market=market, account=PropAccount(), params=params, news=news)
     acct = engine.account
     trades, by_session, reasons = [], Counter(), Counter()
     open_session: dict[str, str] = {}
@@ -280,6 +281,7 @@ def main() -> None:
     ap.add_argument("--params", help='JSON of strategy settings for a single run, e.g. \'{"sessions": ["NEW YORK"]}\'')
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--out", help="write results as JSON here")
+    ap.add_argument("--news", metavar="JSON", help="news calendar (data/news_calendar.json format): skip trades around releases")
     ap.add_argument("--make-sample", metavar="FOLDER", help="write synthetic test files and exit")
     a = ap.parse_args()
 
@@ -298,7 +300,12 @@ def main() -> None:
             _print_result("  tuned on (first 70% of days):", r["train"])
             _print_result("  CHECK on unseen days (last 30%):", r["test"])
     else:
-        out = run(data, json.loads(a.params) if a.params else None)
+        cal = None
+        if a.news:
+            from .news import NewsCalendar
+            with open(a.news) as f:
+                cal = NewsCalendar(NewsCalendar.parse(json.load(f), high_only=False))
+        out = run(data, json.loads(a.params) if a.params else None, cal)
         _print_result("backtest:", out)
     if a.out:
         with open(a.out, "w") as f:

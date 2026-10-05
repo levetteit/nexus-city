@@ -26,6 +26,7 @@ POLL_SECONDS = 20
 engine = Engine() if MODE != "live" else None   # live mode builds its engine at startup (needs a download)
 router = None     # real-order router (live mode only), see execution.py
 notifier = None   # phone notifications (live mode only), see notify.py
+scorecard = None  # live vs backtest checks (live mode only), see scorecard.py
 clients: set[WebSocket] = set()
 
 
@@ -50,15 +51,21 @@ async def run_city() -> None:
 async def run_live() -> None:
     """Poll for new real candles and step the bots through each one."""
     global engine, router, notifier
-    from . import execution, live, notify
+    global scorecard
+    from . import execution, live, news, notify
+    from .scorecard import Scorecard
     notifier = notify.Notifier(live.DATA_DIR)
+    calendar = news.NewsCalendar(data_dir=live.DATA_DIR)
+    await asyncio.to_thread(calendar.refresh, True)
     market = await asyncio.to_thread(live.LiveMarket)
-    engine = Engine(market=market, account=live.load_account())
+    engine = Engine(market=market, account=live.load_account(), news=calendar)
     live.load_careers(engine)
     router = execution.TradersPostRouter(live.DATA_DIR)
     router.start()
     while market.i + 1 < market.warm_until:   # read history, don't trade it
         engine.tick(trade=False)
+    scorecard = Scorecard(live.DATA_DIR, calendar)
+    scorecard.start_day(engine, partial=True)   # we may have come up mid-day
     last_poll = 0.0
     last_order_error = ""
     while True:
@@ -66,6 +73,7 @@ async def run_live() -> None:
         if loop.time() - last_poll >= POLL_SECONDS:
             last_poll = loop.time()
             try:
+                await asyncio.to_thread(calendar.refresh)   # no-op unless the cached week is stale
                 await asyncio.to_thread(market.poll)
             except Exception as exc:   # network hiccup: try again next poll
                 print(f"live poll failed: {exc}")
@@ -76,12 +84,24 @@ async def run_live() -> None:
             live.record(engine, new)
             router.handle(engine, new, market.delay_minutes)   # real orders, if armed
             notifier.handle(engine, new, real=router.armed)     # buzz your phone
+            finished = scorecard.observe(engine, new)
+            if finished:   # a trading day just ended: replay it and compare with what paper trading did
+                asyncio.create_task(check_day(finished))
             events += new
         if router.last_error and router.last_error != last_order_error:   # a real order failed: tell you now
             notifier.send("⚠️ Real order failed", router.last_error, "error")
         last_order_error = router.last_error
         await broadcast({"type": "tick", "state": state(), "events": events})
         await asyncio.sleep(1)
+
+
+async def check_day(day: dict) -> None:
+    try:
+        check = await asyncio.to_thread(scorecard.replay, day)
+    except Exception as exc:   # e.g. Yahoo down: skip this day's check
+        print(f"replay check failed: {exc}")
+        return
+    notifier.send(*scorecard.message(check, engine.account))
 
 
 def state() -> dict:
@@ -92,6 +112,8 @@ def state() -> dict:
         snap["feed"] = engine.market.feed
         if router:
             snap["execution"] = router.status(engine.market.delay_minutes)
+        if scorecard:
+            snap["scorecard"] = scorecard.status(engine.account)
         if notifier:
             snap["push"] = {"web_push": notifier.web_push, "devices": len(notifier.subs), "ntfy": bool(notifier.ntfy_topic)}
     return snap
@@ -175,7 +197,16 @@ def toggle(bot_id: str, action: str) -> dict:
     if bot_id not in engine.bots or action not in ("on", "off"):
         raise HTTPException(404)
     engine.set_enabled(bot_id, action == "on")
+    if scorecard:
+        scorecard.toggled()
     return engine.bots[bot_id].snapshot(engine.market)
+
+
+@app.get("/api/scorecard")
+def get_scorecard() -> dict:
+    if scorecard is None:
+        raise HTTPException(503, "the live vs backtest check only runs in live mode")
+    return {**scorecard.status(engine.account), "days": scorecard.checks}
 
 
 @app.get("/api/bots/{bot_id}/room")
