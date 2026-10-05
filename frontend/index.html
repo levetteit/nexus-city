@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Starnet City</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@500;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <header id="hud">
+    <div class="brand">STARNET<span>CITY</span></div>
+    <div id="tickers"></div>
+    <div id="clock">--:--</div>
+  </header>
+
+  <div id="conn" class="hidden">reconnecting to the city…</div>
+
+  <section id="payroll" class="panel hidden">
+    <button class="close" data-close="payroll">×</button>
+    <h3>PAYROLL · TODAY</h3>
+    <table>
+      <thead><tr><th>Worker</th><th>Trades</th><th>Wins</th><th>Earned</th></tr></thead>
+      <tbody id="payroll-rows"></tbody>
+    </table>
+    <p class="note">Every closed trade sends its money down the road to the vault: gold coins in, red coins out.</p>
+  </section>
+
+  <section id="worker" class="panel hidden">
+    <button class="close" data-close="worker">×</button>
+    <div id="worker-body"></div>
+  </section>
+
+  <script type="module" src="city.js"></script>
+</body>
+</html>
