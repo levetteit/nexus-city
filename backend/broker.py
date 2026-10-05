@@ -53,8 +53,10 @@ class Broker(Protocol):
 
 
 class PaperBroker:
-    def __init__(self, spread_pct: float = 0.02, option_fee: float = 0.65, futures_fee: float = 0.62) -> None:
+    def __init__(self, spread_pct: float = 0.02, option_fee: float = 0.65, futures_fee: float = 0.62,
+                 slippage_ticks: float = 1.0) -> None:
         self.spread_pct = spread_pct
+        self.slippage_ticks = slippage_ticks
         self.option_fee = option_fee      # per contract, per side
         self.futures_fee = futures_fee    # per contract, per side
 
@@ -62,7 +64,7 @@ class PaperBroker:
         if strike is None:  # futures
             u = market.underlyings[symbol]
             mult = FUTURES_MULTIPLIER[symbol]
-            slip = u.tick_size if kind == "long" else -u.tick_size
+            slip = self.slippage_ticks * u.tick_size * (1 if kind == "long" else -1)
             fee = self.futures_fee / mult if kind == "long" else -self.futures_fee / mult
             return Position(symbol, kind, qty, u.price + slip + fee, market.clock_str, None, mult)
         mid = market.option_price(symbol, strike, kind)
@@ -73,7 +75,7 @@ class PaperBroker:
         """Exit price, net of costs, for `pos` (the caller decides how many contracts)."""
         if pos.is_future:
             u = market.underlyings[pos.symbol]
-            cost = u.tick_size + self.futures_fee / pos.multiplier
+            cost = self.slippage_ticks * u.tick_size + self.futures_fee / pos.multiplier
             return u.price - cost if pos.kind == "long" else u.price + cost
         mid = market.option_price(pos.symbol, pos.strike, pos.kind)
         return max(mid * (1 - self.spread_pct / 2) - self.option_fee / 100, 0.0)

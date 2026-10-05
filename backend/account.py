@@ -75,6 +75,8 @@ class Guards:
     mll_cushion: float = 250.0         # never let a day's loss get closer than this to the MLL
     min_room: float = 150.0            # less room than this above the MLL -> stop trading
     max_loss_streak: int | None = 3      # stop for the day after this many losing trades in a row
+    lock_trigger: float | None = None    # once the day has been up this much (open + closed)...
+    lock_floor: float = 0.0              # ...flatten and stop if it falls back to this
     thin_room: float = 500.0           # a day stop below this -> only one 3-contract position at a time
     thin_micros: int = 3
     max_open_micros: int = 12          # e.g. two bots at the full 6
@@ -94,6 +96,7 @@ class PropAccount:
     halted: str = ""                   # why trading stopped for the day, if it did
     day_stop: float = 0.0              # today's loss limit (daily_stop, or less near the MLL)
     loss_streak: int = 0
+    day_peak: float = 0.0
     best_day: float = 0.0
     days: int = 0
     profitable_days: int = 0
@@ -127,6 +130,7 @@ class PropAccount:
         self.day_stop = min(g.daily_stop, room)
         self.halted = ""
         self.loss_streak = 0
+        self.day_peak = 0.0
         if room < g.min_room:
             self.halted = f"only ${self.balance - self.mll:,.0f} above the MLL · reset recommended"
             self._note(self.halted)
@@ -218,8 +222,11 @@ class PropAccount:
         if self.halted:
             return None
         g = self.guards
+        self.day_peak = max(self.day_peak, self.day_pnl)
         if self.day_pnl <= -self.day_stop:
             self.halted = f"daily stop -${self.day_stop:,.0f}"
+        elif g.lock_trigger and self.day_peak >= g.lock_trigger and self.day_pnl <= g.lock_floor:
+            self.halted = f"profit lock: day was up ${self.day_peak:,.0f}, kept +${self.day_pnl:,.0f}"
         elif g.max_loss_streak and self.loss_streak >= g.max_loss_streak:
             self.halted = f"{self.loss_streak} losing trades in a row · stop for the day"
         elif self.day_pnl >= g.daily_cap:

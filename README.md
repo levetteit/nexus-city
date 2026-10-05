@@ -122,7 +122,15 @@ What the trade-level breakdown showed, and what was tried:
   Lucid's $1,500 consistency limit.
 - Tested and rejected (worse when re-run): dropping 5m pointers, exiting only
   on an opposite PROC of the same or higher timeframe, a 2-loss streak stop,
-  adding on MNQ's own pointers. Adding on an MES pointer (`add_on:
+  adding on MNQ's own pointers, an $800 goal or no goal, a profit lock that
+  stops a green day from giving back (`lock_trigger` / `lock_floor`), 3 or 10
+  minute confirmation windows, FFVGs only (IFFVGs carry a lot of the edge),
+  and requiring a liquidity sweep (cut profit by ~90%).
+- Robustness: with 2-3 ticks of slippage per side instead of 1 the results
+  barely change, so the edge isn't living on perfect fills.
+- Daily stops of −$600 and −$1,000 both beat −$800 on total profit, which
+  shows how much of the difference between settings is noise on 21 days.
+  Adding on an MES pointer (`add_on:
   "partner_pointer"`) made more money but fewer profitable days and a best day
   over $1,500: worth re-testing as more data comes in. 21 days is a small sample:
 keep fetching data and re-running the backtest as history grows.
