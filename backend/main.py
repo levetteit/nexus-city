@@ -732,7 +732,7 @@ def station_routine_runs() -> list:
 @app.get("/api/station/{collection}/{rid}")
 def station_record(collection: str, rid: str) -> dict:
     st = _station()
-    if collection not in ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions"):
+    if collection not in ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions", "leads"):
         raise HTTPException(404)
     rec = st.store.get(collection, rid)
     if not rec:
@@ -741,6 +741,9 @@ def station_record(collection: str, rid: str) -> dict:
         rec["pnl"] = st.treasury.pnl("venture", rid)
         rec["health"] = st.health(rec)
         rec["task_list"] = st.store.find("tasks", venture=rid)
+        if rid != "V-001":
+            from .station import results
+            rec["results"] = results.summary(st.store, rid, 30)
     if collection == "agents":
         rec["pnl"] = st.treasury.pnl("agent", rid)
         rec["task_list"] = st.store.find("tasks", assigned_agent=rid)
@@ -912,6 +915,34 @@ async def station_venture_outreach(rid: str, request: Request) -> dict:
     on = bool((await request.json()).get("on"))
     return st.store.update("ventures", rid, {"outreach_allowed": on}, "owner", f"outreach {'allowed' if on else 'off'} for {rid}",
                            kind="venture.outreach_allowed")
+
+
+@app.post("/api/station/ventures/{rid}/leads")
+async def station_add_lead(rid: str, request: Request) -> dict:
+    """Log a lead: `{"source": "dm"|"whatsapp"|"call"|"comment"|"referral"|"other", "note": "...", "action": "X-012"}`."""
+    from .station import results
+    b = await request.json()
+    try:
+        return results.add_lead(_station().store, rid, str(b.get("source", "")), str(b.get("note", ""))[:300], b.get("action") or None)
+    except KeyError:
+        raise HTTPException(404)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/station/leads/{rid}")
+async def station_set_lead(rid: str, request: Request) -> dict:
+    """Move a lead along: `{"status": "quoted"|"won"|"lost", "amount": 350}`. Won books the amount as real income."""
+    from .station import results
+    st = _station()
+    b = await request.json()
+    try:
+        amount = float(b["amount"]) if b.get("amount") not in (None, "") else None
+        return results.set_lead(st.store, rid, str(b.get("status", "")), amount, str(b.get("note", ""))[:300], record_income=st.record)
+    except KeyError:
+        raise HTTPException(404)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.post("/api/station/ventures/{rid}/link")

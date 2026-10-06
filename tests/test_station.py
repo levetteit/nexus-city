@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from backend.station import economy, research
+from backend.station.store import now_iso
 from backend.station.ultron import Ultron
 
 ET = ZoneInfo("America/New_York")
@@ -582,3 +583,67 @@ def test_media_route_is_public_but_unguessable(tmp_path, monkeypatch):
         assert c.get("/api/station").status_code == 401                 # everything else still needs the password
         c.auth = ("x", "pw")
         assert c.post("/api/station/ventures/V-PPS/outreach", json={"on": True}).json()["outreach_allowed"] is True
+
+
+def test_post_engagement_and_leads_feed_the_war_room(tmp_path, monkeypatch):
+    from backend.station import actions, connectors, results, warroom
+    fake = FakeClaude([opp("x")])
+    u = Ultron(str(tmp_path), client=fake)
+    now = datetime.now(ZoneInfo("America/New_York"))
+    # two Padilla posts went out: one on Facebook, one on Instagram
+    ids = []
+    for plat, pid in (("facebook", "1150_99"), ("instagram", "1789")):
+        a = actions.create(u.store, "social.post", "A-006", "V-PPS", {"platform": plat, "text": f"{plat} post", "link": ""}, "post")
+        u.store.update("actions", a["id"], {"status": "sent", "sent_at": now_iso(), "result": {"platform": plat, "id": pid}}, "test")
+        ids.append(a["id"])
+    monkeypatch.setattr(connectors, "facebook_post_metrics", lambda pid: {"reactions": 14, "comments": 3, "shares": 1})
+    monkeypatch.setattr(connectors, "instagram_media_metrics", lambda mid: {"likes": 22, "comments": 2})
+    u.cfg.update({"audited": now.date().isoformat()})
+    assert u.next_job(now) == {"kind": "metrics"}
+    u.run_job({"kind": "metrics"}, now=now)
+    assert u.store.get("actions", ids[0])["result"]["metrics"] == {"reactions": 14, "comments": 3, "shares": 1}
+    assert u.next_job(now) != {"kind": "metrics"}                         # not again for 6 hours
+    # leads: logged from a post, quoted, won (booked as real income), lost
+    l1 = results.add_lead(u.store, "V-PPS", "whatsapp", "casa en Bayamón", action=ids[0])
+    l2 = results.add_lead(u.store, "V-PPS", "dm")
+    with pytest.raises(ValueError):
+        results.add_lead(u.store, "V-PPS", "carrier pigeon")
+    results.set_lead(u.store, l1["id"], "quoted")
+    with pytest.raises(ValueError):
+        results.set_lead(u.store, l1["id"], "won", None, record_income=u.record)   # a sale needs its amount
+    results.set_lead(u.store, l1["id"], "won", 450, record_income=u.record)
+    results.set_lead(u.store, l2["id"], "lost")
+    assert u.treasury.pnl("venture", "V-PPS")["income"] == 450
+    with pytest.raises(ValueError):
+        results.set_lead(u.store, l1["id"], "lost")                        # a booked sale isn't undone here
+    r = results.summary(u.store, "V-PPS")
+    assert r["leads"] == 2 and r["by_status"] == {"won": 1, "lost": 1} and r["won_value"] == 450
+    assert r["best_posts"][0]["post"] == ids[0] and r["best_posts"][0]["leads"] == 1
+    assert u.health(u.store.get("ventures", "V-PPS")) > 60
+    # the War Room sees it all
+    data = warroom.inputs(u.store, u.treasury, u.health, None)
+    pps = next(v for v in data["ventures"] if v["id"] == "V-PPS")
+    assert pps["results_30d"]["won_value"] == 450 and any("lead" in x for x in data["new_results"])
+
+
+def test_lead_api(tmp_path, monkeypatch):
+    import importlib
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv("STARNET_MODE", "sim")
+    monkeypatch.setenv("STARNET_PASSWORD", "pw")
+    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    import backend.main as main
+    importlib.reload(main)
+    with TestClient(main.app) as c:
+        c.auth = ("x", "pw")
+        lead = c.post("/api/station/ventures/V-PPS/leads", json={"source": "whatsapp", "note": "Caguas"}).json()
+        assert lead["status"] == "new"
+        assert c.post("/api/station/ventures/V-PPS/leads", json={"source": "fax"}).status_code == 400
+        assert c.post("/api/station/ventures/V-999/leads", json={"source": "dm"}).status_code == 404
+        assert c.post(f"/api/station/leads/{lead['id']}", json={"status": "won"}).status_code == 400
+        assert c.post(f"/api/station/leads/{lead['id']}", json={"status": "won", "amount": 300}).json()["amount"] == 300
+        o = c.get("/api/station").json()
+        assert o["treasury"]["station"]["income"] == 300 and o["leads"][0]["id"] == lead["id"]
+        pps = next(v for v in o["ventures"] if v["id"] == "V-PPS")
+        assert pps["results"]["leads"] == 1

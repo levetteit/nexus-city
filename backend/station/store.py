@@ -12,10 +12,10 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-COLLECTIONS = ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions")
+COLLECTIONS = ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions", "leads")
 SINGULAR = {"opportunities": "opportunity"}
 PREFIX = {"ventures": "V", "agents": "A", "tasks": "T", "approvals": "AP", "opportunities": "OP",
-          "missions": "M", "routines": "R", "actions": "X"}
+          "missions": "M", "routines": "R", "actions": "X", "leads": "L"}
 
 # Venture lifecycle (the export's canonical order, plus the two end states)
 STAGES = ("research", "validate", "approved", "build", "launch", "operate", "measure", "optimize", "scale",

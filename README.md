@@ -498,6 +498,12 @@ password, because Instagram downloads the image itself; on Render the public add
 
 **Outreach is off for every venture** until you press **Allow outreach** on that venture's card.
 
+**Results** (`backend/station/results.py`): every 6 hours the Auditor reads each recent post's reactions,
+comments and shares (Facebook) and likes and comments (Instagram). On a venture's card you log each lead in
+one tap (DM, WhatsApp, call, comment, referral), optionally tied to the post that brought it, then mark it
+quoted, won (the amount is booked as real income) or lost. The War Room ranks posts by the leads they bring,
+then by engagement, and turns that into lessons and new tasks.
+
 What the station can't do: move money out, refund, sign anything, run a marketplace account, or touch the
 trading bots' orders and risk. The **Stop all outbound** button on the Command tab stops every outgoing post,
 email and Stripe change at once.

@@ -77,6 +77,8 @@ function renderCommand() {
     stat("Active ventures", live.length, `${S.ventures.length} total`) +
     stat("Agents working", working, `${S.agents.length} on the roster`) +
     stat("Waiting for you", S.approvals.length + S.owner_tasks.length, "approvals + tasks", (S.approvals.length + S.owner_tasks.length) ? "neg" : "") +
+    stat("Leads (7 days)", (S.leads || []).filter((l) => Date.now() - new Date(l.created_at) < 7 * 864e5).length,
+      `${(S.leads || []).filter((l) => l.status === "won").length} won all-time`) +
     stat("AI spend (month)", money(t.ai.spent_month), `cap ${money(t.ai.budget)}`);
   $("#cmd-waiting").innerHTML = waitingList(5) || `<div class="empty">Nothing waiting for you.</div>`;
   $("#cmd-alerts").innerHTML = S.alerts.length ? S.alerts.slice(0, 6).map(evRow).join("") : `<div class="empty">All quiet.</div>`;
@@ -214,7 +216,21 @@ function actionRow(a) {
     : `${p.name} · ${money(p.price_usd)}`;
   return `<div class="item ${["manual", "waiting_owner"].includes(a.status) ? "wait" : ""}" data-open="actions:${a.id}">
     <div class="t"><span>${esc(label).slice(0, 110)}</span><span class="pill ${a.status === "sent" ? "green" : a.status === "rejected" ? "red" : "gold"}">${esc(KIND[a.kind] || a.kind)}</span></div>
-    <div class="m">${esc(a.id)} · ${esc(a.venture || "")} · ${esc(a.status.replace("_", " "))}${a.manual_reason ? " · " + esc(a.manual_reason) : ""}</div></div>`;
+    <div class="m">${esc(a.id)} · ${esc(a.venture || "")} · ${esc(a.status.replace("_", " "))}${a.manual_reason ? " · " + esc(a.manual_reason) : ""}${metricsText((a.result || {}).metrics)}</div></div>`;
+}
+
+const SRC = { dm: "DM", whatsapp: "WhatsApp", call: "Llamada", comment: "Comentario", referral: "Referido", other: "Otro" };
+function metricsText(m) {
+  if (!m) return "";
+  return " · " + Object.entries(m).map(([k, v]) => `${v} ${k}`).join(", ");
+}
+function leadRow(l) {
+  const pill = { new: "cyan", quoted: "gold", won: "green", lost: "red" }[l.status];
+  return `<div class="item" style="cursor:default"><div class="t"><span>${esc(SRC[l.source] || l.source)}${l.note ? " · " + esc(l.note) : ""}</span>
+    <span class="pill ${pill}">${esc(l.status)}${l.status === "won" ? " " + money(l.amount) : ""}</span></div>
+    <div class="m">${esc(l.id)} · ${esc(ago(l.created_at))}${l.action ? " · from post " + esc(l.action) : ""}</div>
+    ${["new", "quoted"].includes(l.status) ? `<div class="actions">${l.status === "new" ? `<button class="btn" data-lead="${l.id}:quoted">Quoted</button>` : ""}
+      <button class="btn primary" data-lead="${l.id}:won">Won</button><button class="btn danger" data-lead="${l.id}:lost">Lost</button></div>` : ""}</div>`;
 }
 
 function renderOutbound() {
@@ -323,10 +339,19 @@ async function openRecord(col, id) {
       <h2>Where customers buy</h2>${Object.entries(r.links || {}).map(([k, u]) => `<div><span class="muted">${esc(k)}</span> <a href="${esc(u)}" target="_blank" rel="noopener" style="color:var(--cyan)">${esc(u)}</a></div>`).join("") || `<div class="empty">No link yet: marketing starts once there is one.</div>`}
       <div class="row" style="margin-top:8px"><input id="link-name" placeholder="fiverr" style="max-width:110px" /><input id="link-url" placeholder="https://…" />
         <button class="btn" data-link="${r.id}">Save link</button></div>
+      ${r.id !== "V-001" ? `<h2>Leads</h2><p class="muted small">Got a message? Log it in one tap. The War Room uses this to learn which posts work.</p>
+        <div class="row"><select id="lead-post" style="flex:1"><option value="">From which post? (optional)</option>
+          ${S.outbox.sent.filter((a) => a.venture === r.id).map((a) => `<option value="${a.id}">${esc(a.payload.platform)}: ${esc((a.payload.text || "").slice(0, 50))}</option>`).join("")}</select></div>
+        <input id="lead-note" placeholder="Note (optional): e.g. casa en Bayamón, quiere baterías" style="margin:8px 0" />
+        <div class="actions" style="margin-top:0">${["dm", "whatsapp", "call", "comment", "referral"].map((x) => `<button class="btn" data-addlead="${r.id}:${x}">+ ${SRC[x]}</button>`).join("")}</div>
+        ${(S.leads || []).filter((l) => l.venture === r.id).slice(0, 12).map(leadRow).join("") || `<div class="empty">No leads logged yet.</div>`}
+        ${r.results ? `<h2>Last 30 days</h2><div class="kv"><div>Leads</div><div>${r.results.leads} ${Object.entries(r.results.by_source).map(([k, v]) => `· ${v} ${SRC[k] || k}`).join(" ")}</div>
+          <div>Won</div><div>${r.results.by_status.won || 0} · ${money(r.results.won_value)}</div><div>Posts sent</div><div>${r.results.posts_sent}</div></div>
+          ${r.results.best_posts.length ? `<h2>Best posts</h2>${r.results.best_posts.map((p) => `<div class="ev"><div class="when">${p.leads} leads</div><div>${esc(p.platform)}: ${esc(p.text)}${metricsText(p.metrics)}</div></div>`).join("")}` : ""}` : ""}` : ""}
       <h2>Outreach</h2><div class="row"><span class="muted small" style="flex:1">${r.outreach_allowed ? "The Outreach Agent may email businesses for this venture." : "Off: no one is contacted for this venture."}</span>
         <button class="btn ${r.outreach_allowed ? "danger" : ""}" data-outreach="${r.id}:${r.outreach_allowed ? "off" : "on"}">${r.outreach_allowed ? "Turn off" : "Allow outreach"}</button></div>
       ${r.marketing_plan && r.marketing_plan.channels ? `<h2>Channel plan</h2><p class="muted small">${esc(r.marketing_plan.audience || "")}</p>${list(r.marketing_plan.channels.map((c) => `${c.platform}: ${c.why}`))}` : ""}
-      ${r.id !== "V-001" ? `<h2>Move it</h2><div class="actions">${["launch", "operate", "scale", "paused", "killed"].map((s) => `<button class="btn ${s === "killed" ? "danger" : ""}" data-stage="${r.id}:${s}">${s}</button>`).join("")}</div>` : ""}`);
+      ${r.id !== "V-001" ? `<h2>Move it</h2><div class="actions">${["launch", "operate", "scale", "paused", "killed"].filter((x) => !(r.owner_business && x === "killed")).map((s) => `<button class="btn ${s === "killed" ? "danger" : ""}" data-stage="${r.id}:${s}">${s}</button>`).join("")}</div>` : ""}`);
   } else if (col === "tasks") {
     const deps = await Promise.all((r.depends_on || []).map((d) => api(`/api/station/tasks/${d}`).catch(() => null)));
     const out = r.output && r.output.deliverable;
@@ -356,6 +381,7 @@ async function openRecord(col, id) {
       ${p.image ? `<img src="/media/${esc(p.image)}" alt="Post image" style="width:100%;max-width:360px;border-radius:12px;display:block;margin:10px 0">
         <a class="btn" href="/media/${esc(p.image)}" download>Download image</a>` : ""}
       <pre class="deliver">${esc(text)}</pre><button class="btn" data-copy="${esc(r.id)}">Copy</button>
+      ${(r.result || {}).metrics ? `<h2>Engagement</h2><p>${esc(metricsText(r.result.metrics).slice(3))} <span class="muted small">(checked ${esc(ago(r.result.metrics_at))})</span></p>` : ""}
       ${r.qa ? `<h2>QA: ${esc(r.qa.verdict)}</h2>${list(r.qa.issues)}` : ""}
       <div class="actions">${["manual", "waiting_owner", "ready"].includes(r.status) ? `<button class="btn primary" data-act="${r.id}:done">I posted / sent it</button>` : ""}
         ${r.status === "waiting_owner" ? `<button class="btn" data-act="${r.id}:send">OK, send it</button>` : ""}
@@ -368,7 +394,7 @@ async function openRecord(col, id) {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-open],[data-decide],[data-promote],[data-dismiss],[data-run],[data-done],[data-stage],[data-copy],[data-act],[data-link],[data-outreach]");
+  const el = e.target.closest("[data-open],[data-decide],[data-promote],[data-dismiss],[data-run],[data-done],[data-stage],[data-copy],[data-act],[data-link],[data-outreach],[data-addlead],[data-lead]");
   if (!el) return;
   const d = el.dataset;
   if (d.decide) {
@@ -391,6 +417,23 @@ document.addEventListener("click", (e) => {
     if (what === "cancel" && !confirm("Cancel it?")) return;
     return act(() => api(`/api/station/actions/${id}/${what}`, { note: ($("#act-note") || {}).value || "" }),
       { done: "Marked sent.", send: "Sending.", cancel: "Cancelled.", result: "Result saved: the War Room will use it." }[what]).then(() => $("#sheet").classList.add("hidden"));
+  }
+  if (d.addlead) {
+    const [id, source] = d.addlead.split(":");
+    return act(() => api(`/api/station/ventures/${id}/leads`, { source, note: $("#lead-note").value, action: $("#lead-post").value }),
+      `Lead logged (${SRC[source]}).`).then(() => openRecord("ventures", id));
+  }
+  if (d.lead) {
+    const [id, status] = d.lead.split(":");
+    let amount = null;
+    if (status === "won") {
+      const v = prompt("How much did you earn from this sale? ($)");
+      if (v === null) return;
+      amount = parseFloat(v);
+    }
+    const lead = (S.leads || []).find((l) => l.id === id) || {};
+    return act(() => api(`/api/station/leads/${id}`, { status, amount }), status === "won" ? "Sale booked in the treasury." : `Lead ${status}.`)
+      .then(() => lead.venture && openRecord("ventures", lead.venture));
   }
   if (d.outreach) {
     const [id, to] = d.outreach.split(":");
