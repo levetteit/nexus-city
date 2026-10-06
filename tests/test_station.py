@@ -75,6 +75,8 @@ class FakeClaude:
             body = {"prospects": [{"company": "Acme Staffing", "contact_name": "", "to_email": "hello@acmestaffing.com",
                                    "source_url": "https://acmestaffing.com/contact", "why_them": "they place nurses",
                                    "subject": "Resume help for your nurses", "body": "Hi Acme team, ..."}]}
+        elif "sections" in props:
+            body = PRODUCT
         elif "market_notes" in props:
             body = {"market_notes": "Occupation humor tees sell; fall mugs trending.", "products": self.shop_briefs}
         elif "verdicts" in props:
@@ -196,6 +198,7 @@ def test_content_only_once_a_venture_has_a_link(ultron):
                                                        "outreach": {"use": False}}}, "test")
     u.cfg["audited"] = MON_0900.date().isoformat()
     u.cfg["kicked_off"] = True
+    u.cfg["kickoff_at"] = MON_0900.isoformat()
     u.cfg["shop_research_at"] = MON_0900.isoformat()
     for r in u.store.all("routines"):
         u.store.update("routines", r["id"], {"last_run": MON_0900.isoformat()}, "test")
@@ -868,3 +871,138 @@ def test_no_api_credit_waits_instead_of_failing_jobs(tmp_path):
     assert u.next_job(MON_0900.replace(minute=10)) is None and "credit balance" in u.last_error
     fake.beta.messages.create = fake.create
     assert u.next_job(MON_0900.replace(minute=25)) == job
+
+
+
+PRODUCT = {"title": "Weekly Meal Prep Planner", "subtitle": "Plan, shop and prep a week of meals in 30 minutes",
+           "format": "planner", "audience": "busy parents",
+           "sections": [{"heading": "How to use this planner", "kind": "text", "text": "Pick a prep day.\n\nFill the grid.", "items": [],
+                         "columns": [], "rows": 1},
+                        {"heading": "Week at a glance", "kind": "table", "text": "", "items": [],
+                         "columns": ["Day", "Breakfast", "Lunch", "Dinner"], "rows": 7},
+                        {"heading": "Prep day checklist", "kind": "checklist", "text": "", "items": [f"Step {i}" for i in range(30)],
+                         "columns": [], "rows": 1},
+                        {"heading": "Notes", "kind": "lines", "text": "", "items": [], "columns": [], "rows": 20}],
+           "price_usd": 6.5, "sales": {"headline": "Meal prep, sorted", "subheadline": "A printable weekly planner",
+                                       "bullets": ["7-day grid", "Shopping list"], "faq": [{"q": "Is anything shipped?", "a": "No, it's a PDF."}]},
+           "etsy": {"title": "Meal Prep Planner Printable, Weekly Meal Planner PDF", "description": "Printable planner.",
+                    "tags": ["meal planner", "meal prep printable"] + [f"tag{i}" for i in range(14)]},
+           "pin": {"title": "Weekly meal prep planner (printable)", "description": "Plan a week of meals in 30 minutes."},
+           "cover": {"headline": "Meal prep planner", "subline": "Printable · 7 days", "accent": "#2e7d5b"}}
+
+
+def auto_opp(**kw):
+    return {**opp("Printable meal prep planners", score=81), "category": "digital_product", "execution": "autonomous",
+            "rails": ["storefront", "etsy_digital", "pinterest"], "product_format": "planner", **kw}
+
+
+def test_autonomous_venture_launches_sells_and_closes_on_its_own(tmp_path, monkeypatch):
+    from datetime import timedelta
+    from backend.station import actions, connectors, digital
+    monkeypatch.setenv("STRIPE_API_KEY", "sk_test_x")
+    monkeypatch.setenv("STARNET_PUBLIC_URL", "https://city.example.com")
+    stripe_calls, etsy_calls, pins, vid = [], [], [], [None]
+
+    def fake_stripe(method, path, params=None):
+        stripe_calls.append((method, path, params))
+        if path == "/products":
+            return {"id": "prod_1"}
+        if path == "/prices":
+            return {"id": "price_1"}
+        if path == "/payment_links":
+            return {"id": "plink_1", "url": "https://buy.stripe.com/test_1"}
+        if path.startswith("/checkout/sessions/"):
+            return {"id": path.rsplit("/", 1)[1], "payment_status": "paid", "status": "complete", "payment_link": "plink_1",
+                    "amount_total": 650, "metadata": {"starnet_venture": vid[0], "starnet_product": slug[0]}}
+        return {}
+    monkeypatch.setattr(connectors, "stripe_request", fake_stripe)
+    notes = []
+    fake = FakeClaude([auto_opp(), opp("Resume gig on Fiverr")])
+    u = Ultron(str(tmp_path), client=fake, notify=lambda t, b: notes.append(t))
+    u.run_job({"kind": "routine", "routine": "R-001"}, now=MON_0900)
+    # the autonomous idea launches by itself: recorded as approved by the owner's rule, owner notified
+    u.tick(now=MON_0900)
+    v = next(v for v in u.store.all("ventures") if v.get("autonomous"))
+    vid[0] = v["id"]
+    assert v["stage"] == "launch" and v["planned"] and v["rails"] == ["storefront", "etsy_digital", "pinterest"]
+    ap = u.store.get("approvals", v["approval"])
+    assert ap["status"] == "approved" and ap["owner_response"].startswith("auto")
+    assert any("on its own" in n for n in notes)
+    u.tick(now=MON_0900)
+    assert len([x for x in u.store.all("ventures") if x.get("autonomous")]) == 1        # one auto-launch a day
+    assert not u.store.find("approvals", status="pending") or all("Fiverr" in a["action"] for a in u.store.find("approvals", status="pending"))
+    # the Product Designer makes a real, multi-page PDF and a cover, then QA
+    u.cfg["shop_research_at"] = MON_0900.isoformat()
+    u.store.update("ventures", "V-PPS", {"stage": "paused"}, "test")
+    for r in u.store.all("routines"):
+        u.store.update("routines", r["id"], {"last_run": MON_0900.isoformat()}, "test")
+    u.cfg["audited"] = MON_0900.date().isoformat()
+    job = u.next_job(MON_0900)
+    assert job == {"kind": "product", "venture": v["id"]}
+    a = u.run_job(job, now=MON_0900)
+    assert a["kind"] == "digital.publish" and a["payload"]["pages"] >= 3
+    dd = str(tmp_path)
+    assert digital.pdf_path(dd, a["payload"]["pdf"]) and open(digital.pdf_path(dd, a["payload"]["pdf"]), "rb").read(5) == b"%PDF-"
+    assert len(a["payload"]["etsy"]["tags"]) == 13
+    assert u.next_job(MON_0900) != job                                                   # one in the works at a time
+    u.run_job({"kind": "qa", "action": a["id"]}, now=MON_0900)
+    # published: Stripe link that returns to a verified download, Etsy digital listing, a pin
+    monkeypatch.setattr(connectors, "etsy_connected", lambda: True)
+    monkeypatch.setattr(connectors, "pinterest_connected", lambda: True)
+    monkeypatch.setattr(connectors, "etsy_digital_listing", lambda *a_, **k: etsy_calls.append(a_) or {"listing_id": 99, "url": "https://etsy.com/listing/99"})
+    monkeypatch.setattr(connectors, "etsy_deactivate", lambda lid: etsy_calls.append(("off", lid)))
+    monkeypatch.setattr(connectors, "pinterest_pin", lambda *a_, **k: pins.append(a_) or {"id": "pin1"})
+    out = actions.dispatch(u.store, u.store.get("actions", a["id"]), True)
+    assert out["status"] == "sent", out.get("result")
+    link = next(p for m, path, p in stripe_calls if path == "/payment_links")
+    assert link["after_completion"]["redirect"]["url"].endswith("/thanks?session_id={CHECKOUT_SESSION_ID}")
+    prod = u.store.all("products")[0]
+    slug = [prod["slug"]]
+    assert link["metadata"] == {"starnet_venture": v["id"], "starnet_product": prod["slug"]}
+    assert prod["url"] == f"https://city.example.com/shop/{prod['slug']}" and prod["etsy"]["listing_id"] == 99
+    assert etsy_calls[0][3] == 6.5 and etsy_calls[0][4][:5] == b"%PDF-"                 # price and the PDF itself
+    assert pins[0][3] == prod["url"] and pins[0][4].startswith("https://city.example.com/media/")
+    # the storefront: page, then the download only for a paid session of this product
+    assert "Buy now" in digital.page_product(prod) and prod["title"] in digital.page_index(u.store)
+    assert digital.verify_purchase(u.store, prod, "not-a-session") is None
+    sess = digital.verify_purchase(u.store, {**prod, "payment_link": "plink_other"}, "cs_test_abcdefghijkl")
+    assert sess is None                                                                  # another product's payment
+    sess = digital.verify_purchase(u.store, prod, "cs_test_abcdefghijkl")
+    assert sess["payment_status"] == "paid"
+    assert u.treasury.book_stripe_sale(sess) and not u.treasury.book_stripe_sale(sess)  # booked once
+    assert digital.verify_purchase(u.store, prod, "cs_test_abcdefghijkl")["cached"]
+    sm = u.overview()["storefront"]
+    assert sm["products"][0]["sales"] == 1 and sm["products"][0]["etsy"] and sm["products"][0]["pinned"]
+    # a venture that sold stays; one with no sale in 21 days closes itself and its products come off sale
+    later = datetime.now(ET) + timedelta(days=22)
+    u.tick(now=later)
+    assert u.store.get("ventures", v["id"])["stage"] == "launch"
+    u.treasury.entries = [e for e in u.treasury.entries if e["kind"] != "income"]
+    u.tick(now=later)
+    assert u.store.get("ventures", v["id"])["stage"] == "killed"
+    assert not u.store.get("products", prod["id"])["active"] and ("off", 99) in etsy_calls
+    assert "no longer available" in digital.page_product(u.store.get("products", prod["id"]))
+
+
+def test_owner_assisted_ideas_still_wait_for_the_owner(tmp_path, monkeypatch):
+    monkeypatch.setenv("STRIPE_API_KEY", "sk_test_x")
+    monkeypatch.setenv("STARNET_PUBLIC_URL", "https://city.example.com")
+    u = Ultron(str(tmp_path), client=FakeClaude([opp("Resume gig on Fiverr"), auto_opp(score=50)]))
+    u.run_job({"kind": "routine", "routine": "R-001"}, now=MON_0900)
+    u.tick(now=MON_0900)
+    assert not any(v.get("autonomous") for v in u.store.all("ventures"))                # score 50: below the bar
+    assert len(u.store.find("approvals", status="pending")) == 1
+
+
+def test_research_restarts_when_every_run_failed(tmp_path):
+    u = Ultron(str(tmp_path), client=FakeClaude([opp("x")]))
+    u.cfg.update({"kicked_off": True, "audited": MON_0900.date().isoformat()})   # an old station whose kickoff failed
+    u.store.update("ventures", "V-PPS", {"stage": "paused"}, "test")
+    for r in u.store.all("routines"):
+        u.store.update("routines", r["id"], {"last_run": MON_0900.isoformat()}, "test")
+    assert u.next_job(MON_0900) == {"kind": "routine", "routine": "R-001", "kickoff": True}
+    u.cfg["kickoff_at"] = MON_0900.isoformat()
+    assert u.next_job(MON_0900.replace(minute=40))["kind"] != "routine"
+    for r in u.store.all("routines"):
+        u.store.update("routines", r["id"], {"last_run": MON_0900.replace(hour=12).isoformat()}, "test")
+    assert u.next_job(MON_0900.replace(hour=12, minute=1)) == {"kind": "routine", "routine": "R-001", "kickoff": True}

@@ -27,12 +27,14 @@ from .store import Store, now_iso
 CAPS = {"social.post": int(os.getenv("STARNET_POSTS_PER_DAY", "6")),
         "outreach.email": int(os.getenv("STARNET_OUTREACH_PER_DAY", "15")),
         "stripe.payment_link": 5,
-        "shop.listing": int(os.getenv("STARNET_SHOP_LISTINGS_PER_DAY", "2"))}
+        "shop.listing": int(os.getenv("STARNET_SHOP_LISTINGS_PER_DAY", "2")),
+        "digital.publish": int(os.getenv("STARNET_DIGITAL_PER_DAY", "3"))}
 POLICY = {   # auto: sends once QA passes; owner: waits for the owner's OK even after QA
     "social.post": os.getenv("STARNET_POLICY_SOCIAL", "auto"),
     "outreach.email": os.getenv("STARNET_POLICY_OUTREACH", "auto"),
     "stripe.payment_link": os.getenv("STARNET_POLICY_STRIPE", "auto"),
     "shop.listing": os.getenv("STARNET_POLICY_SHOP", "auto"),
+    "digital.publish": os.getenv("STARNET_POLICY_DIGITAL", "auto"),
 }
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.I)
 
@@ -112,6 +114,9 @@ def revise(store: Store, brain: Brain, action: dict) -> dict:
         from . import shop
         payload = shop.clean(payload)
         payload["image"] = shop.render(os.path.dirname(store.dir), payload)
+    elif action["kind"] == "digital.publish":
+        from . import digital
+        payload = digital.rerender(store, payload)
     return store.update("actions", action["id"], {"payload": payload, "status": "qa", "revisions": action.get("revisions", 0) + 1},
                         agent["id"], f"revised: {out['what_changed'][:140]}", kind="action.revised")
 
@@ -165,6 +170,11 @@ def dispatch(store: Store, action: dict, outbound_on: bool) -> dict:
                 return _manual(store, action, "Printify isn't connected")
             from . import shop
             res = shop.publish(store, action)
+        elif kind == "digital.publish":
+            if not connectors.rails()["storefront"]:
+                return _manual(store, action, "the storefront needs Stripe and STARNET_PUBLIC_URL")
+            from . import digital
+            res = digital.publish(store, action)
         else:
             return _manual(store, action, "no connector for this kind")
     except connectors.ConnectorError as exc:

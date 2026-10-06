@@ -49,8 +49,8 @@ CORE = [
     # The Etsy shop: print-on-demand, run by the crew end to end (shop.py)
     {"id": "A-SHOP", "name": "Etsy Shop Manager", "role": "Etsy Strategist", "department": "marketplace", "kind": "ai",
      "specialty": "Turns what's selling on Etsy into product briefs, lists them through Printify, watches the orders"},
-    {"id": "A-DSGN", "name": "Product Designer", "role": "Creative/Design", "department": "creative", "kind": "logic",
-     "specialty": "Original print-ready designs for every product brief"},
+    {"id": "A-DSGN", "name": "Product Designer", "role": "Creative/Design", "department": "creative", "kind": "ai",
+     "specialty": "Original print designs, and the autonomous ventures' digital products (PDF guides, planners, checklists)"},
 ]
 
 # Roles a venture plan may ask for that a standing team member already covers (never staff a duplicate)
@@ -137,9 +137,13 @@ def lessons_text(store: Store, role: str = "", venture: Optional[str] = None) ->
 
 def seed(store: Store) -> None:
     for a in CORE:
-        if not store.get("agents", a["id"]):
+        cur = store.get("agents", a["id"])
+        if not cur:
             store.create("agents", {**a, "status": "ON BREAK", "current_task": None, "current_venture": None,
                                     "tasks_done": 0, "achievements": []}, "station", "crew member joined")
+        elif any(cur.get(k) != a[k] for k in ("kind", "specialty", "role", "department")):
+            store.update("agents", a["id"], {k: a[k] for k in ("kind", "specialty", "role", "department")}, "A-001",
+                         "job description updated")
 
 
 def sync_bots(store: Store, engine) -> None:

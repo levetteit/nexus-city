@@ -3,9 +3,9 @@
 Each routine researches the web, then turns what it found into structured opportunity records that
 ULTRON can promote straight into ventures (the export's rule: actionable, not an idea list).
 
-The owner's standing mandate (Oct 6 2026) ranks everything: money coming in as fast as possible with
-$0 startup capital first. Ventures that need capital (an Etsy store, ~$29/month) stay on the
-watchlist until the treasury can fund them.
+The owner's standing mandate ranks everything: money coming in as fast as possible, first from ventures
+the crew can run end to end through the station's own rails (storefront, Etsy digital downloads,
+Pinterest), with $0 startup capital. ULTRON launches those on his own (see ultron.py, AUTO_LAUNCH).
 """
 from __future__ import annotations
 
@@ -17,14 +17,31 @@ from .brain import Brain
 from .store import Store
 
 MANDATE = (
-    "OWNER'S MANDATE: get money coming in as fast as possible. Rank first the ventures that need $0 of "
-    "startup capital and that the owner can start TODAY with free accounts, where AI agents do most of the "
-    "work (drafting, designing, writing, research) and the owner only does what must be done by a person "
-    "(signing up, verifying identity, clicking publish, talking to a client). Fastest realistic first "
-    "dollar wins ties. Ventures that need capital (an Etsy store costs about $29/month to run) go on the "
-    "watchlist with what they cost, to be funded later from earnings. The station's earnings also fund "
-    "the trading city and vice versa."
+    "OWNER'S MANDATE (updated Oct 6 2026): money coming in as fast as possible, from ventures the crew runs "
+    "END TO END by itself. Rank first what the crew can make, publish, sell and deliver through the station's own "
+    "rails, with $0 startup capital and no work from the owner: no new accounts, no identity checks, no client "
+    "calls, no publishing by hand. Today that means digital products the crew writes and designs itself (guides, "
+    "checklists, planners, workbooks, template packs, printables, delivered as a PDF) sold on the station storefront "
+    "and as Etsy digital downloads, with Pinterest for traffic. Pick niches with proven buyers, a clear search "
+    "phrase and room for a better product. Owner-assisted ideas (Fiverr gigs, client services) still get filed but "
+    "rank below autonomous ones. Print-on-demand already has its own venture (the Etsy shop): don't propose it. "
+    "The station's earnings also fund the trading city and vice versa."
 )
+OLD_MANDATE_START = "OWNER'S MANDATE: get money coming in as fast as possible"   # replaced on upgrade (ultron.py)
+
+RAILS = {   # what the crew can do with no one's help, and what each needs
+    "storefront": "station storefront: our own sales page + Stripe checkout + automatic PDF download after payment",
+    "etsy_digital": "Etsy digital downloads on the owner's Etsy shop (Etsy delivers the file)",
+    "pinterest": "Pinterest pins that link to the product (free traffic)",
+}
+
+
+def rails_text() -> str:
+    from . import connectors
+    live = connectors.rails()
+    return "RAILS (the crew uses these without the owner): " + "; ".join(
+        f"{k}: {v} [{'live' if live.get(k) else 'not connected yet'}]" for k, v in RAILS.items()) + "."
+
 
 RULES = (
     "Rules: legitimate businesses only, compliant with each platform's terms, intellectual-property law "
@@ -37,7 +54,9 @@ RULES = (
 # The five routines ULTRON reported as active (export section 6). days: Monday=0 ... Sunday=6, times ET.
 ROUTINES = [
     {"id": "R-001", "name": "Opportunity Market Radar", "days": [0, 1, 2, 3, 4], "at": "08:00",
-     "focus": "Fresh cross-market candidates across Etsy, Fiverr and other service marketplaces, digital "
+     "focus": "Digital products the crew can make and sell on its own rails first (what buyers search for and pay "
+              "for on Etsy, Pinterest and Google right now), then cross-market candidates across Etsy, Fiverr and other "
+              "service marketplaces, digital "
               "products, faceless content, music/audio assets and adjacent online businesses: demand signals, "
               "competition, startup-cost bands, automation potential, risks.", "count": 5},
     {"id": "R-002", "name": "Etsy and Digital Product Validation Scan", "days": [1, 3], "at": "09:00",
@@ -94,6 +113,13 @@ OPPORTUNITY_SCHEMA = {
                 "kpis": {"type": "array", "items": {"type": "string"}},
                 "success_criteria": {"type": "string", "description": "What makes it continue after 14 days."},
                 "kill_criteria": {"type": "string"},
+                "execution": {"type": "string", "enum": ["autonomous", "owner_assisted"],
+                              "description": "autonomous: the crew makes, sells and delivers it through the rails alone."},
+                "rails": {"type": "array", "items": {"type": "string", "enum": list(RAILS)},
+                          "description": "The rails it sells through (autonomous ventures need storefront and/or etsy_digital)."},
+                "product_format": {"type": "string", "enum": ["guide", "checklist", "planner", "workbook", "template_pack",
+                                                              "printable", "none"],
+                                   "description": "For digital products: what the crew will make. 'none' otherwise."},
                 "score": {"type": "integer", "description": "0-100 against the owner's mandate."},
                 "recommendation": {"type": "string", "enum": ["build_now", "investigate", "backup", "watchlist"]},
             },
@@ -101,7 +127,7 @@ OPPORTUNITY_SCHEMA = {
                          "can_start_today", "days_to_first_dollar", "price_point", "demand", "competition",
                          "margin_potential", "automation_potential", "speed_to_market", "scalability", "owner_actions",
                          "agent_roles", "platform_restrictions", "risks", "plan_7_day", "kpis", "success_criteria",
-                         "kill_criteria", "score", "recommendation"],
+                         "kill_criteria", "execution", "rails", "product_format", "score", "recommendation"],
             "additionalProperties": False}},
         "first_pick": {"type": "string", "description": "Title of the one opportunity ULTRON should pursue first, and why, in one sentence."},
     },
@@ -125,7 +151,7 @@ def run_routine(routine: dict, store: Store, brain: Brain, now: datetime, mandat
     known = sorted(existing, key=lambda o: -o.get("score", 0))[:40]
     known_lines = "\n".join(f"- {o['title']} (score {o.get('score')}, {o.get('recommendation')})" for o in known) or "(none yet)"
     from .crew import lessons_text
-    system = SYSTEM.replace(MANDATE, mandate) + lessons_text(store, "Market Research") + (
+    system = SYSTEM.replace(MANDATE, mandate) + " " + rails_text() + lessons_text(store, "Market Research") + (
         f"\n\nWAR ROOM RESEARCH FOCUS: {focus}" if focus else "")
     notes, sources = brain.research(agent, system, (
         f"Today is {now.strftime('%A %Y-%m-%d')}. Routine: {routine['name']}.\nFocus: {routine['focus']}\n\n"

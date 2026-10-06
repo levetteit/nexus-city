@@ -492,6 +492,14 @@ function playEvents(events) {
       courier(mods.get("marketplace").pos, mods.get("finance").pos, "#ffd84d");
       burst(mods.get("marketplace").pos.clone().setY(4), "#ffd84d", 30);
       toast(`📦 ${e.summary}`, "#ffd84d");
+    } else if (k === "venture.auto_launched") {
+      burst(mods.get("revenue").pos.clone().setY(5), "#3dffa2", 40);
+      toast(`🚀 ${e.summary}`, "#3dffa2");
+    } else if (k === "digital.published") {
+      courier(mods.get("creative").pos, mods.get("revenue").pos, "#c58bff");
+      toast(`🛒 ${e.summary}`, "#c58bff");
+    } else if (k === "digital.made") {
+      burst(mods.get("creative").pos.clone().setY(5), "#c58bff", 14);
     } else if (k === "shop.design") {
       burst(mods.get("creative").pos.clone().setY(5), "#c58bff", 12);
     } else if (k === "lead.created") {
@@ -618,7 +626,7 @@ function panelModule(id) {
   let body = "";
   if (id === "research") body = `<h2>Routines</h2>${list(S.routines.map((r) => `${esc(r.name)}<div class="m">last run ${ago(r.last_run)}${r.last_error ? " · " + esc(r.last_error) : ""}</div>`))}
     <h2>Top opportunities</h2>${list(S.opportunities.slice(0, 6).map((o) => `${esc(o.title)} <span class="pill ${o.startup_cost_usd === 0 ? "green" : "gold"}">${o.startup_cost_usd === 0 ? "$0" : money(o.startup_cost_usd)}</span><div class="m">score ${o.score} · first $ in ~${o.days_to_first_dollar}d</div>`))}`;
-  else if (id === "revenue") body = `<h2>Ventures</h2>${S.ventures.map((v) => `<div class="row" data-pick="venture:${v.id}"><b>${esc(v.name)}</b> <span class="pill">${esc(v.stage)}</span><div class="m">health ${v.health} · net ${money(v.pnl.net)}${v.results ? ` · ${v.results.leads} leads (30d)` : ""}</div></div>`).join("")}`;
+  else if (id === "revenue") body = `${S.storefront && S.storefront.products.length ? `<h2>On sale (storefront)</h2>${S.storefront.products.filter((p) => p.active).slice(0, 6).map((p) => `<div class="row" style="overflow:hidden"><img src="/media/${esc(p.cover)}" alt="" style="width:36px;height:54px;object-fit:cover;border-radius:5px;float:left;margin-right:10px"><b>${esc(p.title)}</b><div class="m">${money(p.price_usd)} · ${p.sales} sale${p.sales === 1 ? "" : "s"}${p.etsy ? " · Etsy" : ""}${p.pinned ? " · pinned" : ""}</div></div>`).join("")}` : ""}<h2>Ventures</h2>${S.ventures.map((v) => `<div class="row" data-pick="venture:${v.id}"><b>${esc(v.name)}</b> <span class="pill">${esc(v.stage)}</span><div class="m">health ${v.health} · net ${money(v.pnl.net)}${v.results ? ` · ${v.results.leads} leads (30d)` : ""}</div></div>`).join("")}`;
   else if (id === "marketing") body = `<h2>Connections</h2><div class="kv"><div>Facebook</div><div>${S.connectors.social.includes("facebook") ? "connected" : "—"}</div><div>Instagram</div><div>${S.connectors.social.includes("instagram") ? "connected" : "—"}</div><div>Stripe</div><div>${S.connectors.stripe ? "connected" : "—"}</div><div>Outbound</div><div>${S.outbound ? "on" : "STOPPED"}</div></div>
     <h2>Recently sent</h2>${list(S.outbox.sent.slice(0, 6).map((a) => `${esc(a.payload.platform || a.kind)}: ${esc((a.payload.text || a.payload.subject || a.payload.name || "").slice(0, 90))}<div class="m">${ago(a.sent_at)}${a.result && a.result.metrics ? " · " + Object.entries(a.result.metrics).map(([k, v]) => `${v} ${k}`).join(", ") : ""}</div>`))}
     <h2>For you to post</h2>${list(S.outbox.manual.slice(0, 5).map((a) => `${esc(a.payload.platform || a.kind)}: ${esc((a.payload.text || a.payload.subject || "").slice(0, 80))}`))}`;

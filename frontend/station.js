@@ -256,6 +256,20 @@ function shopSection(sh) {
     <h2>In the works</h2>${sh.drafts.map((x) => item(x, `${esc(x.status)} · ${esc(x.niche || "")} · ${money(x.price_usd)}`)).join("") || `<div class="empty">The next best-seller scan fills this.</div>`}`;
 }
 
+function connectRow(name, service, state) {
+  const on = String(state || "").startsWith("connected");
+  const btn = state === "press Connect" || on ? `<a class="btn small" href="/api/station/connect/${service}">${on ? "Reconnect" : "Connect"}</a>` : "";
+  return `<div class="conn"><span>${esc(name)}</span><span class="${on ? "pos" : "muted"}">${esc(state || "")} ${btn}</span></div>`;
+}
+
+function productsSection(sf, ventureId) {
+  const mine = sf.products.filter((p) => p.venture === ventureId), works = sf.in_works.filter((p) => p.venture === ventureId);
+  const item = (x, extra) => `<div class="row" style="display:flex;gap:10px;align-items:center">${x.cover ? `<img src="/media/${esc(x.cover)}" alt="" style="width:46px;height:69px;object-fit:cover;border-radius:6px;flex:none">` : ""}<div><b>${esc(x.title)}</b><div class="muted small">${extra}</div></div></div>`;
+  return `<h2>Products</h2><p class="muted small">Runs on its own: the Product Designer makes a product every day (up to 6), QA checks it, it goes on sale on the storefront${sf.rails.etsy_digital ? ", Etsy" : ""}${sf.rails.pinterest ? " and Pinterest" : ""}. It closes itself after 21 days with no sale.</p>
+    ${mine.map((x) => item(x, `${money(x.price_usd)} · ${plural(x.sales, "sale")} · ${x.active ? `<a href="${esc(x.url)}" target="_blank" rel="noopener" style="color:var(--cyan)">page</a>` : "off sale"}${x.etsy ? ` · <a href="${esc(x.etsy)}" target="_blank" rel="noopener" style="color:var(--cyan)">Etsy</a>` : ""}${x.pinned ? " · pinned" : ""}`)).join("") || `<div class="empty">Nothing on sale yet.</div>`}
+    ${works.length ? `<h2>In the works</h2>${works.map((x) => item(x, `${esc(x.status)} · ${money(x.price_usd)}`)).join("")}` : ""}`;
+}
+
 function renderMarketing() {
   const c = S.connectors;
   const row = (name, on, how) => `<div class="conn"><span>${esc(name)}</span><span class="${on === true ? "pos" : "muted"}">${on === true ? "connected" : esc(on || how)}</span></div>`;
@@ -263,7 +277,9 @@ function renderMarketing() {
     row("Email outreach", c.email, "not connected") + row("Facebook Page", c.social.includes("facebook"), "not connected") +
     row("Instagram", c.social.includes("instagram"), "not connected") + row("LinkedIn", c.social.includes("linkedin"), "off") +
     row("TikTok", c.tiktok) +
-    row("Fiverr", c.fiverr) + row("Etsy (via Printify)", c.printify === true ? true : c.etsy);
+    row("Fiverr", c.fiverr) + row("Etsy (via Printify)", c.printify === true ? true : c.etsy) +
+    row("Storefront (/shop)", c.rails && c.rails.storefront ? true : "needs Stripe + STARNET_PUBLIC_URL") +
+    connectRow("Etsy digital downloads", "etsy", c.etsy_digital) + connectRow("Pinterest", "pinterest", c.pinterest);
   $("#ob-manual").innerHTML = S.outbox.manual.map(actionRow).join("") || `<div class="empty">Nothing to post by hand.</div>`;
   $("#ob-wait").innerHTML = S.outbox.waiting_owner.map(actionRow).join("") || `<div class="empty">Nothing waiting.</div>`;
   $("#ob-sent").innerHTML = S.outbox.sent.map(actionRow).join("") || `<div class="empty">Nothing sent yet.</div>`;
@@ -346,11 +362,11 @@ async function openRecord(col, id) {
       <div class="kv"><div>Offer</div><div>${esc(r.offer || "—")}</div><div>Objective</div><div>${esc(r.objective || "—")}</div>
       <div>Income / costs</div><div>${money(r.pnl.income)} / ${money(r.pnl.costs)}</div><div>Success</div><div>${esc(r.success_criteria || "—")}</div>
       <div>Kill</div><div>${esc(r.kill_criteria || "—")}</div><div>Validation</div><div>${esc(r.validation ? r.validation.verdict + ": " + r.validation.why : "—")}</div></div>
-      ${r.agent_run && S.shop ? shopSection(S.shop) : ""}
+      ${r.autonomous && S.storefront ? productsSection(S.storefront, r.id) : r.agent_run && S.shop ? shopSection(S.shop) : ""}
       <h2>Tasks</h2>${(r.task_list || []).map(taskRow).join("") || `<div class="empty">No tasks yet.</div>`}
-      <h2>Where customers buy</h2>${Object.entries(r.links || {}).map(([k, u]) => `<div><span class="muted">${esc(k)}</span> <a href="${esc(u)}" target="_blank" rel="noopener" style="color:var(--cyan)">${esc(u)}</a></div>`).join("") || `<div class="empty">No link yet: marketing starts once there is one.</div>`}
+      ${r.autonomous ? "" : `<h2>Where customers buy</h2>${Object.entries(r.links || {}).map(([k, u]) => `<div><span class="muted">${esc(k)}</span> <a href="${esc(u)}" target="_blank" rel="noopener" style="color:var(--cyan)">${esc(u)}</a></div>`).join("") || `<div class="empty">No link yet: marketing starts once there is one.</div>`}
       <div class="row" style="margin-top:8px"><input id="link-name" placeholder="fiverr" style="max-width:110px" /><input id="link-url" placeholder="https://…" />
-        <button class="btn" data-link="${r.id}">Save link</button></div>
+        <button class="btn" data-link="${r.id}">Save link</button></div>`}
       ${r.id !== "V-001" && !r.agent_run ? `<h2>Leads</h2><p class="muted small">Got a message? Log it in one tap. The War Room uses this to learn which posts work.</p>
         <div class="row"><select id="lead-post" style="flex:1"><option value="">From which post? (optional)</option>
           ${S.outbox.sent.filter((a) => a.venture === r.id).map((a) => `<option value="${a.id}">${esc(a.payload.platform)}: ${esc((a.payload.text || "").slice(0, 50))}</option>`).join("")}</select></div>
@@ -360,8 +376,8 @@ async function openRecord(col, id) {
         ${r.results ? `<h2>Last 30 days</h2><div class="kv"><div>Leads</div><div>${r.results.leads} ${Object.entries(r.results.by_source).map(([k, v]) => `· ${v} ${SRC[k] || k}`).join(" ")}</div>
           <div>Won</div><div>${r.results.by_status.won || 0} · ${money(r.results.won_value)}</div><div>Posts sent</div><div>${r.results.posts_sent}</div></div>
           ${r.results.best_posts.length ? `<h2>Best posts</h2>${r.results.best_posts.map((p) => `<div class="ev"><div class="when">${p.leads} leads</div><div>${esc(p.platform)}: ${esc(p.text)}${metricsText(p.metrics)}</div></div>`).join("")}` : ""}` : ""}` : ""}
-      <h2>Outreach</h2><div class="row"><span class="muted small" style="flex:1">${r.outreach_allowed ? "The Outreach Agent may email businesses for this venture." : "Off: no one is contacted for this venture."}</span>
-        <button class="btn ${r.outreach_allowed ? "danger" : ""}" data-outreach="${r.id}:${r.outreach_allowed ? "off" : "on"}">${r.outreach_allowed ? "Turn off" : "Allow outreach"}</button></div>
+      ${r.agent_run ? "" : `<h2>Outreach</h2><div class="row"><span class="muted small" style="flex:1">${r.outreach_allowed ? "The Outreach Agent may email businesses for this venture." : "Off: no one is contacted for this venture."}</span>
+        <button class="btn ${r.outreach_allowed ? "danger" : ""}" data-outreach="${r.id}:${r.outreach_allowed ? "off" : "on"}">${r.outreach_allowed ? "Turn off" : "Allow outreach"}</button></div>`}
       ${r.marketing_plan && r.marketing_plan.channels ? `<h2>Channel plan</h2><p class="muted small">${esc(r.marketing_plan.audience || "")}</p>${list(r.marketing_plan.channels.map((c) => `${c.platform}: ${c.why}`))}` : ""}
       ${r.id !== "V-001" ? `<h2>Move it</h2><div class="actions">${["launch", "operate", "scale", "paused", "killed"].filter((x) => !(r.owner_business && x === "killed")).map((s) => `<button class="btn ${s === "killed" ? "danger" : ""}" data-stage="${r.id}:${s}">${s}</button>`).join("")}</div>` : ""}`);
   } else if (col === "tasks") {
