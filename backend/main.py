@@ -254,7 +254,27 @@ class PasswordGate:
         return await self.app(scope, receive, send_with_cookie)
 
 
+class FreshAssets:
+    """Tell browsers to re-check the app's files on every load (a cheap ETag check), so a deploy
+    shows up the next time the app opens instead of whenever the phone's cache decides."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["path"].startswith("/api/"):
+            return await self.app(scope, receive, send)
+
+        async def send_fresh(msg):
+            if msg["type"] == "http.response.start":
+                headers = [(k, v) for k, v in msg.get("headers", []) if k.lower() != b"cache-control"]
+                msg = {**msg, "headers": headers + [(b"cache-control", b"no-cache")]}
+            await send(msg)
+        return await self.app(scope, receive, send_fresh)
+
+
 app.add_middleware(PasswordGate)
+app.add_middleware(FreshAssets)
 
 
 @app.get("/healthz")
