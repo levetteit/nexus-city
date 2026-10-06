@@ -180,6 +180,7 @@ def state() -> dict:
         snap["delay_min"] = round(engine.market.delay_minutes, 1)
         snap["feed"] = engine.market.feed
         snap["feed_symbols"] = sorted(engine.market.realtime_symbols)   # symbols with a live TradingView alert
+        snap["feed_last"] = FEED_LOG[-1] if FEED_LOG else None
         if router:
             snap["execution"] = router.status(engine.market.delay_minutes)
         if history:
@@ -379,29 +380,55 @@ def bot_room(bot_id: str) -> dict:
 FULL_SIZE = {"NQ": "MNQ", "ES": "MES", "RTY": "M2K", "YM": "MYM"}   # full-size charts feed their micro
 
 
+FEED_LOG: list[dict] = []   # the last few TradingView feed webhooks and what happened to them
+
+
+def _feed_note(ok: bool, reason: str, ticker: str = "") -> None:
+    from datetime import datetime, timezone
+    entry = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ok": ok, "reason": reason, "ticker": ticker}
+    if not ok and (not FEED_LOG or FEED_LOG[-1]["reason"] != reason):   # shows in Render → Logs
+        print(f"feed webhook rejected ({ticker or '?'}): {reason}")
+    FEED_LOG.append(entry)
+    del FEED_LOG[:-20]
+
+
 @app.post("/api/feed")
 async def feed(request: Request) -> dict:
     """Real-time 1m candles from the Starnet feed script on TradingView (tradingview/starnet_feed.pine)."""
     secret = os.getenv("STARNET_FEED_SECRET") or os.getenv("STARNET_WEBHOOK_SECRET")
-    if not secret:
-        raise HTTPException(503, "set STARNET_FEED_SECRET to enable the real-time feed")
+    raw = await request.body()
     try:
-        p = json.loads(await request.body())
+        p = json.loads(raw)
     except ValueError:
+        _feed_note(False, f"not JSON (starts with {raw[:30]!r}): the alert message must be left empty")
         raise HTTPException(400, "body must be JSON")
+    ticker = str(p.get("ticker", "")) if isinstance(p, dict) else ""
+    if not secret:
+        _feed_note(False, "STARNET_FEED_SECRET is not set on the server", ticker)
+        raise HTTPException(503, "set STARNET_FEED_SECRET to enable the real-time feed")
     if not isinstance(p, dict) or not hmac.compare_digest(str(p.get("secret", "")), secret):
+        got = str(p.get("secret", "")) if isinstance(p, dict) else ""
+        hint = "empty: set the secret in the indicator, then create the alert again" if not got else \
+            f"doesn't match ({len(got)} characters sent, {len(secret)} expected)"
+        _feed_note(False, f"wrong feed secret: {hint}", ticker)
         raise HTTPException(401, "bad secret")
     if engine is None or MODE != "live":
+        _feed_note(False, "server still starting", ticker)
         raise HTTPException(503, "live mode is still starting")
-    sym = normalize_symbol(str(p.get("ticker", "")))
+    sym = normalize_symbol(ticker)
     sym = FULL_SIZE.get(sym, sym)
     try:
         ts = int(float(p["t"]))
         ts = ts // 1000 if ts > 10**12 else ts
         o, h, l, c = (float(p[k]) for k in ("o", "h", "l", "c"))
     except (KeyError, ValueError, TypeError):
+        _feed_note(False, "missing t/o/h/l/c: use the Starnet feed script as is", ticker)
         raise HTTPException(400, "need t, o, h, l, c")
+    if sym not in engine.market.underlyings:
+        _feed_note(False, f"unknown symbol {ticker!r}: use the MNQ1! and MES1! charts", ticker)
+        raise HTTPException(400, f"unknown symbol {ticker}")
     engine.market.push(sym, ts, o, h, l, c)
+    _feed_note(True, "ok", sym)
     return {"ok": True, "symbol": sym}
 
 
