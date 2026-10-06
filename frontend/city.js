@@ -8,6 +8,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { Room, moodEmoji, tierOf, GADGETS } from "./room.js";
 import { ChartView } from "./chart.js";
 import { wardrobe, ITEMS, dress, finishMaterial, animateApparel } from "./skins.js";
+import { Flight, newFlights } from "./shuttle.js";
 
 // ---------------------------------------------------------------- setup
 const app = document.getElementById("app");
@@ -387,6 +388,59 @@ function updateCoins(dt) {
   }
 }
 
+// ---------------------------------------------------------------- the station in the sky, and payout shuttles
+// The Space Station hangs over the city (tap it to go there). Real money in flies to it as shuttles:
+// a Lucid payout lifts off from the vault, a store sale comes in from beyond the skyline (shuttle.js).
+const skyStation = new THREE.Group();
+{
+  const metal = new THREE.MeshStandardMaterial({ color: "#c9d2ff", metalness: 0.4, roughness: 0.4, emissive: "#3a3f8a", emissiveIntensity: 0.5 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(7, 0.7, 10, 48), metal);
+  ring.rotation.x = Math.PI / 2;
+  skyStation.add(ring);
+  const lights = new THREE.Mesh(new THREE.TorusGeometry(7, 0.18, 6, 48), new THREE.MeshBasicMaterial({ color: "#5ee7ff" }));
+  lights.rotation.x = Math.PI / 2;
+  lights.position.y = 0.6;
+  skyStation.add(lights);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(2.2, 20, 14), new THREE.MeshStandardMaterial({ color: "#ff3b5c", emissive: "#ff1f4b", emissiveIntensity: 2.2 }));
+  skyStation.add(core);
+  for (let i = 0; i < 4; i++) {
+    const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 7, 6), metal);
+    spoke.rotation.z = Math.PI / 2;
+    spoke.rotation.y = (i / 4) * Math.PI;
+    skyStation.add(spoke);
+  }
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 9, 6), metal);
+  skyStation.add(mast);
+  skyStation.userData.lights = lights.material;
+  skyStation.position.set(-38, 32, -52);
+  skyStation.traverse((o) => { if (o.isMesh) o.userData.station = true; });
+  scene.add(skyStation);
+}
+let stationPulse = 0;
+const flightsSeen = new Set();
+const flying = [];
+function launchFlights(s) {
+  for (const f of newFlights(flightsSeen, s.station?.flights)) {
+    const payout = f.kind === "payout";
+    const a = Math.random() * Math.PI * 2;
+    const from = payout ? new THREE.Vector3(0, 9, 0) : new THREE.Vector3(Math.cos(a) * 200, 35, Math.sin(a) * 200);
+    flying.push(new Flight(scene, f.kind, f.amount, from, skyStation.position.clone().setY(skyStation.position.y - 2),
+      { scale: 1.6, height: payout ? 14 : 10, seconds: payout ? 8 : 7, onArrive: () => {
+        stationPulse = 1;
+        feed(`${payout ? "🚀" : "🛍️"} <b>$${Math.round(f.amount).toLocaleString()}</b> ${payout ? "payout docked at the station treasury" : "sale docked at the station treasury"}`, "win");
+      } }));
+    if (payout) vaultPulse = 1;
+  }
+}
+function updateFlights(dt, t) {
+  for (let i = flying.length - 1; i >= 0; i--) if (!flying[i].update(dt)) flying.splice(i, 1);
+  stationPulse = Math.max(0, stationPulse - dt * 0.6);
+  skyStation.rotation.y += dt * 0.12;
+  skyStation.position.y = 32 + Math.sin(t * 0.4) * 1.2;
+  skyStation.scale.setScalar(1 + stationPulse * 0.15);
+  skyStation.userData.lights.color.set(stationPulse > 0.05 ? "#3dffa2" : "#5ee7ff");
+}
+
 // ---------------------------------------------------------------- state -> visuals
 let state = null;
 let openWorkerId = null;
@@ -450,6 +504,7 @@ function applyState(s) {
 
   renderAccount(s.account);
   applyWeather(s);
+  launchFlights(s);
   if (openWorkerId) renderWorker();
 }
 
@@ -1143,8 +1198,9 @@ renderer.domElement.addEventListener("pointerdown", (e) => (downAt = [e.clientX,
 renderer.domElement.addEventListener("pointerup", (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
-  const hit = ray.intersectObjects([...clickables, dome]).find((h) => h.object.userData.botId || h.object === dome);
+  const hit = ray.intersectObjects([...clickables, dome, skyStation], true).find((h) => h.object.userData.botId || h.object === dome || h.object.userData.station);
   if (!hit) return;
+  if (hit.object.userData.station) { location.href = "station3d.html"; return; }
   if (hit.object === dome) document.getElementById("payroll").classList.toggle("hidden");
   else openRoom(hit.object.userData.botId);
 });
@@ -1310,6 +1366,7 @@ function frame() {
   }
 
   updateSky(dt, t);
+  updateFlights(dt, t);
 
   vaultPulse = Math.max(0, vaultPulse - dt * 1.5);
   domeMat.emissiveIntensity = 0.9 + vaultPulse * 2.5;

@@ -197,7 +197,8 @@ def state() -> dict:
         cr = station.credits or {}
         snap["station"] = {"coordinating": station.busy, "approvals": len(station.store.find("approvals", status="pending")),
                            "owner_tasks": len(station.store.find("tasks", status="waiting_owner")),
-                           "credits": {"state": cr.get("state", "unknown"), "remaining": cr.get("remaining")}}
+                           "credits": {"state": cr.get("state", "unknown"), "remaining": cr.get("remaining")},
+                           "flights": station.treasury.flights()}
     if MODE == "live":
         snap["delay_min"] = round(engine.market.delay_minutes, 1)
         snap["feed"] = engine.market.feed

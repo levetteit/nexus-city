@@ -660,7 +660,7 @@ class Ultron:
             "owner_tasks": [t for t in queue if t["status"] == "waiting_owner"],
             "queue": queue[:40], "opportunities": opps[:25],
             "routines": sorted(s.all("routines"), key=lambda r: r["id"]),
-            "treasury": self.treasury.summary(paper),
+            "treasury": self.treasury.summary(paper), "flights": self.treasury.flights(8),
             "outbound": self.cfg.get("outbound", True), "connectors": connectors.status(),
             "outbox": {"manual": s.find("actions", status="manual"), "waiting_owner": s.find("actions", status="waiting_owner"),
                        "in_qa": len(s.find("actions", status="qa")) + len(s.find("actions", status="revise")),

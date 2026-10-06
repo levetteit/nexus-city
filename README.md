@@ -21,6 +21,14 @@ against the last day's — **storm** (lightning, heavy rain) at 1.8x or during a
 Each district's towers grow with its bot's best-ever profit (up to 1.8x at $16k), and the background skyline
 grows with the account's profit. Preview any sky with `/?weather=storm&hour=13`.
 
+## Payout shuttles (`frontend/shuttle.js`)
+
+Real money in flies. The Space Station now hangs over the city (tap it to go aboard). When you record a Lucid
+payout, a green shuttle lifts off from the vault and docks at the station's treasury; a store sale (Stripe,
+Etsy) comes in as a gold shuttle. On the station the same flights run from the City Dock or the shop to the
+Finance Observatory, whose panel keeps a shuttle log. Every flight is a ledger entry (`Treasury.flights()`):
+costs and paper profit never fly. Preview with `?shuttle=payout` or `?shuttle=sale`.
+
 ## Skins and apparel (`frontend/skins.js`)
 
 Every robot has its own look, in the city (standing in front of its building), in its streamer room and on

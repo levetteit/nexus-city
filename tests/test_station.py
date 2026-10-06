@@ -253,6 +253,21 @@ def test_simulated_payouts_never_reach_the_treasury(ultron):
     assert u.treasury.summary()["pool"] == 0
 
 
+def test_shuttle_flights_are_real_money_in(ultron):
+    u, _ = ultron
+    t = u.treasury
+    assert t.flights() == []
+    t.sync_payouts(NS(payouts=[[3, 1000.0]]))
+    t.book("ai_usage", 0.4, "station", "api_usage", "a call")                 # costs never fly
+    t.book("expense", 9, "station", "owner", "domain")
+    t.book_stripe_sale({"id": "cs_test_abc12345", "payment_status": "paid", "amount_total": 2700, "metadata": {}})
+    f = t.flights()
+    assert [(x["kind"], x["amount"]) for x in f] == [("sale", 27.0), ("payout", 900.0)]
+    assert len({x["id"] for x in f}) == 2
+    assert t.flights() is f                                                    # cached until the ledger grows
+    assert u.overview()["flights"] == f
+
+
 def test_ai_budget_cap_stops_research(ultron, monkeypatch):
     u, fake = ultron
     monkeypatch.setattr("backend.station.economy.AI_BUDGET", 5.0)
