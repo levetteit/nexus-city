@@ -78,7 +78,8 @@ def qa(store: Store, brain: Brain, action: dict) -> dict:
     """Compliance & QA reviews one action. Blocking: run in a thread."""
     venture = store.get("ventures", action["venture"]) if action.get("venture") else None
     out = brain.structured("A-011", QA_SYSTEM + lessons_text(store, "Compliance/Policy"), (
-        f"ACTION TYPE: {action['kind']}\nVENTURE: {json.dumps({k: (venture or {}).get(k) for k in ('name', 'offer', 'links')})}\n"
+        f"ACTION TYPE: {action['kind']}\nVENTURE: {json.dumps({k: (venture or {}).get(k) for k in ('name', 'offer', 'links', 'language', 'market', 'compliance')})}\n"
+        "If the venture has a language, the content must be in it, natural and correct. Its compliance list is binding.\n"
         f"WHY: {action['why']}\n\nCONTENT TO CHECK:\n{json.dumps(action['payload'], indent=1)}"), QA_SCHEMA,
         venture=action.get("venture"), effort="medium")
     if out["verdict"] == "pass":
@@ -146,7 +147,13 @@ def dispatch(store: Store, action: dict, outbound_on: bool) -> dict:
         elif kind == "social.post":
             if not connectors.social_configured(p.get("platform", "")):
                 return _manual(store, action, f"{p.get('platform')} isn't connected")
-            res = connectors.post_social(p["platform"], p["text"], p.get("link", ""))
+            if not connectors.platform_allowed(p.get("platform", ""), action.get("venture")):
+                return _manual(store, action, f"the connected {p.get('platform')} account belongs to another venture")
+            from .media import public_url
+            image_url = public_url(p["image"]) if p.get("image") else ""
+            if p.get("image") and not image_url:
+                return _manual(store, action, "the card has no public address (set STARNET_PUBLIC_URL)")
+            res = connectors.post_social(p["platform"], p["text"], p.get("link", ""), image_url)
         else:
             return _manual(store, action, "no connector for this kind")
     except connectors.ConnectorError as exc:

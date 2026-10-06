@@ -107,9 +107,11 @@ def convene(store: Store, brain: Brain, treasury: Treasury, health: Callable[[di
     applied = []
     for vd in out["verdicts"]:
         vid = vd["venture"]
-        if vid not in known or vid == "V-001" and vd["verdict"] in ("pause", "pivot", "kill"):
-            continue   # the trading desk answers to its own rules and the owner, not the War Room
+        if vid not in known:
+            continue
         v = store.get("ventures", vid)
+        if (vid == "V-001" or v.get("owner_business")) and vd["verdict"] in ("pause", "pivot", "kill"):
+            continue   # the trading desk and the owner's own businesses get improved, not shut down, by the War Room
         if vd["verdict"] in ("pause", "pivot") and v["stage"] not in ("paused", "killed"):
             store.update("ventures", vid, {"stage": "paused", "next_action": f"War Room: {vd['verdict']}"}, "A-012",
                          f"WAR ROOM {vd['verdict'].upper()}: {vd['why'][:160]}", kind="venture.stage")

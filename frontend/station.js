@@ -233,7 +233,9 @@ function renderMarketing() {
   const c = S.connectors;
   const row = (name, on, how) => `<div class="conn"><span>${esc(name)}</span><span class="${on === true ? "pos" : "muted"}">${on === true ? "connected" : esc(on || how)}</span></div>`;
   $("#conn").innerHTML = row("Stripe (checkout links)", c.stripe, "not connected") + row("Stripe sales → treasury", c.stripe_webhook, "no webhook yet") +
-    row("Email outreach", c.email, "not connected") + row("Social posting", c.social.length ? c.social.join(", ") : false, "none connected yet") +
+    row("Email outreach", c.email, "not connected") + row("Facebook Page", c.social.includes("facebook"), "not connected") +
+    row("Instagram", c.social.includes("instagram"), "not connected") + row("LinkedIn", c.social.includes("linkedin"), "off") +
+    row("TikTok", c.tiktok) +
     row("Fiverr", c.fiverr) + row("Etsy", c.etsy);
   $("#ob-manual").innerHTML = S.outbox.manual.map(actionRow).join("") || `<div class="empty">Nothing to post by hand.</div>`;
   $("#ob-wait").innerHTML = S.outbox.waiting_owner.map(actionRow).join("") || `<div class="empty">Nothing waiting.</div>`;
@@ -321,6 +323,8 @@ async function openRecord(col, id) {
       <h2>Where customers buy</h2>${Object.entries(r.links || {}).map(([k, u]) => `<div><span class="muted">${esc(k)}</span> <a href="${esc(u)}" target="_blank" rel="noopener" style="color:var(--cyan)">${esc(u)}</a></div>`).join("") || `<div class="empty">No link yet: marketing starts once there is one.</div>`}
       <div class="row" style="margin-top:8px"><input id="link-name" placeholder="fiverr" style="max-width:110px" /><input id="link-url" placeholder="https://…" />
         <button class="btn" data-link="${r.id}">Save link</button></div>
+      <h2>Outreach</h2><div class="row"><span class="muted small" style="flex:1">${r.outreach_allowed ? "The Outreach Agent may email businesses for this venture." : "Off: no one is contacted for this venture."}</span>
+        <button class="btn ${r.outreach_allowed ? "danger" : ""}" data-outreach="${r.id}:${r.outreach_allowed ? "off" : "on"}">${r.outreach_allowed ? "Turn off" : "Allow outreach"}</button></div>
       ${r.marketing_plan && r.marketing_plan.channels ? `<h2>Channel plan</h2><p class="muted small">${esc(r.marketing_plan.audience || "")}</p>${list(r.marketing_plan.channels.map((c) => `${c.platform}: ${c.why}`))}` : ""}
       ${r.id !== "V-001" ? `<h2>Move it</h2><div class="actions">${["launch", "operate", "scale", "paused", "killed"].map((s) => `<button class="btn ${s === "killed" ? "danger" : ""}" data-stage="${r.id}:${s}">${s}</button>`).join("")}</div>` : ""}`);
   } else if (col === "tasks") {
@@ -349,6 +353,8 @@ async function openRecord(col, id) {
     sheet(`<div class="label">${esc((KIND[r.kind] || r.kind).toUpperCase())} ${esc(r.id)} · ${esc(r.status.replace("_", " "))}</div><h1>${esc(r.why)}</h1>
       ${r.kind === "outreach.email" ? `<div class="kv"><div>Company</div><div>${esc(p.company)}</div><div>Why them</div><div>${esc(p.why_them)}</div>
         <div>Found at</div><div><a href="${esc(p.source_url)}" target="_blank" rel="noopener" style="color:var(--cyan)">${esc(p.source_url)}</a></div></div>` : ""}
+      ${p.image ? `<img src="/media/${esc(p.image)}" alt="Post image" style="width:100%;max-width:360px;border-radius:12px;display:block;margin:10px 0">
+        <a class="btn" href="/media/${esc(p.image)}" download>Download image</a>` : ""}
       <pre class="deliver">${esc(text)}</pre><button class="btn" data-copy="${esc(r.id)}">Copy</button>
       ${r.qa ? `<h2>QA: ${esc(r.qa.verdict)}</h2>${list(r.qa.issues)}` : ""}
       <div class="actions">${["manual", "waiting_owner", "ready"].includes(r.status) ? `<button class="btn primary" data-act="${r.id}:done">I posted / sent it</button>` : ""}
@@ -362,7 +368,7 @@ async function openRecord(col, id) {
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-open],[data-decide],[data-promote],[data-dismiss],[data-run],[data-done],[data-stage],[data-copy],[data-act],[data-link]");
+  const el = e.target.closest("[data-open],[data-decide],[data-promote],[data-dismiss],[data-run],[data-done],[data-stage],[data-copy],[data-act],[data-link],[data-outreach]");
   if (!el) return;
   const d = el.dataset;
   if (d.decide) {
@@ -385,6 +391,10 @@ document.addEventListener("click", (e) => {
     if (what === "cancel" && !confirm("Cancel it?")) return;
     return act(() => api(`/api/station/actions/${id}/${what}`, { note: ($("#act-note") || {}).value || "" }),
       { done: "Marked sent.", send: "Sending.", cancel: "Cancelled.", result: "Result saved: the War Room will use it." }[what]).then(() => $("#sheet").classList.add("hidden"));
+  }
+  if (d.outreach) {
+    const [id, to] = d.outreach.split(":");
+    return act(() => api(`/api/station/ventures/${id}/outreach`, { on: to === "on" }), to === "on" ? "Outreach allowed." : "Outreach off.").then(() => openRecord("ventures", id));
   }
   if (d.link) return act(() => api(`/api/station/ventures/${d.link}/link`, { name: $("#link-name").value, url: $("#link-url").value }), "Link saved.").then(() => openRecord("ventures", d.link));
   if (d.copy) return navigator.clipboard.writeText((sheet.copy || {})[d.copy] || "").then(() => toast("Copied"), () => toast("Copy failed"));

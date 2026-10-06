@@ -129,8 +129,11 @@ class Store:
         """A free-form document (routine outputs, ULTRON's reports) under data/station/docs/."""
         d = os.path.join(self.dir, "docs")
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, name), "w") as f:
+        path = os.path.join(d, name)
+        tmp = f"{path}.{threading.get_ident()}.tmp"   # write, then swap: a reader never sees a half-written file
+        with open(tmp, "w") as f:
             json.dump(doc, f, indent=1, default=str)
+        os.replace(tmp, path)
 
     def load_doc(self, name: str) -> Optional[Any]:
         path = os.path.join(self.dir, "docs", name)
@@ -143,4 +146,4 @@ class Store:
         d = os.path.join(self.dir, "docs")
         if not os.path.isdir(d):
             return []
-        return sorted((n for n in os.listdir(d) if n.startswith(prefix)), reverse=True)[:limit]
+        return sorted((n for n in os.listdir(d) if n.startswith(prefix) and n.endswith(".json")), reverse=True)[:limit]

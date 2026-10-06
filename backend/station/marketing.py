@@ -12,13 +12,15 @@ A venture only gets content once it has somewhere to send people (a payment link
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 
-from . import actions
+from . import actions, connectors, media
 from .brain import Brain
 from .crew import AGENT_RULES, lessons_text
 from .store import Store
 
+IMAGE_PLATFORMS = ("instagram", "facebook")   # posts here carry a branded card
 PLATFORMS = ["x", "instagram", "facebook", "linkedin", "tiktok", "pinterest", "threads", "bluesky", "reddit", "youtube"]
 
 PLAN_SCHEMA = {
@@ -43,7 +45,13 @@ POSTS_SCHEMA = {
     "properties": {"posts": {"type": "array", "items": {"type": "object", "properties": {
         "platform": {"type": "string", "enum": PLATFORMS},
         "text": {"type": "string", "description": "The full post, within the platform's length limit, with any disclosure it needs."},
-        "angle": {"type": "string"}}, "required": ["platform", "text", "angle"], "additionalProperties": False}}},
+        "angle": {"type": "string"},
+        "card": {"type": "object", "description": "The image that goes with the post (required for Instagram).", "properties": {
+            "headline": {"type": "string", "description": "At most 60 characters."},
+            "points": {"type": "array", "items": {"type": "string"}, "description": "0-3 short points, at most 40 characters each."},
+            "cta": {"type": "string", "description": "Call to action, at most 32 characters."}},
+            "required": ["headline", "points", "cta"], "additionalProperties": False}},
+        "required": ["platform", "text", "angle", "card"], "additionalProperties": False}}},
     "required": ["posts"], "additionalProperties": False,
 }
 
@@ -60,9 +68,41 @@ PROSPECTS_SCHEMA = {
 }
 
 
-def _link(v: dict) -> str:
-    links = v.get("links") or {}
+LANGUAGES = {"es": "Spanish as people write it in Puerto Rico: natural and local, never a word-for-word translation",
+             "en": "English"}
+
+
+def _link(v: dict, platform: str = "") -> str:
+    """Where a post sends people; never a link to the same platform's own page."""
+    links = {k: u for k, u in (v.get("links") or {}).items() if not (platform and k.startswith(platform))}
     return links.get("stripe") or next(iter(links.values()), "")
+
+
+def _voice(v: dict) -> str:
+    out = []
+    if v.get("language"):
+        out.append(f"Write everything customers will see in {LANGUAGES.get(v['language'], v['language'])}.")
+    if v.get("market"):
+        out.append(f"Market: {v['market']}.")
+    if v.get("notes"):
+        out.append(f"Owner's notes: {v['notes']}")
+    if v.get("compliance"):
+        out.append("Rules for this venture (binding): " + " | ".join(v["compliance"]))
+    return ("\n\n" + "\n".join(out)) if out else ""
+
+
+def _page_posts(v: dict) -> str:
+    """The venture's own recent Facebook posts, when the connected Page is its Page."""
+    if "facebook" not in (v.get("channels") or []) or not connectors.platform_allowed("facebook", v["id"]):
+        return ""
+    try:
+        posts = connectors.facebook_recent_posts()
+    except connectors.ConnectorError:
+        return ""
+    if not posts:
+        return ""
+    return ("\n\nTHE PAGE'S OWN RECENT POSTS (study the voice, the offers, what it already said; don't repeat them):\n"
+            + json.dumps(posts, ensure_ascii=False, indent=1))
 
 
 def _work(store: Store, v: dict, n: int = 6) -> list[dict]:
@@ -73,8 +113,13 @@ def _work(store: Store, v: dict, n: int = 6) -> list[dict]:
 def plan(store: Store, brain: Brain, v: dict) -> dict:
     out = brain.structured("A-005", AGENT_RULES + " You are the Marketing Lead." + lessons_text(store, "Marketing", v["id"]), (
         "Write the channel plan for this venture: where its customers actually are, the few channels worth our time "
-        "(we have no ad budget), honest angles, and whether direct outreach to businesses makes sense.\n\n"
-        + json.dumps({k: v.get(k) for k in ("name", "category", "platform", "offer", "objective", "links")}, indent=1)),
+        "(we have no ad budget), and honest angles."
+        + (" Say whether direct outreach to businesses makes sense." if v.get("outreach_allowed")
+           else " The owner hasn't allowed outreach for this venture: set outreach.use to false.")
+        + (f" The venture's own channels are fixed: {', '.join(v['channels'])}." if v.get("channels") else "")
+        + _voice(v) + "\n\n"
+        + json.dumps({k: v.get(k) for k in ("name", "category", "platform", "offer", "objective", "links")}, indent=1)
+        + _page_posts(v)),
         PLAN_SCHEMA, venture=v["id"])
     return store.update("ventures", v["id"], {"marketing_plan": out}, "A-005", f"channel plan: {', '.join(c['platform'] for c in out['channels'])}",
                         kind="venture.marketing_plan")
@@ -82,17 +127,26 @@ def plan(store: Store, brain: Brain, v: dict) -> dict:
 
 def content(store: Store, brain: Brain, v: dict, now: datetime) -> list[dict]:
     mp = v.get("marketing_plan") or {}
-    channels = [c["platform"] for c in mp.get("channels", [])] or ["x"]
+    channels = v.get("channels") or [c["platform"] for c in mp.get("channels", [])] or ["x"]
     out = brain.structured("A-006", AGENT_RULES + " You are the Content Creator." + lessons_text(store, "Content Strategist", v["id"]), (
         f"Write today's posts for {', '.join(channels)} (one per channel, at most 3). Turn the crew's real work below into "
-        "useful content (a tip, a before/after, a sample) that makes the right customer click through. The link is added "
-        "for you; don't invent results or testimonials.\n\n"
+        "useful content (a tip, a before/after, a sample) that makes the right customer click through or message us. Any "
+        "link is added for you; don't invent results, prices or testimonials. Each post also gets an image card: give it "
+        "a short headline, up to 3 short points and a call to action, in the post's language (Instagram links aren't "
+        "clickable, so its call to action points to DMs or the profile)." + _voice(v) + "\n\n"
         f"VENTURE: {json.dumps({k: v.get(k) for k in ('name', 'offer')})}\nANGLES: {json.dumps(mp.get('angles', []))}\n"
-        f"AUDIENCE: {mp.get('audience', '')}\nWORK:\n{json.dumps(_work(store, v), indent=1)}"), POSTS_SCHEMA, venture=v["id"], effort="medium")
+        f"AUDIENCE: {mp.get('audience', '')}\nWORK:\n{json.dumps(_work(store, v), indent=1)}" + _page_posts(v)),
+        POSTS_SCHEMA, venture=v["id"], effort="medium")
     filed = []
+    data_dir = os.path.dirname(store.dir)
     for p in out["posts"][:3]:
-        a = actions.create(store, "social.post", "A-006", v["id"], {"platform": p["platform"], "text": p["text"], "link": _link(v)},
-                           f"{p['platform']} post for {v['name']}: {p['angle']}")
+        payload = {"platform": p["platform"], "text": p["text"], "link": _link(v, p["platform"])}
+        card = p.get("card") or {}
+        if p["platform"] in IMAGE_PLATFORMS and card.get("headline"):
+            payload["card"] = card
+            payload["image"] = media.render_card(data_dir, v["name"], card["headline"], card.get("points"), card.get("cta", ""),
+                                                 "solar" if v.get("category") == "solar" else "default")
+        a = actions.create(store, "social.post", "A-006", v["id"], payload, f"{p['platform']} post for {v['name']}: {p['angle']}")
         if a:
             filed.append(a)
     store.update("ventures", v["id"], {"content_day": now.date().isoformat()}, "A-006", f"{len(filed)} posts drafted", kind="venture.content")
