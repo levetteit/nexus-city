@@ -674,6 +674,15 @@ def test_jarvis_brief_is_read_only_and_token_gated(tmp_path, monkeypatch):
         assert c.get("/api/jarvis/brief", headers={"Authorization": "Bearer wrong"}).status_code == 401
         b = c.get("/api/jarvis/brief", headers={"Authorization": "Bearer " + "j" * 40}).json()
         assert b["mission"]["name"] == "First Dollar" and any(v["id"] == "V-PPS" for v in b["ventures"])
+        assert b["city"]["mode"] == "sim" and "balance" in b["city"]["account"]
+        # real-order status, without ever leaking a webhook URL (anyone with one can place orders)
+        from backend.execution import TradersPostRouter
+        r = TradersPostRouter(str(tmp_path), webhooks=["https://tp.example/secret-hook-123"])
+        r.armed, r.open = True, {"MNQ": {"side": "buy", "qty": 3, "contract": "MNQZ2026", "targets": {"https://tp.example/secret-hook-123": 3}}}
+        monkeypatch.setattr(main, "router", r)
+        cb = main._city_brief()
+        assert cb["real_orders"]["armed"] and cb["real_orders"]["open"]["MNQ"] == {"side": "buy", "qty": 3, "contract": "MNQZ2026"}
+        assert "secret-hook" not in json.dumps(cb)
         assert c.post("/api/jarvis/brief", headers={"Authorization": "Bearer " + "j" * 40}).status_code == 405   # read only
         assert c.get("/api/station", headers={"Authorization": "Bearer " + "j" * 40}).status_code == 401      # token opens nothing else
         monkeypatch.setenv("STARNET_JARVIS_TOKEN", "short")

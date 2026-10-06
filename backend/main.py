@@ -1036,7 +1036,28 @@ def jarvis_brief(request: Request) -> dict:
             "warroom": {k: (o["warroom"] or {}).get(k) for k in ("at", "summary", "stop_doing", "start_doing")},
             "leads_7d": sum(1 for l in o["leads"] if l["created_at"] >= (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()),
             "credits": {k: o["credits"][k] for k in ("state", "remaining", "added", "used", "today", "per_day_7d", "days_left")},
+            "city": _city_brief(),
             "error": o["error"]}
+
+
+def _city_brief() -> dict:
+    """The trading city for Jarvis: price feed, real-order router, the account. Never webhook URLs."""
+    out: dict = {"mode": MODE}
+    if engine is None:
+        return out
+    a = engine.account.snapshot()
+    out["account"] = {k: a.get(k) for k in ("firm", "phase", "balance", "profit", "target", "day_pnl", "daily_stop", "halted",
+                                            "open_micros", "days", "payout_eligible")}
+    if MODE == "live":
+        out["feed"] = {"source": engine.market.feed, "delay_min": round(engine.market.delay_minutes, 1),
+                       "realtime_symbols": sorted(engine.market.realtime_symbols),
+                       "last": FEED_LOG[-3:][::-1]}   # what happened to the last webhooks (ok / why rejected)
+    if router:
+        st = router.status(getattr(engine.market, "delay_minutes", 0.0))   # the sim market has no feed delay
+        out["real_orders"] = {"configured": st["configured"], "armed": st["armed"], "data_ok": st["data_ok"],
+                              "sent": st["sent"], "blocked": st["blocked"], "last_error": st["last_error"],
+                              "open": {sym: {k: p.get(k) for k in ("side", "qty", "contract")} for sym, p in st["open"].items()}}
+    return out
 
 
 @app.post("/api/station/ventures/{rid}/leads")
