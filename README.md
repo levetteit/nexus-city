@@ -571,6 +571,29 @@ The city's account panel still tracks paper P&L from the bots' fills. Your real
 fills (slippage, commissions) are in TradersPost and Tradovate. Run paper for a
 while, then start with **one** evaluation account before connecting more.
 
+## Tests and the watchdog
+
+**Tests.** `python -m pytest tests` checks the things that cost money when they break:
+
+- Lucid's rules: drawdown, consistency, payouts and scaling.
+- The real-order router: per-account sizing, stale data, restarts.
+- The account book and the news filter.
+- The desk's risk-off-only modes.
+- The password gate.
+- A regression on 5 real trading days (`tests/fixtures`). The 21-day baseline also runs when `data/` is present.
+
+GitHub runs the tests on every pull request.
+
+**Watchdog (`backend/watchdog.py`).** It pushes to your phone when, during market hours:
+
+- MNQ or MES drops off the TradingView real-time feed (usually an expired alert), and again when it's back;
+- no candles arrive at all for 25 minutes;
+- the server restarts with real positions open.
+
+Every weekday at 08:30 ET it also sends a short systems check. If the whole server
+is down it can't warn you itself, so point a free uptime monitor (e.g. UptimeRobot)
+at `https://<your-app>/healthz`.
+
 ## Backtest and optimize on real data (`backend/backtest.py`)
 
 The live city runs on simulated, random prices, so it can't tell you if the

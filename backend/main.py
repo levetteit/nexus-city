@@ -34,6 +34,7 @@ reports = None    # end-of-day reports (live mode only), see report.py
 history = None    # saved 1m candles for future backtests (live mode only), see history.py
 desk = None       # the bots' evening meeting / morning briefing on Claude (live mode only), see desk.py
 book = None       # your Lucid accounts, each tracked through the trades (live mode only), see accounts.py
+watchdog = None   # pushes when the feed or data stops (live mode only), see watchdog.py
 clients: set[WebSocket] = set()
 
 
@@ -58,7 +59,7 @@ async def run_city() -> None:
 async def run_live() -> None:
     """Poll for new real candles and step the bots through each one."""
     global engine, router, notifier
-    global scorecard, reports, history, desk, book
+    global scorecard, reports, history, desk, book, watchdog
     from . import execution, live, news, notify
     from .report import DayReports
     from .scorecard import Scorecard
@@ -76,7 +77,12 @@ async def run_live() -> None:
     book = AccountBook(live.DATA_DIR)
     router.account_urls = book.urls
     router.url_names = lambda: {a.webhook: a.name for a in book.accounts if a.webhook}
-    router.start()
+    closed = router.start()
+    if closed:   # we restarted while real positions were open: they were just closed
+        notifier.send("🔄 Starnet restarted with real positions open",
+                      f"Sent exits for {', '.join(closed)}: the bots restart flat. Check your accounts.", "watchdog")
+    from .watchdog import Watchdog
+    watchdog = Watchdog(live.DATA_DIR)
     while market.i + 1 < market.warm_until:   # read history, don't trade it
         engine.tick(trade=False)
     scorecard = Scorecard(live.DATA_DIR, calendar)
@@ -119,6 +125,8 @@ async def run_live() -> None:
                 asyncio.create_task(check_day(finished, report))
                 asyncio.create_task(asyncio.to_thread(history.save))   # add the day that just ended
             events += new
+        for title, body in watchdog.check(market, router, desk):
+            notifier.send(title, body, "watchdog")
         if router.last_error and router.last_error != last_order_error:   # a real order failed: tell you now
             notifier.send("⚠️ Real order failed", router.last_error, "error")
         last_order_error = router.last_error
@@ -187,6 +195,8 @@ def state() -> dict:
             snap["history"] = history.status()
         if desk:
             snap["desk"] = desk.status()
+        if watchdog:
+            snap["watchdog"] = watchdog.status()
         if book:
             st = book.status()
             snap["accounts"] = {k: st[k] for k in ("count", "payouts_ready", "total_balance", "paid_out")}
@@ -280,7 +290,8 @@ app.add_middleware(FreshAssets)
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"ok": True, "ready": engine is not None}
+    """Always 200 while the server runs (Render restarts it otherwise); `problems` lists what the watchdog sees."""
+    return {"ok": True, "ready": engine is not None, "problems": watchdog.status()["problems"] if watchdog else []}
 
 
 @app.get("/api/state")

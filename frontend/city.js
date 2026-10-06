@@ -445,6 +445,10 @@ function alertRows(s) {
 
 // real orders on your Lucid accounts (live mode only)
 function feedLast(s) {
+  const problems = (s.watchdog?.problems || []).map((p) => `<div class="halt">🚨 ${esc(p)}</div>`).join("");
+  return problems + feedLastRow(s);
+}
+function feedLastRow(s) {
   const f = s.feed_last;
   if (!f) return `<div class="row"><span>TradingView webhooks</span><span>none received yet</span></div>`;
   const when = new Date(f.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
