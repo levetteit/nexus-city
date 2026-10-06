@@ -485,6 +485,15 @@ function playEvents(events) {
       courier(mods.get("revenue").pos, mods.get("finance").pos, "#ffd84d");
       burst(mods.get("finance").pos.clone().setY(3), "#ffd84d", 24);
       toast(`💵 ${e.summary}`, "#ffd84d");
+    } else if (k === "shop.listed") {
+      burst(mods.get("marketplace").pos.clone().setY(4), "#ffa94d", 22);
+      toast(`🛍️ ${e.summary}`, "#ffa94d");
+    } else if (k === "shop.order") {
+      courier(mods.get("marketplace").pos, mods.get("finance").pos, "#ffd84d");
+      burst(mods.get("marketplace").pos.clone().setY(4), "#ffd84d", 30);
+      toast(`📦 ${e.summary}`, "#ffd84d");
+    } else if (k === "shop.design") {
+      burst(mods.get("creative").pos.clone().setY(5), "#c58bff", 12);
     } else if (k === "lead.created") {
       courier(mods.get("marketing").pos, mods.get("revenue").pos, "#3dffa2");
       toast(`📨 ${e.summary}`, "#3dffa2");
@@ -533,6 +542,7 @@ async function load() {
     approvals: S.approvals.length + S.owner_tasks.length ? `<span class="warn">${S.approvals.length + S.owner_tasks.length} waiting for you</span>` : "all clear",
     lounge: `${count("lounge")} on break`,
     citydock: "trading bots",
+    marketplace: S.shop ? `Etsy · ${S.shop.live.length} live · ${S.shop.orders_30d} orders (30d)` : "",
   };
   for (const mod of mods.values()) {
     mod.lab.element.innerHTML = `${esc(mod.name)}<small>${sub[mod.id] || `${count(mod.id)} crew`}${mod.busy ? ` · ${mod.busy} working` : ""}</small>`;
@@ -626,6 +636,13 @@ function panelModule(id) {
     body = `<h2>Leaderboard</h2>${lb.slice(0, 10).map((a, i) => `<div class="row" data-pick="agent:${a.id}">#${i + 1} <b>${esc(a.name)}</b> · ${a.work || 0} jobs ${(a.achievements || []).length ? `<span class="badgechip">★ ${esc(a.achievements[a.achievements.length - 1].title)}</span>` : ""}${a.pet ? ` · 🐾 ${esc(a.pet.name)}` : ""}</div>`).join("")}
     <h2>Pets</h2>${list(S.agents.filter((a) => a.pet).map((a) => `🐾 ${esc(a.pet.name)} the ${esc(a.pet.kind)} · with ${esc(a.name)}`))}
     <p class="muted small">Pets are earned: a robo-cat at 5 jobs, a drone at 15, a star-jelly at 40, a comet-fox at 100.</p>`; }
+  else if (id === "marketplace") { const sh = S.shop || { live: [], drafts: [], pipeline: {} };
+    const thumb = (img, ink) => img ? `<img src="/media/${esc(img)}" alt="" style="width:44px;height:52px;object-fit:contain;background:${ink === "light" ? "#1d1d22" : "#f3efe6"};border-radius:6px;float:left;margin-right:10px">` : "";
+    body = `<div class="kv"><div>Etsy via Printify</div><div>${sh.connected ? `<span class="pos">connected</span>` : `<span class="muted">waiting for the Printify token</span>`}</div>
+      <div>Orders (30d)</div><div>${sh.orders_30d || 0} · ${money(sh.retail_30d || 0)} retail</div><div>New listings</div><div>up to ${sh.per_day}/day</div>
+      <div>Pipeline</div><div>${["qa", "ready", "manual", "sent"].map((k) => `${sh.pipeline[k] || 0} ${k === "sent" ? "live" : k === "manual" ? "waiting" : k}`).join(" · ")}</div></div>
+      <h2>Live on Etsy</h2>${sh.live.length ? sh.live.slice(0, 8).map((x) => `<div class="row" style="overflow:hidden">${thumb(x.image, x.ink)}<b>${esc(x.title)}</b><div class="m">${esc(x.type)} · ${x.price_cents ? money(x.price_cents[0] / 100) : ""} · ${x.orders} order${x.orders === 1 ? "" : "s"} · listed ${ago(x.sent_at)}</div></div>`).join("") : `<div class="muted small">Nothing listed yet.</div>`}
+      <h2>In the works</h2>${sh.drafts.length ? sh.drafts.slice(0, 6).map((x) => `<div class="row" style="overflow:hidden">${thumb(x.image, x.ink)}<b>${esc(x.title)}</b> <span class="pill">${esc(x.status)}</span><div class="m">${esc(x.niche || "")} · ${money(x.price_usd)}</div></div>`).join("") : `<div class="muted small">The Shop Manager's next scan fills this.</div>`}`; }
   else if (id === "citydock") body = `<p>The trading city: Venture #1. The bots trade MNQ on the Lucid account; their profit and payouts fund the station.</p><div class="actions"><a class="btn primary" href="/">Go to the city</a></div>`;
   show(`<div class="label">${esc(mod.name.toUpperCase())}</div><h1>${esc(mod.name)}</h1>${body}<h2>Crew here</h2>${crew.length ? crew.map(agentRow).join("") : `<div class="muted small">Nobody here right now.</div>`}`, () => panelModule(id));
 }

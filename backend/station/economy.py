@@ -33,8 +33,8 @@ DEFAULT_BILLS = [
     {"id": "station-ai", "unit": "station", "name": "Station AI usage (cap)", "monthly": AI_BUDGET},
 ]
 DEFAULT_GOALS = [
-    {"id": "etsy-launch", "name": "Open the first Etsy store", "monthly": 29.0, "months": 2, "unit": "station",
-     "why": "Etsy ventures need about $29/month to run; fund two months before opening."},
+    {"id": "printify-premium", "name": "Printify Premium", "monthly": 29.0, "months": 2, "unit": "station",
+     "why": "Up to 20% off every Etsy product's cost: worth it once the shop sells steadily."},
 ]
 
 
@@ -63,6 +63,8 @@ class Treasury:
         if os.path.exists(self.cfg_path):
             with open(self.cfg_path) as f:
                 self.cfg.update(json.load(f))
+        if any(g["id"] == "etsy-launch" for g in self.cfg["goals"]):   # the owner already runs the Etsy shop
+            self.cfg["goals"] = [g for g in self.cfg["goals"] if g["id"] != "etsy-launch"] + DEFAULT_GOALS
         self.entries: list[dict] = []
         if os.path.exists(self.path):
             with open(self.path) as f:

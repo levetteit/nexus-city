@@ -898,12 +898,12 @@ async def station_feedback(request: Request) -> dict:
 
 @app.get("/media/{name}")
 def station_media(name: str):
-    """A post's image card. Names are 128-bit random, so they're unguessable; nothing else is served here."""
+    """A post's image card or a product design. Names are 128-bit random, so they're unguessable; nothing else is served here."""
     from .station import media
     path = media.path_for(os.getenv("STARNET_DATA_DIR", "data"), name)
     if not path:
         raise HTTPException(404)
-    return FileResponse(path, media_type="image/jpeg")
+    return FileResponse(path, media_type="image/png" if path.endswith(".png") else "image/jpeg")
 
 
 @app.post("/api/station/ventures/{rid}/outreach")

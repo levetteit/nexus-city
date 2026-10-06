@@ -12,8 +12,13 @@
   Facebook STARNET_FB_PAGE_ID, STARNET_FB_PAGE_TOKEN: posts to your Page
   LinkedIn STARNET_LINKEDIN_TOKEN: posts to your profile (the token lasts 60 days)
 
-Fiverr and Etsy have no seller API for this. Driving their sites with a bot breaks their terms and gets
-accounts banned, so the crew prepares everything and you publish and reply there.
+  Printify PRINTIFY_API_TOKEN (Printify → My profile → Connections → Personal access token), optional
+           PRINTIFY_SHOP_ID (else the Printify shop connected to Etsy). The crew's print-on-demand products
+           are created in Printify and published to the Etsy shop through Printify's own Etsy connection.
+           Each new Etsy listing costs $0.20; STARNET_SHOP_LISTINGS_PER_DAY caps how many go up a day.
+
+Fiverr has no seller API, and Etsy's own API isn't needed: Printify publishes the listings. Driving a
+marketplace's site with a bot breaks its terms and gets accounts banned, so nothing here does that.
 """
 from __future__ import annotations
 
@@ -295,8 +300,112 @@ def post_social(platform: str, text: str, link: str = "", image_url: str = "") -
     return SOCIAL[platform.lower()]["post"](text, link, **({"image_url": image_url} if image_url else {}))
 
 
+# ---------------------------------------------------------------------------- Printify → Etsy
+PRINTIFY_API = "https://api.printify.com/v1"
+_printify_cache: dict = {}
+
+
+def printify_configured() -> bool:
+    return bool(os.getenv("PRINTIFY_API_TOKEN", "").strip())
+
+
+def _printify(method: str, path: str, body: Optional[dict] = None) -> dict:
+    token = os.getenv("PRINTIFY_API_TOKEN", "").strip()
+    if not token:
+        raise ConnectorError("Printify isn't connected (PRINTIFY_API_TOKEN)")
+    return _http_json(method, PRINTIFY_API + path, {"Authorization": f"Bearer {token}", "User-Agent": "StarNet-Station"},
+                      body=body)
+
+
+def printify_shop_id() -> str:
+    """The Printify shop that publishes to Etsy."""
+    sid = os.getenv("PRINTIFY_SHOP_ID", "").strip()
+    if sid:
+        return sid
+    if "shop" not in _printify_cache:
+        shops = _printify("GET", "/shops.json")
+        etsy = [x for x in shops if str(x.get("sales_channel", "")).lower() == "etsy"]
+        if not etsy:
+            raise ConnectorError("no Etsy store is connected in Printify (Printify → My stores → Add new store → Etsy)")
+        _printify_cache["shop"] = str(etsy[0]["id"])
+    return _printify_cache["shop"]
+
+
+def _pick_variants(variants: list, colors: list, sizes: list, limit: int = 12) -> list:
+    """Apparel: the requested colors in the requested sizes. Anything else: the first few variants."""
+    def opt(v, k):
+        return str((v.get("options") or {}).get(k, "")).strip()
+    if colors and any(opt(v, "color") for v in variants):
+        picked = []
+        for c in colors:
+            picked += [v for v in variants if opt(v, "color").lower() == c.lower() and (not sizes or opt(v, "size") in sizes)]
+        if picked:
+            return picked[:limit]
+    return variants[:min(limit, 4)]
+
+
+def printify_blueprint(product_type: dict) -> dict:
+    """Find the catalog blueprint, a print provider and the variants for one of shop.PRODUCT_TYPES (cached)."""
+    key = product_type["key"]
+    if key in _printify_cache:
+        return _printify_cache[key]
+    blueprints = _printify_cache.get("blueprints") or _printify("GET", "/catalog/blueprints.json")
+    _printify_cache["blueprints"] = blueprints
+    bp = None
+    for want in product_type["blueprints"]:
+        bp = next((b for b in blueprints if b.get("title", "").lower() == want.lower()), None) \
+            or next((b for b in blueprints if want.lower() in b.get("title", "").lower()), None)
+        if bp:
+            break
+    if not bp:
+        raise ConnectorError(f"Printify has no blueprint like {product_type['blueprints'][0]!r}")
+    providers = _printify("GET", f"/catalog/blueprints/{bp['id']}/print_providers.json")
+    for pp in providers:
+        variants = _printify("GET", f"/catalog/blueprints/{bp['id']}/print_providers/{pp['id']}/variants.json").get("variants", [])
+        if variants:
+            out = {"blueprint_id": bp["id"], "blueprint": bp.get("title"), "provider_id": pp["id"],
+                   "provider": pp.get("title"), "variants": variants}
+            _printify_cache[key] = out
+            return out
+    raise ConnectorError(f"no print provider has variants for {bp.get('title')}")
+
+
+def printify_list(product_type: dict, title: str, description: str, tags: list, price_cents: int, png: bytes,
+                  file_name: str, colors: list, min_price) -> dict:
+    """Upload the design, create the product, price it above cost, publish it to Etsy. Several HTTP calls."""
+    import base64
+    shop = printify_shop_id()
+    bp = printify_blueprint(product_type)
+    variants = _pick_variants(bp["variants"], colors, product_type.get("sizes", []))
+    image = _printify("POST", "/uploads/images.json", {"file_name": file_name, "contents": base64.b64encode(png).decode()})
+    ids = [v["id"] for v in variants]
+    product = _printify("POST", f"/shops/{shop}/products.json", {
+        "title": title, "description": description, "tags": tags, "blueprint_id": bp["blueprint_id"],
+        "print_provider_id": bp["provider_id"],
+        "variants": [{"id": i, "price": price_cents, "is_enabled": True} for i in ids],
+        "print_areas": [{"variant_ids": ids, "placeholders": [{"position": product_type.get("position", "front"),
+                                                               "images": [{"id": image["id"], "x": 0.5, "y": 0.5, "scale": 1, "angle": 0}]}]}]})
+    # never sell below cost: Printify only tells us the cost once the product exists
+    costs = {v["id"]: v.get("cost", 0) for v in product.get("variants", []) if v.get("id") in ids}
+    prices = {i: max(price_cents, min_price(costs.get(i, 0))) for i in ids}
+    if any(p != price_cents for p in prices.values()):
+        _printify("PUT", f"/shops/{shop}/products/{product['id']}.json",
+                  {"variants": [{"id": i, "price": p, "is_enabled": True} for i, p in prices.items()]})
+    _printify("POST", f"/shops/{shop}/products/{product['id']}/publish.json",
+              {"title": True, "description": True, "images": True, "variants": True, "tags": True,
+               "keyFeatures": True, "shipping_template": True})
+    return {"id": product["id"], "shop": shop, "blueprint": bp["blueprint"], "provider": bp["provider"],
+            "variants": len(ids), "price_cents": sorted(prices.values()), "cost_cents": sorted(set(costs.values()))}
+
+
+def printify_orders(limit: int = 50) -> list[dict]:
+    return _printify("GET", f"/shops/{printify_shop_id()}/orders.json?limit={limit}").get("data", [])
+
+
 def status() -> dict:
     return {"stripe": stripe_configured(), "stripe_webhook": bool(os.getenv("STRIPE_WEBHOOK_SECRET")),
             "email": email_configured(), "social": sorted(p for p in SOCIAL if social_configured(p)),
             "tiktok": "queue (needs a video; API needs TikTok's audit)",
-            "fiverr": "manual (no seller API)", "etsy": "manual until funded"}
+            "fiverr": "manual (no seller API)",
+            "etsy": "live via Printify" if printify_configured() else "waiting for PRINTIFY_API_TOKEN",
+            "printify": printify_configured()}

@@ -14,7 +14,7 @@ import textwrap
 from typing import Optional
 
 W, H = 1080, 1350
-NAME_RE = re.compile(r"^[a-f0-9]{32}\.jpg$")
+NAME_RE = re.compile(r"^[a-f0-9]{32}\.(jpg|png)$")
 PALETTES = {   # background top, background bottom, accent, text
     "solar": ((8, 28, 66), (14, 70, 140), (255, 196, 44), (255, 255, 255)),
     "default": ((10, 14, 34), (28, 40, 90), (94, 231, 255), (255, 255, 255)),
@@ -94,6 +94,53 @@ def render_card(data_dir: str, brand: str, headline: str, points: Optional[list]
         d.text(((W - tw) / 2, H - 80 - box_h + 38), line, font=_font(46, bold=True), fill=top)
     name = secrets.token_hex(16) + ".jpg"
     img.save(os.path.join(media_dir(data_dir), name), "JPEG", quality=90)
+    return name
+
+
+def _hex(color: str, fallback: tuple) -> tuple:
+    c = (color or "").lstrip("#")
+    try:
+        return tuple(int(c[i:i + 2], 16) for i in (0, 2, 4)) if len(c) == 6 else fallback
+    except ValueError:
+        return fallback
+
+
+def render_design(data_dir: str, headline: str, subline: str = "", ink: str = "dark", accent: str = "",
+                  size: tuple = (4500, 5400), background: bool = False) -> str:
+    """A print-ready typographic design: transparent PNG (garments, mugs) or on paper white (posters).
+    Original artwork from the crew's own words: no clip art, no fonts or marks we don't have rights to."""
+    from PIL import Image, ImageDraw
+    w, h = size
+    main = (24, 24, 28) if ink == "dark" else (250, 248, 242)
+    acc = _hex(accent, (214, 92, 60) if ink == "dark" else (255, 196, 44))
+    img = Image.new("RGBA", (w, h), (255, 255, 255, 255) if background else (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    m = int(w * 0.08)
+    words = headline.upper().strip() or "HELLO"
+    # biggest headline that fits in at most 4 lines and the top 60% of the canvas
+    for fs in range(int(min(w, h) * 0.4), 40, -int(max(4, min(w, h) * 0.006))):
+        lines = _wrap(d, words, _font(fs, bold=True), w - 2 * m)
+        if len(lines) <= 4 and len(lines) * fs * 1.12 <= h * 0.6 and all(d.textlength(x, font=_font(fs, bold=True)) <= w - 2 * m for x in lines):
+            break
+    sub_fs = max(40, int(fs * 0.32))
+    sub_lines = _wrap(d, subline.strip(), _font(sub_fs), w - 2 * m)[:2] if subline.strip() else []
+    rule_h = max(8, int(fs * 0.08))
+    block = len(lines) * fs * 1.12 + (rule_h + fs * 0.5 if sub_lines else 0) + len(sub_lines) * sub_fs * 1.3
+    y = (h - block) / 2 if size[0] >= size[1] else h * 0.12   # garments: high on the chest; wide items: centered
+    for line in lines:
+        tw = d.textlength(line, font=_font(fs, bold=True))
+        d.text(((w - tw) / 2, y), line, font=_font(fs, bold=True), fill=main)
+        y += fs * 1.12
+    if sub_lines:
+        y += fs * 0.2
+        d.rectangle(((w - fs * 1.6) / 2, y, (w + fs * 1.6) / 2, y + rule_h), fill=acc)
+        y += rule_h + fs * 0.3
+        for line in sub_lines:
+            tw = d.textlength(line, font=_font(sub_fs))
+            d.text(((w - tw) / 2, y), line, font=_font(sub_fs), fill=acc)
+            y += sub_fs * 1.3
+    name = secrets.token_hex(16) + ".png"
+    img.save(os.path.join(media_dir(data_dir), name), "PNG", optimize=True)
     return name
 
 

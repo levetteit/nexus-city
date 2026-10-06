@@ -245,6 +245,17 @@ $("#ob-toggle").addEventListener("click", () => {
   act(() => api("/api/station/outbound", { on: !S.outbound }), S.outbound ? "Outbound stopped." : "Outbound on.");
 });
 
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+function shopSection(sh) {
+  const item = (x, extra) => `<div class="row" style="display:flex;gap:10px;align-items:center">${x.image ? `<img src="/media/${esc(x.image)}" alt="" style="width:48px;height:56px;object-fit:contain;background:${x.ink === "light" ? "#1d1d22" : "#f3efe6"};border-radius:6px;flex:none">` : ""}<div><b>${esc(x.title)}</b><div class="muted small">${extra}</div></div></div>`;
+  return `<h2>The shop</h2><div class="kv"><div>Etsy via Printify</div><div>${sh.connected ? "connected" : "waiting for PRINTIFY_API_TOKEN on Render"}</div>
+    <div>Orders (30 days)</div><div>${plural(sh.orders_30d, "order")}, ${plural(sh.units_30d, "unit")} · ${money(sh.retail_30d)} retail, ${money(sh.cost_30d)} product cost</div>
+    <div>New listings</div><div>up to ${sh.per_day} a day ($0.20 each on Etsy)</div></div>
+    <p class="muted small">Etsy deposits aren't booked automatically: record them in Finance when they land.</p>
+    <h2>Live listings</h2>${sh.live.map((x) => item(x, `${esc(x.type)} · ${x.price_cents ? money(x.price_cents[0] / 100) : ""} · ${plural(x.orders, "order")}`)).join("") || `<div class="empty">Nothing listed yet.</div>`}
+    <h2>In the works</h2>${sh.drafts.map((x) => item(x, `${esc(x.status)} · ${esc(x.niche || "")} · ${money(x.price_usd)}`)).join("") || `<div class="empty">The next best-seller scan fills this.</div>`}`;
+}
+
 function renderMarketing() {
   const c = S.connectors;
   const row = (name, on, how) => `<div class="conn"><span>${esc(name)}</span><span class="${on === true ? "pos" : "muted"}">${on === true ? "connected" : esc(on || how)}</span></div>`;
@@ -252,7 +263,7 @@ function renderMarketing() {
     row("Email outreach", c.email, "not connected") + row("Facebook Page", c.social.includes("facebook"), "not connected") +
     row("Instagram", c.social.includes("instagram"), "not connected") + row("LinkedIn", c.social.includes("linkedin"), "off") +
     row("TikTok", c.tiktok) +
-    row("Fiverr", c.fiverr) + row("Etsy", c.etsy);
+    row("Fiverr", c.fiverr) + row("Etsy (via Printify)", c.printify === true ? true : c.etsy);
   $("#ob-manual").innerHTML = S.outbox.manual.map(actionRow).join("") || `<div class="empty">Nothing to post by hand.</div>`;
   $("#ob-wait").innerHTML = S.outbox.waiting_owner.map(actionRow).join("") || `<div class="empty">Nothing waiting.</div>`;
   $("#ob-sent").innerHTML = S.outbox.sent.map(actionRow).join("") || `<div class="empty">Nothing sent yet.</div>`;
@@ -335,11 +346,12 @@ async function openRecord(col, id) {
       <div class="kv"><div>Offer</div><div>${esc(r.offer || "—")}</div><div>Objective</div><div>${esc(r.objective || "—")}</div>
       <div>Income / costs</div><div>${money(r.pnl.income)} / ${money(r.pnl.costs)}</div><div>Success</div><div>${esc(r.success_criteria || "—")}</div>
       <div>Kill</div><div>${esc(r.kill_criteria || "—")}</div><div>Validation</div><div>${esc(r.validation ? r.validation.verdict + ": " + r.validation.why : "—")}</div></div>
+      ${r.agent_run && S.shop ? shopSection(S.shop) : ""}
       <h2>Tasks</h2>${(r.task_list || []).map(taskRow).join("") || `<div class="empty">No tasks yet.</div>`}
       <h2>Where customers buy</h2>${Object.entries(r.links || {}).map(([k, u]) => `<div><span class="muted">${esc(k)}</span> <a href="${esc(u)}" target="_blank" rel="noopener" style="color:var(--cyan)">${esc(u)}</a></div>`).join("") || `<div class="empty">No link yet: marketing starts once there is one.</div>`}
       <div class="row" style="margin-top:8px"><input id="link-name" placeholder="fiverr" style="max-width:110px" /><input id="link-url" placeholder="https://…" />
         <button class="btn" data-link="${r.id}">Save link</button></div>
-      ${r.id !== "V-001" ? `<h2>Leads</h2><p class="muted small">Got a message? Log it in one tap. The War Room uses this to learn which posts work.</p>
+      ${r.id !== "V-001" && !r.agent_run ? `<h2>Leads</h2><p class="muted small">Got a message? Log it in one tap. The War Room uses this to learn which posts work.</p>
         <div class="row"><select id="lead-post" style="flex:1"><option value="">From which post? (optional)</option>
           ${S.outbox.sent.filter((a) => a.venture === r.id).map((a) => `<option value="${a.id}">${esc(a.payload.platform)}: ${esc((a.payload.text || "").slice(0, 50))}</option>`).join("")}</select></div>
         <input id="lead-note" placeholder="Note (optional): e.g. casa en Bayamón, quiere baterías" style="margin:8px 0" />

@@ -46,6 +46,11 @@ CORE = [
     # War Room: what works, what doesn't, what we do instead
     {"id": "A-012", "name": "War Room Strategist", "role": "War Room", "department": "warroom", "kind": "ai",
      "specialty": "Reads every result, kills what doesn't work, doubles down on what does, writes the lessons"},
+    # The Etsy shop: print-on-demand, run by the crew end to end (shop.py)
+    {"id": "A-SHOP", "name": "Etsy Shop Manager", "role": "Etsy Strategist", "department": "marketplace", "kind": "ai",
+     "specialty": "Turns what's selling on Etsy into product briefs, lists them through Printify, watches the orders"},
+    {"id": "A-DSGN", "name": "Product Designer", "role": "Creative/Design", "department": "creative", "kind": "logic",
+     "specialty": "Original print-ready designs for every product brief"},
 ]
 
 # Roles a venture plan may ask for that a standing team member already covers (never staff a duplicate)
@@ -53,7 +58,9 @@ ALIASES = {"marketing": "A-005", "marketing lead": "A-005", "content strategist"
            "social media": "A-006", "outreach": "A-007", "sales": "A-007", "compliance/policy": "A-011",
            "compliance": "A-011", "qa": "A-011", "legal": "A-010", "legal counsel": "A-010",
            "finance/unit economics": "A-004", "finance": "A-004", "accountant": "A-008", "analytics": "A-009",
-           "auditor": "A-009", "market research": "A-002", "opportunity validation": "A-003"}
+           "auditor": "A-009", "market research": "A-002", "opportunity validation": "A-003",
+           "etsy strategist": "A-SHOP", "store operations": "A-SHOP", "listing/seo": "A-SHOP",
+           "creative/design": "A-DSGN", "product creation": "A-DSGN"}
 
 DEPARTMENT = {"Etsy Strategist": "marketplace", "Store Operations": "marketplace", "Fiverr Opportunity": "marketplace",
               "Service Delivery": "marketplace", "Listing/SEO": "marketplace", "Product Creation": "creative",

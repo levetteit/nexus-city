@@ -26,11 +26,13 @@ from .store import Store, now_iso
 
 CAPS = {"social.post": int(os.getenv("STARNET_POSTS_PER_DAY", "6")),
         "outreach.email": int(os.getenv("STARNET_OUTREACH_PER_DAY", "15")),
-        "stripe.payment_link": 5}
+        "stripe.payment_link": 5,
+        "shop.listing": int(os.getenv("STARNET_SHOP_LISTINGS_PER_DAY", "2"))}
 POLICY = {   # auto: sends once QA passes; owner: waits for the owner's OK even after QA
     "social.post": os.getenv("STARNET_POLICY_SOCIAL", "auto"),
     "outreach.email": os.getenv("STARNET_POLICY_OUTREACH", "auto"),
     "stripe.payment_link": os.getenv("STARNET_POLICY_STRIPE", "auto"),
+    "shop.listing": os.getenv("STARNET_POLICY_SHOP", "auto"),
 }
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.I)
 
@@ -106,6 +108,10 @@ def revise(store: Store, brain: Brain, action: dict) -> dict:
         payload = {**action["payload"], **json.loads(out["payload_json"])}
     except (ValueError, TypeError):
         payload = action["payload"]
+    if action["kind"] == "shop.listing":   # the preview follows the revised words
+        from . import shop
+        payload = shop.clean(payload)
+        payload["image"] = shop.render(os.path.dirname(store.dir), payload)
     return store.update("actions", action["id"], {"payload": payload, "status": "qa", "revisions": action.get("revisions", 0) + 1},
                         agent["id"], f"revised: {out['what_changed'][:140]}", kind="action.revised")
 
@@ -154,6 +160,11 @@ def dispatch(store: Store, action: dict, outbound_on: bool) -> dict:
             if p.get("image") and not image_url:
                 return _manual(store, action, "the card has no public address (set STARNET_PUBLIC_URL)")
             res = connectors.post_social(p["platform"], p["text"], p.get("link", ""), image_url)
+        elif kind == "shop.listing":
+            if not connectors.printify_configured():
+                return _manual(store, action, "Printify isn't connected")
+            from . import shop
+            res = shop.publish(store, action)
         else:
             return _manual(store, action, "no connector for this kind")
     except connectors.ConnectorError as exc:

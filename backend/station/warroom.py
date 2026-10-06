@@ -74,6 +74,16 @@ def due(store: Store, cfg: dict, now: datetime) -> bool:
     return sum(1 for e in store.events(800, INPUT_KINDS) if e["at"] > since) >= TRIGGER_INPUTS
 
 
+def shop_summary(venture: str, store: Store) -> Optional[dict]:
+    """The Etsy shop's listings and orders: which products sell, which don't."""
+    from . import shop
+    if venture != shop.VENTURE:
+        return None
+    sm = shop.summary(store)
+    return {k: sm[k] for k in ("pipeline", "orders_30d", "units_30d", "retail_30d", "cost_30d")} | {
+        "listings": [{"title": x["title"], "type": x["type"], "orders": x["orders"], "listed": x["sent_at"]} for x in sm["live"]]}
+
+
 def inputs(store: Store, treasury: Treasury, health: Callable[[dict], int], since: Optional[str]) -> dict:
     ventures = []
     for v in store.all("ventures"):
@@ -89,6 +99,7 @@ def inputs(store: Store, treasury: Treasury, health: Callable[[dict], int], sinc
                          "outbound": stats, "results": [a["result"] for a in acts if a.get("result") and a["result"].get("note")][-10:],
                          "qa_rejections": [a["qa"]["issues"] for a in acts if a["status"] == "rejected"][-5:],
                          "results_30d": results.summary(store, v["id"], 30),
+                         "shop_30d": shop_summary(v["id"], store),
                          "success_criteria": v.get("success_criteria"), "kill_criteria": v.get("kill_criteria")})
     ev = [e for e in store.events(1500, INPUT_KINDS) if not since or e["at"] > since]
     return {"ventures": ventures, "treasury": treasury.summary(), "new_results": [f"{e['at'][:16]} {e['summary']}" for e in ev[:80]],
