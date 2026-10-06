@@ -179,6 +179,7 @@ def state() -> dict:
     if MODE == "live":
         snap["delay_min"] = round(engine.market.delay_minutes, 1)
         snap["feed"] = engine.market.feed
+        snap["feed_symbols"] = sorted(engine.market.realtime_symbols)   # symbols with a live TradingView alert
         if router:
             snap["execution"] = router.status(engine.market.delay_minutes)
         if history:

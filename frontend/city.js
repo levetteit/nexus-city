@@ -447,7 +447,10 @@ function alertRows(s) {
 function execRows(s) {
   if (s?.mode !== "live") return "";
   const x = s.execution, live = s.feed === "tradingview";
-  const data = `<div class="row"><span>Price data</span><span class="${live ? "pos" : ""}">${live ? "TradingView · real-time" : `Yahoo · ${Math.round(s.delay_min)}m delayed`}</span></div>`;
+  // MNQ trades and MES confirms: both need the real-time feed, or the late MES candles are lost
+  const missing = live ? ["MNQ", "MES"].filter((x) => !(s.feed_symbols || []).includes(x)) : [];
+  const data = `<div class="row"><span>Price data</span><span class="${live && !missing.length ? "pos" : missing.length ? "neg" : ""}">${live ? `TradingView · real-time (${(s.feed_symbols || []).join(", ")})` : `Yahoo · ${Math.round(s.delay_min)}m delayed`}</span></div>
+    ${missing.length ? `<div class="halt">⚠️ ${missing.join(" & ")} not on the real-time feed: add the Starnet feed alert on the ${missing.map((x) => x + "1!").join(" / ")} 1-minute chart too</div>` : ""}`;
   if (!x) return data;
   if (!x.configured) return data + `<div class="row"><span>Real orders</span><span>not connected</span></div>`;
   const open = Object.entries(x.open).map(([sym, p]) => `${p.side === "buy" ? "LONG" : "SHORT"} ${p.qty} ${p.contract}`).join(", ");
