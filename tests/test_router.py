@@ -100,3 +100,20 @@ def test_restart_closes_leftover_positions(tmp_path):
 def test_front_month_rolls_eight_days_before_expiry(day, expected):
     from datetime import date
     assert front_month("MNQ", date.fromisoformat(day)) == expected
+
+
+def test_every_order_is_market_with_the_last_price(tmp_path):
+    """Tradovate gives TradersPost no quotes: a subscription defaulting to limit orders would reject an
+    add or exit that carries no price, leaving a real position open."""
+    r = router(tmp_path, [SHARED])
+    r.handle(engine(), [OPEN, ADD, CLOSE], 0.5, Book())
+    payloads = []
+    while not r.queue.empty():
+        payloads.append(r.queue.get_nowait()[1])
+    assert {p["action"] for p in payloads} == {"buy", "add", "exit"}
+    assert all(p["orderType"] == "market" and p["signalPrice"] == 25_000.0 for p in payloads)
+    r.handle(engine(), [OPEN], 0.5, Book())
+    sent(r)
+    r.flatten_all(["MNQ"])                                   # FLATTEN ALL: market, with the price too
+    flat = r.queue.get_nowait()[1]
+    assert flat["action"] == "exit" and flat["orderType"] == "market" and flat["signalPrice"] == 25_000.0
