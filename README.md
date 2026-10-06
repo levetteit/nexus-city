@@ -340,8 +340,8 @@ every day in normal mode, so each non-normal mode's cost or savings is measured,
 the desk sees that history. You can make the desk advisory-only from its panel.
 
 **Turn it on:** add `ANTHROPIC_API_KEY` in Render → Environment. Without a key the desk
-stays off and nothing else changes. Expect roughly 4 Claude calls and up to 10 web
-searches a day, which works out to a few dollars a month.
+stays off and nothing else changes. Expect about 4 Claude calls and up to 10 web
+searches a day: roughly $0.30–0.70 a day, or $10–20 a month.
 
 **Where to see it:**
 
