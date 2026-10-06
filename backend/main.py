@@ -783,8 +783,11 @@ def station_connect(service: str):
         raise HTTPException(404)
     try:
         return RedirectResponse(connectors.oauth_start(service))
-    except connectors.ConnectorError as exc:
-        raise HTTPException(400, str(exc))
+    except connectors.ConnectorError as exc:   # the button opens this in a browser tab: say what to fix, plainly
+        return HTMLResponse(f"<!doctype html><meta name=viewport content='width=device-width'><body style='font:15px system-ui;"
+                            f"max-width:640px;margin:40px auto;padding:0 16px;line-height:1.5'><h3>{service.title()} isn't ready to "
+                            f"connect</h3><p>{html.escape(str(exc))}</p><p><a href='/station.html#/marketing'>Back to the board</a></p>",
+                            status_code=400)
 
 
 @app.get("/api/station/{collection}/{rid}")

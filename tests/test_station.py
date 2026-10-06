@@ -1128,9 +1128,19 @@ def test_connect_buttons_reach_their_route(tmp_path, monkeypatch):
     monkeypatch.setenv("ETSY_SHARED_SECRET", "secret")
     monkeypatch.setenv("STARNET_PUBLIC_URL", "https://city.example.com")
     import backend.main as main
+    from backend.station import connectors
     importlib.reload(main)
+    pings = []
+    monkeypatch.setattr(connectors, "_etsy", lambda *a, **k: pings.append(a) or {"ping": "pong"})
     with TestClient(main.app) as c:
         r = c.get("/api/station/connect/etsy", follow_redirects=False)
+        assert pings == [("GET", "/application/openapi-ping")]   # Etsy is asked first
         assert r.status_code in (302, 307) and r.headers["location"].startswith("https://www.etsy.com/oauth/connect?")
         assert "redirect_uri=https%3A%2F%2Fcity.example.com%2Fapi%2Fstation%2Fconnect%2Fetsy%2Fcallback" in r.headers["location"]
         assert c.get("/api/station/connect/pinterest", follow_redirects=False).status_code == 400   # no app keys yet: says so
+        # an app Etsy doesn't know (pending approval, wrong keystring): a plain page saying what to check, not Etsy's dead end
+        def refuse(*a, **k):
+            raise connectors.ConnectorError('HTTP 403: {"error":"API key not active"}')
+        monkeypatch.setattr(connectors, "_etsy", refuse)
+        r = c.get("/api/station/connect/etsy", follow_redirects=False)
+        assert r.status_code == 400 and "Pending Personal Approval" in r.text and "connect/etsy/callback" in r.text

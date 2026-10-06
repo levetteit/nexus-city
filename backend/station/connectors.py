@@ -481,6 +481,7 @@ def oauth_start(service: str) -> str:
     if service == "etsy":
         if not etsy_app():
             raise ConnectorError("set ETSY_KEYSTRING and ETSY_SHARED_SECRET on the server first")
+        etsy_check_app()
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
         return "https://www.etsy.com/oauth/connect?" + urllib.parse.urlencode({
             "response_type": "code", "client_id": os.getenv("ETSY_KEYSTRING", "").strip(), "redirect_uri": _redirect_uri("etsy"),
@@ -525,6 +526,22 @@ ETSY_TAXONOMY_PATHS = (("calendars & planners",), ("planners",), ("paper",))   #
 
 def etsy_app() -> bool:
     return bool(os.getenv("ETSY_KEYSTRING", "").strip() and os.getenv("ETSY_SHARED_SECRET", "").strip())
+
+
+def etsy_check_app() -> None:
+    """Ask Etsy whether it knows this app before sending the owner there. Etsy's own page only says
+    "the application ... is not recognized" when the keystring is wrong or the app isn't approved yet."""
+    try:
+        _etsy("GET", "/application/openapi-ping", auth=False)
+    except ConnectorError as exc:
+        msg = str(exc)
+        if "HTTP 401" in msg or "HTTP 403" in msg:
+            raise ConnectorError(
+                "Etsy doesn't recognize this app yet. At etsy.com/developers/your-apps open the app and check: "
+                "(1) its status is Active, not Pending Personal Approval (Etsy reviews new apps; until then nothing can "
+                "connect); (2) ETSY_KEYSTRING on Render is the app's KEYSTRING and ETSY_SHARED_SECRET its SHARED SECRET, "
+                "with no spaces; (3) the callback URL " + _redirect_uri("etsy") + " is listed exactly. Etsy said: " + msg[:120])
+        raise
 
 
 def etsy_connected() -> bool:
