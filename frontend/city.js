@@ -7,6 +7,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { Room, moodEmoji, tierOf, GADGETS } from "./room.js";
 import { ChartView } from "./chart.js";
+import { wardrobe, ITEMS, dress, finishMaterial, animateApparel } from "./skins.js";
 
 // ---------------------------------------------------------------- setup
 const app = document.getElementById("app");
@@ -174,6 +175,39 @@ const buildings = new Map(); // bot id -> { group, beam, halo, tag, pos, mats }
 const clickables = [];
 const BUILD_RADIUS = 23;
 
+function makeMascot(bot) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 0.9, 6, 12), finishMaterial("chrome"));
+  body.position.y = 1.1;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.62, 20, 14), new THREE.MeshStandardMaterial({ color: "#d9e2ff", metalness: 0.4, roughness: 0.3 }));
+  head.position.y = 2.25;
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.28, 0.2), new THREE.MeshStandardMaterial({ color: bot.color, emissive: bot.color, emissiveIntensity: 2 }));
+  visor.position.set(0, 2.3, 0.5);
+  const pick = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 3.2, 8), new THREE.MeshBasicMaterial({ visible: false }));
+  pick.position.y = 1.6;
+  pick.userData.botId = bot.id;
+  clickables.push(pick);
+  g.add(body, head, visor, pick);
+  g.userData.body = body;
+  return g;
+}
+
+function dressMascot(b, bot) {
+  const look = wardrobe(bot, "bot", { phase: state?.account?.phase });
+  const key = JSON.stringify(look.wear) + look.finish;
+  if (key === b.wearKey) return;
+  for (const it of b.apparel) it.parent?.remove(it);
+  b.mascot.userData.body.material = finishMaterial(look.finish);
+  b.apparel = dress(look.wear, {
+    head: { parent: b.mascot, pos: [0, 2.82, 0], w: 1.2 },
+    face: { parent: b.mascot, pos: [0, 2.32, 0.62], w: 1.1 },
+    neck: { parent: b.mascot, pos: [0, 1.78, 0], w: 1.1 },
+    chest: { parent: b.mascot, pos: [0.25, 1.35, 0.56], w: 1.0 },
+    back: { parent: b.mascot, pos: [0, 1.85, -0.56], w: 1.0, rot: [0, Math.PI, 0] },
+  }, bot.color);
+  b.wearKey = key;
+}
+
 function makeBuilding(bot, index, total) {
   const angle = (index / total) * Math.PI * 2 - Math.PI / 2;
   const pos = new THREE.Vector3(Math.cos(angle) * BUILD_RADIUS, 0, Math.sin(angle) * BUILD_RADIUS);
@@ -268,7 +302,12 @@ function makeBuilding(bot, index, total) {
   group.add(signObj);
 
   group.traverse((o) => { if (o.isMesh) { o.userData.botId = bot.id; clickables.push(o); } });
-  buildings.set(bot.id, { group, beam, beamMat, halo, haloMat, tag, pos, mats, hero, color, status: null });
+  // the bot itself, out front facing the vault, in its skin and apparel (skins.js)
+  const mascot = makeMascot(bot);
+  mascot.position.set(0, 1, 5.3);
+  mascot.scale.setScalar(1.5);
+  group.add(mascot);
+  buildings.set(bot.id, { group, beam, beamMat, halo, haloMat, tag, pos, mats, hero, color, status: null, mascot, apparel: [], wearKey: "" });
 }
 
 // ---------------------------------------------------------------- coins
@@ -379,6 +418,7 @@ function applyState(s) {
     b.tag.classList.toggle("dim", bot.status === "disabled");
     b.tag.classList.toggle("off", bot.status === "disabled");
     b.status = bot.status;
+    dressMascot(b, bot);
     const dark = ["disabled", "stopped", "walked"].includes(bot.status);
     b.mats.forEach((m) => (m.emissiveIntensity = dark ? 0.1 : bot.status === "off_duty" ? 0.35 : 0.6));
     b.haloMat.color.set(bot.status === "stopped" || bot.status === "walked" ? "#ff4d6d" : bot.status === "off_duty" ? "#ffd34d" : "#ffffff");
@@ -911,7 +951,7 @@ function openRoom(id) {
   el.style.setProperty("--accent", bot.color);
   document.getElementById("room-title").innerHTML = `<b>${bot.persona?.handle || bot.name}</b> <span>${bot.name} · ${bot.persona?.vibe || ""}</span>`;
   room ||= new Room(document.getElementById("room-view"));
-  if (roomBotId !== id) { room.build(bot); room.chat = []; }
+  if (roomBotId !== id) { room.build(bot, { phase: state?.account?.phase }); room.chat = []; }
   roomBotId = id;
   room.start();
   refreshRoom();
@@ -948,6 +988,14 @@ function openWorker(id) {
   renderWorker();
 }
 
+function wardrobeHtml(bot) {
+  const w = wardrobe(bot, "bot", { phase: state?.account?.phase });
+  const worn = Object.values(w.wear).map((id) => ITEMS[id].label).join(" · ");
+  const earn = w.earned.map((e) => `<div class="row"><span>${e.owned ? "✅" : "🔒"} ${ITEMS[e.item].label}</span><span>${e.need}</span></div>`).join("");
+  return `<h4 style="margin:14px 0 6px">👕 Wardrobe · ${w.title}</h4>
+    <div class="row"><span>Wearing</span><span style="text-align:right;max-width:65%">${worn}</span></div>${earn}`;
+}
+
 function renderWorker() {
   const bot = state?.bots.find((b) => b.id === openWorkerId);
   if (!bot) return;
@@ -977,6 +1025,7 @@ function renderWorker() {
     <div class="row"><span>Trades / wins</span><span>${bot.trades} / ${bot.wins}</span></div>
     ${pos}
     ${trades ? `<table style="margin-top:10px"><thead><tr><th>Time</th><th>Contract</th><th>Why</th><th>P&L</th></tr></thead><tbody>${trades}</tbody></table>` : ""}
+    ${wardrobeHtml(bot)}
     <button class="toggle ${enabled ? "off" : "on"}" data-bot="${bot.id}" data-action="${enabled ? "off" : "on"}">${enabled ? "SEND HOME" : "PUT ON SHIFT"}</button>`;
 }
 
@@ -1130,6 +1179,10 @@ function frame() {
     b.halo.rotation.z += dt * (active ? 2.5 : 0.6);
     b.halo.position.y = b.hero + 6 + Math.sin(t * 1.5 + b.pos.x) * 0.4;
     b.haloMat.opacity = b.status === "disabled" ? 0.15 : active ? 1 : 0.6;
+    // the bot out front: bounces while it's in a trade, slumps when sent home
+    b.mascot.position.y = 1 + (active ? Math.abs(Math.sin(t * 5 + b.pos.x)) * 0.5 : Math.sin(t * 1.4 + b.pos.z) * 0.06);
+    b.mascot.rotation.z = b.status === "stopped" || b.status === "disabled" ? 0.25 : 0;
+    animateApparel(b.apparel, t);
     if (b.tvFlash > 0) {
       b.tvFlash = Math.max(0, b.tvFlash - dt * 0.8);
       b.halo.scale.setScalar(1 + b.tvFlash * 0.8);

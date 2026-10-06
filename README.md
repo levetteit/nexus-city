@@ -12,6 +12,22 @@ red ones) roll down its road to **The Vault** in the middle of town.
 
 ![city](docs/city.png)
 
+## Skins and apparel (`frontend/skins.js`)
+
+Every robot has its own look, in the city (standing in front of its building), in its streamer room and on
+the space station: OG_Pointer in a backwards cap and chain, SixMinuteSage in a beanie and prayer beads,
+SPX_Scout in glasses and a bow tie, SweepQueen with cat ears and neon shades, SmallCapKid with a propeller cap;
+ULTRON wears a commander's crest, QA a hard hat, the Auditor a monocle, and so on.
+
+More apparel is **earned from real results and never taken back**:
+
+| Trading bots (lifetime P&L high-water mark) | Station crew (milestones from the audit log) |
+|---|---|
+| $100 star pin · $1,000 gold shades · $5,000 gold chain + $ pendant · funded account: funded wings · $10,000 cape · $25,000 gold crown (and a gold chassis) · $50,000 gold jetpack | First delivery: star pin · Reliable: station scarf · Veteran: gold shades · Legend: cape · Hall of Fame: gold crown |
+
+An earned item replaces the signature one in the same slot when it ranks higher. Tap **STATS** in a room (or
+a crew member on the station) for its wardrobe: what it wears and what it can still earn.
+
 ## Streamer rooms
 
 Tap any building to go inside: its bot is a little robot streamer at a desk,
