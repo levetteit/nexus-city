@@ -847,3 +847,24 @@ def test_old_etsy_goal_is_retired(tmp_path):
     u = Ultron(str(tmp_path), client=FakeClaude([opp("x")]))
     assert [g["id"] for g in u.treasury.cfg["goals"]] == ["printify-premium"]
     assert "Etsy store (~$29" not in u.store.get("missions", "M-001")["goal"]
+
+
+def test_no_api_credit_waits_instead_of_failing_jobs(tmp_path):
+    import anthropic
+    import httpx2 as httpx
+    fake = FakeClaude([opp("x")])
+    u = Ultron(str(tmp_path), client=fake)
+    u.cfg["audited"] = MON_0900.date().isoformat()
+    resp = httpx.Response(400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+
+    def broke(**kw):
+        raise anthropic.BadRequestError("Your credit balance is too low to access the Anthropic API.", response=resp,
+                                        body={"type": "error", "error": {"type": "invalid_request_error"}})
+    fake.beta.messages.create = broke
+    job = u.next_job(MON_0900)
+    assert job["kind"] == "marketing_plan"
+    u.run_job(job, now=MON_0900)
+    assert not (u.store.get("ventures", job["venture"]).get("marketing_plan") or {}).get("failed_at")   # not marked failed
+    assert u.next_job(MON_0900.replace(minute=10)) is None and "credit balance" in u.last_error
+    fake.beta.messages.create = fake.create
+    assert u.next_job(MON_0900.replace(minute=25)) == job

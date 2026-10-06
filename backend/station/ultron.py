@@ -28,11 +28,16 @@ ET = ZoneInfo("America/New_York")
 
 
 def _is_connection(exc) -> bool:
+    """Claude is out of reach for every job, not just this one: the network, the key, or no API credit left.
+    The job keeps its place and its slot; ULTRON waits and tries again."""
     try:
         import anthropic
-        return isinstance(exc, anthropic.APIConnectionError)
     except ImportError:
         return False
+    if isinstance(exc, anthropic.APIConnectionError):
+        return True
+    return isinstance(exc, anthropic.APIStatusError) and (exc.status_code in (401, 403)
+                                                          or "credit balance" in str(getattr(exc, "message", "")).lower())
 MAX_EXPERIMENTS = int(os.getenv("STARNET_STATION_EXPERIMENTS", "3"))      # live ventures besides the trading desk
 TASKS_PER_DAY = int(os.getenv("STARNET_STATION_TASKS_PER_DAY", "25"))     # agent drafting runs per ET day
 STALL_MINUTES = 30
