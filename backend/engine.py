@@ -161,4 +161,21 @@ class Engine:
                         for s, u in self.market.underlyings.items()},
             "bots": bots,
             "news": self.news.status(getattr(self.market, "now", None)) if self.news else None,
+            "weather": self.weather(),
         }
+
+    def weather(self) -> dict:
+        """The city's weather follows the market: how busy the last 30 minutes were next to the last day.
+        clear (normal) · rain (busy) · storm (very busy, or a news blackout) · fog (dead quiet)."""
+        u = self.market.underlyings.get("MNQ") or next(iter(self.market.underlyings.values()), None)
+        bars = list(getattr(u, "bars", []) or [])
+        ratio = None
+        if len(bars) >= 60:
+            recent = bars[-30:]
+            base = bars[-390:]
+            avg = lambda bs: sum(b.high - b.low for b in bs) / len(bs)
+            ratio = round(avg(recent) / avg(base), 2) if avg(base) > 0 else None
+        news = bool(self.news and self.news.status(getattr(self.market, "now", None)).get("hold"))
+        kind = ("storm" if news or (ratio or 1) >= 1.8 else "rain" if (ratio or 1) >= 1.25
+                else "fog" if (ratio or 1) <= 0.55 else "clear")
+        return {"kind": kind, "vol_ratio": ratio, "news": news}

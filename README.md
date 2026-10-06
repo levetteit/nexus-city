@@ -12,6 +12,39 @@ red ones) roll down its road to **The Vault** in the middle of town.
 
 ![city](docs/city.png)
 
+## Market weather and skyline
+
+The city's sky follows the market. Day and night follow the ET clock (dawn at 6, bright through the New York
+session, golden hour at 4:30, night after 9). The weather follows volatility: the last 30 minutes of MNQ range
+against the last day's — **storm** (lightning, heavy rain) at 1.8x or during a news hold, **rain** at 1.25x,
+**fog** when the tape is dead (0.55x or less), clear otherwise. The chip next to the fuel gauge names it.
+Each district's towers grow with its bot's best-ever profit (up to 1.8x at $16k), and the background skyline
+grows with the account's profit. Preview any sky with `/?weather=storm&hour=13`.
+
+## Payout shuttles (`frontend/shuttle.js`)
+
+Real money in flies. The Space Station now hangs over the city (tap it to go aboard). When you record a Lucid
+payout, a green shuttle lifts off from the vault and docks at the station's treasury; a store sale (Stripe,
+Etsy) comes in as a gold shuttle. On the station the same flights run from the City Dock or the shop to the
+Finance Observatory, whose panel keeps a shuttle log. Every flight is a ledger entry (`Treasury.flights()`):
+costs and paper profit never fly. Preview with `?shuttle=payout` or `?shuttle=sale`.
+
+## Skins and apparel (`frontend/skins.js`)
+
+Every robot has its own look, in the city (standing in front of its building), in its streamer room and on
+the space station: OG_Pointer in a backwards cap and chain, SixMinuteSage in a beanie and prayer beads,
+SPX_Scout in glasses and a bow tie, SweepQueen with cat ears and neon shades, SmallCapKid with a propeller cap;
+ULTRON wears a commander's crest, QA a hard hat, the Auditor a monocle, and so on.
+
+More apparel is **earned from real results and never taken back**:
+
+| Trading bots (lifetime P&L high-water mark) | Station crew (milestones from the audit log) |
+|---|---|
+| $100 star pin · $1,000 gold shades · $5,000 gold chain + $ pendant · funded account: funded wings · $10,000 cape · $25,000 gold crown (and a gold chassis) · $50,000 gold jetpack | First delivery: star pin · Reliable: station scarf · Veteran: gold shades · Legend: cape · Hall of Fame: gold crown |
+
+An earned item replaces the signature one in the same slot when it ranks higher. Tap **STATS** in a room (or
+a crew member on the station) for its wardrobe: what it wears and what it can still earn.
+
 ## Streamer rooms
 
 Tap any building to go inside: its bot is a little robot streamer at a desk,
@@ -65,6 +98,7 @@ backend/
   backtest.py    replay real 1m candles through the bots; walk-forward optimizer
   fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
   live.py        live paper trading on real candles (Yahoo, or real-time via TradingView), with trade logs
+  scale.py       the Lucid scale plan: accounts by stage, next payouts, when to buy the next evaluation
   execution.py   real orders to your Lucid accounts via TradersPost (armed from the city, with safety checks)
   notify.py      phone notifications for every trade (web push to the home-screen app, or ntfy)
 station/       the Space Station: ULTRON, the Research Station, ventures, approvals, the shared treasury
@@ -322,6 +356,19 @@ per cycle of 5+ days. The way to scale is more accounts and fast, steady $150+
 days, not bigger days.
 
     python -m backend.backtest data/*_1m.csv --payouts
+
+### Scale plan (`backend/scale.py`)
+
+**📈 SCALE PLAN** in the account panel shows every account by stage (in evaluation, funded, payout ready,
+moved to live, failed), the next milestone for each with an estimated date, the payouts coming (your 90%),
+and when the treasury can buy the next evaluation. Estimates use $400/day (the latest 22-day backtest on real
+candles) until there are 10 traded paper days, then your own average, with ~55% of days making $150+.
+
+Set what Lucid charges you for an evaluation and your account limit with the button in the panel
+(`POST /api/scale`). From then on the next evaluation is a one-time treasury goal: once the pool covers it on
+top of a month of bills, ULTRON puts **Buy: Lucid evaluation #N** in your approvals. Nothing is bought for you:
+you buy it at Lucid and add it under 👥. In the simulation the plan reads the simulated account and never
+asks for money.
 
 ### Your Lucid accounts (`backend/accounts.py`)
 

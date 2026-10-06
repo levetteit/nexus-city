@@ -156,7 +156,48 @@ class Treasury:
             self._save_cfg()
         return len(payouts) - n
 
+    def set_eval_goal(self, goal: Optional[dict]) -> None:
+        """The scale plan's one-time goal for the next Lucid evaluation (backend/scale.py): one at a time."""
+        keep = [g for g in self.cfg["goals"] if not g["id"].startswith("lucid-eval-") or (goal and g["id"] == goal["id"])]
+        if goal and not any(g["id"] == goal["id"] for g in keep):
+            keep.append(goal)
+        elif goal:
+            keep = [goal if g["id"] == goal["id"] else g for g in keep]   # the price may have changed
+        if keep != self.cfg["goals"]:
+            self.cfg["goals"] = keep
+            self._save_cfg()
+
+    def set_scale(self, eval_price: Optional[float], max_accounts: Optional[int]) -> dict:
+        sc = self.cfg.setdefault("scale", {})
+        if eval_price is not None:
+            if eval_price < 0 or eval_price > 5000:
+                raise ValueError("evaluation price must be $0-$5,000")
+            sc["eval_price"] = round(float(eval_price), 2) or None
+        if max_accounts is not None:
+            if not 1 <= int(max_accounts) <= 20:
+                raise ValueError("account limit must be 1-20")
+            sc["max_accounts"] = int(max_accounts)
+        self._save_cfg()
+        return sc
+
     # ---------------------------------------------------------------- reading
+    def flights(self, n: int = 6) -> list[dict]:
+        """The latest real money in, as shuttle flights: a Lucid payout flies from the city's vault up to the
+        station's treasury, a store sale docks at the treasury from the marketplace. Newest first."""
+        key = (len(self.entries), n)
+        if getattr(self, "_flights", (None,))[0] == key:   # the city asks every tick; the ledger rarely changes
+            return self._flights[1]
+        out = []
+        for e in reversed(self.entries):
+            if e["kind"] == "lucid_payout" or (e["kind"] == "income" and e.get("source") in ("stripe", "owner")):
+                out.append({"id": (e.get("hash") or e["at"])[:12], "at": e["at"], "amount": round(e["amount"], 2),
+                            "kind": "payout" if e["kind"] == "lucid_payout" else "sale", "unit": e["unit"],
+                            "note": e["note"][:80]})
+                if len(out) >= n:
+                    break
+        self._flights = (key, out)
+        return out
+
     def ai_spent(self, month: Optional[str] = None) -> float:
         month = month or datetime.now(timezone.utc).strftime("%Y-%m")
         return round(sum(e["amount"] for e in self.entries if e["kind"] == "ai_usage" and e["at"].startswith(month)

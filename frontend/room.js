@@ -3,6 +3,7 @@
 // emotions when it wins, loses, waits or gets sent home.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { wardrobe, dress, finishMaterial, animateApparel } from "./skins.js";
 
 const W = 640, H = 400;   // monitor canvas resolution
 
@@ -68,8 +69,9 @@ export class Room {
   }
 
   // ---------------------------------------------------------------- build
-  build(bot) {
+  build(bot, ctx = {}) {
     this.bot = bot;
+    this.look = wardrobe(bot, "bot", ctx);
     const p = bot.persona || {};
     const color = new THREE.Color(bot.color);
     const tier = (this.tier = tierOf(bot.career_best));
@@ -209,7 +211,15 @@ export class Room {
     scene.add(posterMesh);
 
     // the robot
-    this.robot = this.makeRobot(color, has("gold"));
+    this.robot = this.makeRobot(color, has("gold"), this.look.finish);
+    // apparel: signature look + what this bot has earned (skins.js)
+    this.apparel = dress(this.look.wear, {
+      head: { parent: this.head, pos: [0, 0.24, 0], w: 0.62 },
+      face: { parent: this.head, pos: [0, 0.04, 0.27], w: 0.62 },
+      neck: { parent: this.robot, pos: [0, 0.82, 0], w: 0.6, rot: [0, Math.PI, 0] },
+      chest: { parent: this.robot, pos: [0.13, 0.62, -0.3], w: 0.6, rot: [0, Math.PI, 0] },
+      back: { parent: this.robot, pos: [0, 0.85, 0.3], w: 0.6 },
+    }, bot.color);
     this.robot.position.set(0, 0.62, 0.25);
     this.robot.scale.setScalar(0.82);
     scene.add(this.robot);
@@ -380,11 +390,9 @@ export class Room {
     }
   }
 
-  makeRobot(color, gold = false) {
+  makeRobot(color, gold = false, finish = "chrome") {
     const r = new THREE.Group();
-    const metal = gold
-      ? new THREE.MeshStandardMaterial({ color: "#ffcf40", metalness: 0.95, roughness: 0.2, emissive: "#5a3d00", emissiveIntensity: 0.3 })
-      : new THREE.MeshStandardMaterial({ color: "#d9dcff", metalness: 0.4, roughness: 0.35 });
+    const metal = finishMaterial(gold ? "gold" : finish);
     const accent = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6 });
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.35, 8, 16), metal);
     body.position.y = 0.45;
@@ -754,6 +762,7 @@ export class Room {
     if (Math.random() < dt / 2) this.drawChat();
     this.drawFace(mood, t);
 
+    animateApparel(this.apparel || [], t);
     // body language
     const r = this.robot, [la, ra] = this.arms;
     const turn = ["ecstatic", "upset", "hyped", "chill", "defeated"].includes(mood);

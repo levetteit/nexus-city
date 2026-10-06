@@ -7,6 +7,8 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { wardrobe, dress, finishMaterial, animateApparel, ITEMS } from "./skins.js";
+import { Flight, newFlights } from "./shuttle.js";
 
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -324,8 +326,8 @@ const agents = new Map();
 function makeRobot(a) {
   const big = a.id === "A-001", bot = a.kind === "bot";
   const g = new THREE.Group();
-  const bodyColor = big ? "#3a0f1a" : bot ? "#4a3a12" : "#2c3a5e";
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 0.9, 6, 12), new THREE.MeshStandardMaterial({ color: bodyColor, metalness: 0.6, roughness: 0.35 }));
+  const look = lookFor(a);
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 0.9, 6, 12), finishMaterial(look.finish));
   body.position.y = 1.1;
   g.add(body);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.62, 20, 14), new THREE.MeshStandardMaterial({ color: "#d9e2ff", metalness: 0.4, roughness: 0.3 }));
@@ -355,7 +357,29 @@ function makeRobot(a) {
   lab.position.y = big ? 1.8 : 3.6;
   g.add(lab);
   scene.add(g);
-  return { g, body, visor, jet, halo, el, target: new THREE.Vector3(), slot: 0, pet: null, data: a };
+  const r = { g, body, visor, jet, halo, el, target: new THREE.Vector3(), slot: 0, pet: null, data: a, apparel: [], wearKey: "" };
+  wear(r, a);
+  return r;
+}
+
+// skins.js: the trading bots on the dock wear their city looks; the crew wear theirs plus what they've earned
+function lookFor(a) {
+  return a.kind === "bot" ? wardrobe({ id: a.id.replace(/^BOT-/, "") }, "bot") : wardrobe(a, "agent");
+}
+function wear(r, a) {
+  const look = lookFor(a);
+  const key = JSON.stringify(look.wear) + look.finish;
+  if (key === r.wearKey) return;
+  for (const it of r.apparel) it.parent?.remove(it);
+  r.body.material = finishMaterial(look.finish);
+  r.apparel = dress(look.wear, {
+    head: { parent: r.g, pos: [0, 2.82, 0], w: 1.2 },
+    face: { parent: r.g, pos: [0, 2.32, 0.62], w: 1.1 },
+    neck: { parent: r.g, pos: [0, 1.78, 0], w: 1.1 },
+    chest: { parent: r.g, pos: [0.25, 1.35, 0.56], w: 1.0 },
+    back: { parent: r.g, pos: [0, 1.85, -0.56], w: 1.0, rot: [0, Math.PI, 0] },
+  }, a.id === "A-001" ? "#ff2a4d" : "#5ee7ff");
+  r.wearKey = key;
 }
 
 function moduleFor(a) {
@@ -396,6 +420,7 @@ function syncAgents(list) {
     r.el.innerHTML = (working ? `<span class="task">${esc(String(a.current_task || "").slice(0, 60))}</span><br>` : "")
       + `${esc(a.name)}${badge}`;
     syncPet(r, a);
+    wear(r, a);
   }
   // modules' agent counts
   for (const mod of mods.values()) mod.busy = 0;
@@ -462,6 +487,17 @@ function courier(from, to, color) {   // a glowing packet flying between modules
   scene.add(m);
   fx.push(m);
 }
+// payout shuttles (shuttle.js): a Lucid payout flies in from the City Dock, a sale from the shop that made it
+const flightsSeen = new Set();
+const flying = [];
+function launchFlights(flights) {
+  for (const f of newFlights(flightsSeen, flights)) {
+    const src = f.kind === "payout" ? "citydock" : /etsy|printify/i.test(f.note || "") ? "marketplace" : "revenue";
+    const from = mods.get(src).pos.clone().setY(4), to = mods.get("finance").pos.clone().setY(4);
+    flying.push(new Flight(scene, f.kind, f.amount, from, to, { scale: 1.1, height: 14, seconds: 6,
+      onArrive: () => burst(to.clone().setY(3), f.kind === "payout" ? "#3dffa2" : "#ffd84d", 36) }));
+  }
+}
 function toast(text, color = "#5ee7ff") {
   const t = document.createElement("div");
   t.className = "toast";
@@ -482,7 +518,7 @@ function playEvents(events) {
       mk.ray.material.opacity = 0.9;
       toast(`📡 ${e.summary}`, "#ff7ad9");
     } else if (k.startsWith("money.income") || k === "lead.won" || k.startsWith("money.lucid")) {
-      courier(mods.get("revenue").pos, mods.get("finance").pos, "#ffd84d");
+      if (k === "lead.won") courier(mods.get("revenue").pos, mods.get("finance").pos, "#ffd84d");   // money in flies as a shuttle
       burst(mods.get("finance").pos.clone().setY(3), "#ffd84d", 24);
       toast(`💵 ${e.summary}`, "#ffd84d");
     } else if (k === "shop.listed") {
@@ -538,6 +574,7 @@ async function load() {
   syncPlanets(S.ventures);
   syncAgents(S.agents);
   playEvents(S.events);
+  launchFlights(S.flights);
   // module labels
   const count = (id) => S.agents.filter((a) => moduleFor(a) === id).length;
   const sub = {
@@ -635,6 +672,7 @@ function panelModule(id) {
     <h2>For you to post</h2>${list(S.outbox.manual.slice(0, 5).map((a) => `${esc(a.payload.platform || a.kind)}: ${esc((a.payload.text || a.payload.subject || "").slice(0, 80))}`))}`;
   else if (id === "finance") { const t = S.treasury; body = `<div class="kv"><div>Pool</div><div>${money(t.pool)}</div><div>Runway</div><div>${t.runway_months ?? "—"} months</div><div>City net</div><div>${money(t.city.net)}</div><div>Station net</div><div>${money(t.station.net)}</div><div>AI this month</div><div>${money(t.ai.spent_month)} / ${money(t.ai.budget)}</div></div>
     <h2>Goals</h2>${list(t.goals.map((g) => `${esc(g.name)} · ${Math.round(g.progress * 100)}%`))}
+    <h2>Shuttle log</h2>${list((S.flights || []).map((f) => `${f.kind === "payout" ? "🚀 payout from the City" : "🛍️ sale"} <b>+${money(f.amount)}</b><div class="m">${esc(f.note)} · ${ago(f.at)}</div>`))}
     <h2>Recent money</h2>${list(t.recent.filter((e) => e.kind !== "ai_usage").slice(0, 6).map((e) => `${["income", "lucid_payout"].includes(e.kind) ? "+" : "−"}${money(e.amount)} · ${esc(e.note)}<div class="m">${ago(e.at)}</div>`))}`; }
   else if (id === "legal") body = `<div class="kv"><div>In QA</div><div>${S.outbox.in_qa}</div><div>Stopped by QA</div><div>${S.outbox.rejected.length}</div><div>Sent</div><div>${S.outbox.sent.length}</div></div>
     <h2>Recent QA calls</h2>${list(S.events.filter((e) => e.kind.startsWith("action.qa_")).slice(0, 6).map((e) => esc(e.summary)))}`;
@@ -657,6 +695,13 @@ function panelModule(id) {
   else if (id === "citydock") body = `<p>The trading city: Venture #1. The bots trade MNQ on the Lucid account; their profit and payouts fund the station.</p><div class="actions"><a class="btn primary" href="/">Go to the city</a></div>`;
   show(`<div class="label">${esc(mod.name.toUpperCase())}</div><h1>${esc(mod.name)}</h1>${body}<h2>Crew here</h2>${crew.length ? crew.map(agentRow).join("") : `<div class="muted small">Nobody here right now.</div>`}`, () => panelModule(id));
 }
+function wardrobePanel(a) {
+  const w = lookFor(a);
+  const worn = Object.values(w.wear).map((id) => ITEMS[id].label).join(" · ");
+  const earn = a.kind === "bot" ? "" : w.earned.map((e) => `<div class="row">${e.owned ? "✅" : "🔒"} ${esc(ITEMS[e.item].label)} <span class="muted small">· ${esc(e.need)}</span></div>`).join("");
+  return `<h2>Wardrobe${w.title ? " · " + esc(w.title) : ""}</h2><div class="row">${esc(worn)}</div>${earn}`;
+}
+
 async function panelAgent(id) {
   const a = S.agents.find((x) => x.id === id);
   if (!a) return;
@@ -667,6 +712,7 @@ async function panelAgent(id) {
     <div>Last delivered</div><div>${esc(a.last_output || "—")}</div><div>Jobs done</div><div>${a.work || a.tasks_done || 0}</div>
     <div>Specialty</div><div>${esc(a.specialty || "")}</div>${pnl ? `<div>Cost to run</div><div>${money(pnl.ai_costs)} AI</div>` : ""}</div>
     <h2>Milestones</h2>${(a.achievements || []).length ? `<div class="badges">${a.achievements.map((m) => `<span class="badgechip">★ ${esc(m.title)}</span>`).join("")}</div>` : `<div class="muted small">First milestone at 1 job.</div>`}
+    ${wardrobePanel(a)}
     <h2>Pet</h2>${a.pet ? `<div class="row">🐾 <b>${esc(a.pet.name)}</b> the ${esc(a.pet.kind)}</div>` : `<div class="muted small">A robo-cat joins at 5 jobs.</div>`}
     <div class="actions"><a class="btn" href="station.html#/crew">Open in the board</a></div>`, () => panelAgent(id));
 }
@@ -736,6 +782,7 @@ function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
   controls.update();
+  for (const r of agents.values()) if (r.apparel.length) animateApparel(r.apparel, clock.elapsedTime);
   document.body.classList.toggle("far", camera.position.distanceTo(controls.target) > 170);   // far away: module names only
   if (flight) {
     flight.t = Math.min(1, flight.t + dt / 1.4);
@@ -790,6 +837,7 @@ function frame() {
     }
   }
   // effects
+  for (let i = flying.length - 1; i >= 0; i--) if (!flying[i].update(dt)) flying.splice(i, 1);
   for (let i = fx.length - 1; i >= 0; i--) {
     const m = fx[i];
     if (m.userData.to) {

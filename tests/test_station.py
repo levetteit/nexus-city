@@ -253,6 +253,61 @@ def test_simulated_payouts_never_reach_the_treasury(ultron):
     assert u.treasury.summary()["pool"] == 0
 
 
+def test_shuttle_flights_are_real_money_in(ultron):
+    u, _ = ultron
+    t = u.treasury
+    assert t.flights() == []
+    t.sync_payouts(NS(payouts=[[3, 1000.0]]))
+    t.book("ai_usage", 0.4, "station", "api_usage", "a call")                 # costs never fly
+    t.book("expense", 9, "station", "owner", "domain")
+    t.book_stripe_sale({"id": "cs_test_abc12345", "payment_status": "paid", "amount_total": 2700, "metadata": {}})
+    f = t.flights()
+    assert [(x["kind"], x["amount"]) for x in f] == [("sale", 27.0), ("payout", 900.0)]
+    assert len({x["id"] for x in f}) == 2
+    assert t.flights() is f                                                    # cached until the ledger grows
+    assert u.overview()["flights"] == f
+
+
+def test_scale_plan_and_next_evaluation_goal(ultron):
+    from datetime import date
+    from backend import scale
+    u, _ = ultron
+    t = u.treasury
+    accts = [{"id": "a", "name": "Eval", "phase": "evaluation", "target": 3000, "profit": 1200},
+             {"id": "b", "name": "Funded", "phase": "funded", "profit": 800, "payout_days": 5, "cycle_days": 2,
+              "payouts": 0, "max_payouts": 5, "payout_eligible": False},
+             {"id": "c", "name": "Ready", "phase": "funded", "profit": 2500, "payout_eligible": True, "safe_payout": 1200,
+              "payouts": 1, "max_payouts": 5},
+             {"id": "d", "name": "Blown", "phase": "failed"}]
+    p = scale.plan(accts, t.summary(), {}, None, date(2026, 10, 6))   # a Tuesday
+    stages = {r["id"]: r["stage"] for r in p["accounts"]}
+    assert stages == {"a": "evaluation", "b": "funded", "c": "payout ready", "d": "failed"}
+    a = p["accounts"][0]
+    assert a["left"] == 1800 and a["eta_days"] == 5 and a["eta"] == "2026-10-13"      # 5 trading days, over the weekend
+    assert p["accounts"][1]["eta_days"] == 6 and p["accounts"][1]["payout"] == 1600   # 3 qualifying days at ~55%
+    assert [c["amount"] for c in p["coming"]] == [1080.0, 1440.0]                      # the trader's 90%, soonest first
+    assert scale.eval_goal({}, p) is None and "Set the evaluation price" in p["next_eval"]["text"]
+    # a price: short of it until a payout lands, then a one-time goal ULTRON asks the owner to approve
+    cfg = t.set_scale(150, 5)
+    p = scale.plan(accts, t.summary(), cfg, None, date(2026, 10, 6))
+    assert not p["next_eval"]["can_fund"] and p["next_eval"]["eta"] == "2026-10-06"
+    t.set_eval_goal(scale.eval_goal(cfg, p))
+    t.sync_payouts(NS(payouts=[[3, 1000.0]]))
+    p = scale.plan(accts, t.summary(), cfg, None, date(2026, 10, 6))
+    assert p["next_eval"]["can_fund"]
+    u.tick(now=MON_0900)
+    ask = [a for a in u.store.find("approvals", kind="fund_goal") if a["payload"]["goal"] == "lucid-eval-5"]
+    assert len(ask) == 1 and ask[0]["cost"] == 150 and not ask[0]["reversible"] and "/month" not in ask[0]["action"]
+    # the limit stops the plan (and drops the goal); the paper pace takes over after 10 traded days
+    cfg = t.set_scale(None, 3)
+    p = scale.plan(accts, t.summary(), cfg, {"days": 12, "avg_day": 250.0}, date(2026, 10, 6))
+    assert "limit" in p["next_eval"]["text"] and p["pace"]["avg_day"] == 250.0
+    t.set_eval_goal(scale.eval_goal(cfg, p))
+    assert not any(g["id"].startswith("lucid-eval-") for g in t.cfg["goals"])
+    with pytest.raises(ValueError):
+        t.set_scale(-1, None)
+
+
 def test_ai_budget_cap_stops_research(ultron, monkeypatch):
     u, fake = ultron
     monkeypatch.setattr("backend.station.economy.AI_BUDGET", 5.0)

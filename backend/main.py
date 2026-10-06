@@ -197,7 +197,8 @@ def state() -> dict:
         cr = station.credits or {}
         snap["station"] = {"coordinating": station.busy, "approvals": len(station.store.find("approvals", status="pending")),
                            "owner_tasks": len(station.store.find("tasks", status="waiting_owner")),
-                           "credits": {"state": cr.get("state", "unknown"), "remaining": cr.get("remaining")}}
+                           "credits": {"state": cr.get("state", "unknown"), "remaining": cr.get("remaining")},
+                           "flights": station.treasury.flights()}
     if MODE == "live":
         snap["delay_min"] = round(engine.market.delay_minutes, 1)
         snap["feed"] = engine.market.feed
@@ -226,6 +227,8 @@ async def run_station() -> None:
     while True:
         try:
             job = station.tick(engine, real_account=MODE == "live")
+            if MODE == "live":
+                _scale_plan()   # keeps the next-evaluation goal in step with the accounts and the treasury
             if job:
                 await asyncio.to_thread(station.run_job, job)
         except Exception as exc:   # the station must never take the city down
@@ -595,6 +598,42 @@ def _book():
     if book is None:
         raise HTTPException(503, "accounts are only tracked in live mode")
     return book
+
+
+def _scale_plan() -> dict:
+    """The Lucid scale plan (scale.py): the 👥 accounts, or the main account while the book is empty."""
+    from . import scale
+    if book and book.accounts:
+        accounts = book.status()["accounts"]
+    else:
+        accounts = [{"id": "main", "name": "Main account", **engine.account.snapshot()}]
+    tre = station.treasury if station else None
+    cfg = (tre.cfg.get("scale") if tre else None) or {}
+    edge = scorecard.edge(engine.account) if scorecard else None
+    p = scale.plan(accounts, tre.summary() if tre else None, cfg, edge, datetime.now(ET).date())
+    if tre and MODE == "live":   # simulated accounts never ask for real money
+        tre.set_eval_goal(scale.eval_goal(cfg, p))
+    p["mode"] = MODE
+    return p
+
+
+@app.get("/api/scale")
+def scale_plan() -> dict:
+    return _scale_plan()
+
+
+@app.post("/api/scale")
+async def scale_set(request: Request) -> dict:
+    """Your numbers for the plan: {"eval_price": 99, "max_accounts": 5} (the price Lucid charges you, your limit)."""
+    if not station:
+        raise HTTPException(503, "the station isn't running")
+    b = await request.json()
+    try:
+        station.treasury.set_scale(None if b.get("eval_price") is None else float(b["eval_price"]),
+                                   None if b.get("max_accounts") is None else int(b["max_accounts"]))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    return _scale_plan()
 
 
 @app.get("/api/accounts")

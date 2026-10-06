@@ -41,3 +41,13 @@ def test_feed_rejects_wrong_secret_and_explains(client):
 def test_ticker_names(client, ticker, sym):
     _, main = client
     assert main.normalize_symbol(ticker) == sym
+
+
+
+def test_scale_plan(client):
+    c, main = client
+    c = TestClient(main.app)
+    c.get("/", auth=("x", "pw"))
+    p = c.get("/api/scale").json()
+    assert p["mode"] == "sim" and p["accounts"][0]["stage"] == "evaluation"
+    assert p["next_eval"]["can_fund"] is False and "Set the evaluation price" in p["next_eval"]["text"]

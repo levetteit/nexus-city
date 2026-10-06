@@ -7,6 +7,8 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { Room, moodEmoji, tierOf, GADGETS } from "./room.js";
 import { ChartView } from "./chart.js";
+import { wardrobe, ITEMS, dress, finishMaterial, animateApparel } from "./skins.js";
+import { Flight, newFlights } from "./shuttle.js";
 
 // ---------------------------------------------------------------- setup
 const app = document.getElementById("app");
@@ -48,7 +50,8 @@ const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
-scene.add(new THREE.HemisphereLight("#8f7bff", "#120838", 0.9));
+const hemi = new THREE.HemisphereLight("#8f7bff", "#120838", 0.9);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight("#c9b8ff", 1.2);
 sun.position.set(30, 60, 20);
 scene.add(sun);
@@ -121,12 +124,13 @@ const runLights = new THREE.Group();
 }
 scene.add(runLights);
 
-// background skyline (instanced for speed)
+// background skyline (instanced for speed); it grows with the account's profit
+let skyline;
 {
   const count = 420;
   const mat = towerMaterial(3, 6, 0.42, 0.35);
   mat.emissiveIntensity = 0.3;
-  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, count);
+  const mesh = skyline = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, count);
   const m = new THREE.Matrix4();
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
@@ -174,6 +178,39 @@ const buildings = new Map(); // bot id -> { group, beam, halo, tag, pos, mats }
 const clickables = [];
 const BUILD_RADIUS = 23;
 
+function makeMascot(bot) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 0.9, 6, 12), finishMaterial("chrome"));
+  body.position.y = 1.1;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.62, 20, 14), new THREE.MeshStandardMaterial({ color: "#d9e2ff", metalness: 0.4, roughness: 0.3 }));
+  head.position.y = 2.25;
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.28, 0.2), new THREE.MeshStandardMaterial({ color: bot.color, emissive: bot.color, emissiveIntensity: 2 }));
+  visor.position.set(0, 2.3, 0.5);
+  const pick = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 3.2, 8), new THREE.MeshBasicMaterial({ visible: false }));
+  pick.position.y = 1.6;
+  pick.userData.botId = bot.id;
+  clickables.push(pick);
+  g.add(body, head, visor, pick);
+  g.userData.body = body;
+  return g;
+}
+
+function dressMascot(b, bot) {
+  const look = wardrobe(bot, "bot", { phase: state?.account?.phase });
+  const key = JSON.stringify(look.wear) + look.finish;
+  if (key === b.wearKey) return;
+  for (const it of b.apparel) it.parent?.remove(it);
+  b.mascot.userData.body.material = finishMaterial(look.finish);
+  b.apparel = dress(look.wear, {
+    head: { parent: b.mascot, pos: [0, 2.82, 0], w: 1.2 },
+    face: { parent: b.mascot, pos: [0, 2.32, 0.62], w: 1.1 },
+    neck: { parent: b.mascot, pos: [0, 1.78, 0], w: 1.1 },
+    chest: { parent: b.mascot, pos: [0.25, 1.35, 0.56], w: 1.0 },
+    back: { parent: b.mascot, pos: [0, 1.85, -0.56], w: 1.0, rot: [0, Math.PI, 0] },
+  }, bot.color);
+  b.wearKey = key;
+}
+
 function makeBuilding(bot, index, total) {
   const angle = (index / total) * Math.PI * 2 - Math.PI / 2;
   const pos = new THREE.Vector3(Math.cos(angle) * BUILD_RADIUS, 0, Math.sin(angle) * BUILD_RADIUS);
@@ -197,6 +234,8 @@ function makeBuilding(bot, index, total) {
     [0, 0, 4, hero], [-3.2, 2.6, 3, hero * 0.55], [3.0, 2.4, 3.2, hero * 0.65],
     [-2.8, -2.8, 2.8, hero * 0.4], [3.1, -2.9, 2.6, hero * 0.35],
   ];
+  const towersG = new THREE.Group();   // grows taller with the bot's best-ever day (career_best)
+  group.add(towersG);
   towers.forEach(([x, z, w, h], i) => {
     const mat = towerMaterial(w, h, seed + i * 0.31, 0.6);
     mats.push(mat);
@@ -206,13 +245,13 @@ function makeBuilding(bot, index, total) {
       const seg = Math.min(remaining, Math.max(3, h * 0.45));
       const m = new THREE.Mesh(new THREE.BoxGeometry(width, seg, width), mat);
       m.position.set(x, y + seg / 2, z);
-      group.add(m);
+      towersG.add(m);
       y += seg; remaining -= seg; width *= 0.78;
     }
     if (i === 0) {
       const spire = new THREE.Mesh(new THREE.ConeGeometry(0.4, 4, 8), new THREE.MeshBasicMaterial({ color }));
       spire.position.set(x, y + 2, z);
-      group.add(spire);
+      towersG.add(spire);
     }
   });
 
@@ -268,7 +307,13 @@ function makeBuilding(bot, index, total) {
   group.add(signObj);
 
   group.traverse((o) => { if (o.isMesh) { o.userData.botId = bot.id; clickables.push(o); } });
-  buildings.set(bot.id, { group, beam, beamMat, halo, haloMat, tag, pos, mats, hero, color, status: null });
+  // the bot itself, out front facing the vault, in its skin and apparel (skins.js)
+  const mascot = makeMascot(bot);
+  mascot.position.set(0, 1, 5.3);
+  mascot.scale.setScalar(1.5);
+  group.add(mascot);
+  buildings.set(bot.id, { group, beam, beamMat, halo, haloMat, tag, label, labelY: label.position.y, pos, mats, hero, color, status: null,
+    mascot, apparel: [], wearKey: "", towersG, grow: 1, growTo: 1 });
 }
 
 // ---------------------------------------------------------------- coins
@@ -343,6 +388,59 @@ function updateCoins(dt) {
   }
 }
 
+// ---------------------------------------------------------------- the station in the sky, and payout shuttles
+// The Space Station hangs over the city (tap it to go there). Real money in flies to it as shuttles:
+// a Lucid payout lifts off from the vault, a store sale comes in from beyond the skyline (shuttle.js).
+const skyStation = new THREE.Group();
+{
+  const metal = new THREE.MeshStandardMaterial({ color: "#c9d2ff", metalness: 0.4, roughness: 0.4, emissive: "#3a3f8a", emissiveIntensity: 0.5 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(7, 0.7, 10, 48), metal);
+  ring.rotation.x = Math.PI / 2;
+  skyStation.add(ring);
+  const lights = new THREE.Mesh(new THREE.TorusGeometry(7, 0.18, 6, 48), new THREE.MeshBasicMaterial({ color: "#5ee7ff" }));
+  lights.rotation.x = Math.PI / 2;
+  lights.position.y = 0.6;
+  skyStation.add(lights);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(2.2, 20, 14), new THREE.MeshStandardMaterial({ color: "#ff3b5c", emissive: "#ff1f4b", emissiveIntensity: 2.2 }));
+  skyStation.add(core);
+  for (let i = 0; i < 4; i++) {
+    const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 7, 6), metal);
+    spoke.rotation.z = Math.PI / 2;
+    spoke.rotation.y = (i / 4) * Math.PI;
+    skyStation.add(spoke);
+  }
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 9, 6), metal);
+  skyStation.add(mast);
+  skyStation.userData.lights = lights.material;
+  skyStation.position.set(-38, 32, -52);
+  skyStation.traverse((o) => { if (o.isMesh) o.userData.station = true; });
+  scene.add(skyStation);
+}
+let stationPulse = 0;
+const flightsSeen = new Set();
+const flying = [];
+function launchFlights(s) {
+  for (const f of newFlights(flightsSeen, s.station?.flights)) {
+    const payout = f.kind === "payout";
+    const a = Math.random() * Math.PI * 2;
+    const from = payout ? new THREE.Vector3(0, 9, 0) : new THREE.Vector3(Math.cos(a) * 200, 35, Math.sin(a) * 200);
+    flying.push(new Flight(scene, f.kind, f.amount, from, skyStation.position.clone().setY(skyStation.position.y - 2),
+      { scale: 1.6, height: payout ? 14 : 10, seconds: payout ? 8 : 7, onArrive: () => {
+        stationPulse = 1;
+        feed(`${payout ? "🚀" : "🛍️"} <b>$${Math.round(f.amount).toLocaleString()}</b> ${payout ? "payout docked at the station treasury" : "sale docked at the station treasury"}`, "win");
+      } }));
+    if (payout) vaultPulse = 1;
+  }
+}
+function updateFlights(dt, t) {
+  for (let i = flying.length - 1; i >= 0; i--) if (!flying[i].update(dt)) flying.splice(i, 1);
+  stationPulse = Math.max(0, stationPulse - dt * 0.6);
+  skyStation.rotation.y += dt * 0.12;
+  skyStation.position.y = 32 + Math.sin(t * 0.4) * 1.2;
+  skyStation.scale.setScalar(1 + stationPulse * 0.15);
+  skyStation.userData.lights.color.set(stationPulse > 0.05 ? "#3dffa2" : "#5ee7ff");
+}
+
 // ---------------------------------------------------------------- state -> visuals
 let state = null;
 let openWorkerId = null;
@@ -379,6 +477,8 @@ function applyState(s) {
     b.tag.classList.toggle("dim", bot.status === "disabled");
     b.tag.classList.toggle("off", bot.status === "disabled");
     b.status = bot.status;
+    dressMascot(b, bot);
+    b.growTo = Math.min(1.8, Math.max(1, 1 + ((bot.career_best || 0) / 10000) * 0.5));
     const dark = ["disabled", "stopped", "walked"].includes(bot.status);
     b.mats.forEach((m) => (m.emissiveIntensity = dark ? 0.1 : bot.status === "off_duty" ? 0.35 : 0.6));
     b.haloMat.color.set(bot.status === "stopped" || bot.status === "walked" ? "#ff4d6d" : bot.status === "off_duty" ? "#ffd34d" : "#ffffff");
@@ -403,6 +503,8 @@ function applyState(s) {
     .join("");
 
   renderAccount(s.account);
+  applyWeather(s);
+  launchFlights(s);
   if (openWorkerId) renderWorker();
 }
 
@@ -521,6 +623,7 @@ function renderAccount(a) {
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
     ${state.mode === "live" ? `<button class="reports-btn" data-reports>📒 DAILY REPORTS</button>` : ""}
     ${state.accounts ? `<button class="desk-btn" data-accounts>👥 MY LUCID ACCOUNTS (${state.accounts.count})${state.accounts.payouts_ready ? ` · ${fmt(state.accounts.payouts_ready)} READY` : ""}</button>` : ""}
+    <button class="desk-btn" data-scale>📈 SCALE PLAN: NEXT PAYOUTS & ACCOUNTS</button>
     ${state.mode === "live" ? `<button class="desk-btn" data-signals>🎯 SIGNAL CHECK VS. YOUR INDICATOR</button>` : ""}
     ${deskRow(state)}
     ${scoreRows(state)}
@@ -692,6 +795,38 @@ async function openAccounts() {
       <div><b>${fmt(d.paid_out * 0.9)}</b><small>you've kept (90%)</small></div></div>
     ${cards || `<p class="note">Add each Lucid account you buy. The bots' trades are applied to every account, so you can see each one's drawdown room, evaluation progress and payouts. Give an account its own TradersPost webhook and accounts that must stop (target reached, daily stop, close to the MLL) are left out of new trades automatically.</p>`}
     <button class="add" data-acct="add">＋ ADD A LUCID ACCOUNT</button>`;
+}
+
+// ---------------------------------------------------------------- scale plan (backend/scale.py)
+let scaleData = null;
+const STAGE_ICON = { evaluation: "🎯", passing: "✅", funded: "💼", "payout ready": "💸", live: "🏁", failed: "✖" };
+async function openScale() {
+  const panel = document.getElementById("scale"), body = document.getElementById("scale-body");
+  panel.classList.remove("hidden");
+  try { scaleData = await (await fetch("/api/scale")).json(); } catch { body.innerHTML = `<p class="note">scale plan unavailable</p>`; return; }
+  const d = scaleData, n = d.next_eval;
+  const day = (iso) => iso ? new Date(iso + "T12:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : "—";
+  const lane = (stage, label) => {
+    const rows = d.accounts.filter((a) => a.stage === stage);
+    return rows.length ? `<div class="lane"><h5>${STAGE_ICON[stage]} ${label} <small>${rows.length}</small></h5>${rows.map((a) => `
+      <div class="card ${stage.replace(" ", "-")}"><div class="row"><b>${esc(a.name)}</b><span>${a.eta ? day(a.eta) : ""}</span></div>
+      <div class="row"><span>${esc(a.next)}</span></div>
+      ${stage === "evaluation" ? `<div class="bar"><i style="width:${Math.max(0, Math.min(100, (a.profit / (a.profit + a.left)) * 100))}%"></i></div>` : ""}
+      ${a.paid_out ? `<div class="row"><span class="muted">paid out</span><span>${fmt(a.paid_out)} (${a.payouts}/${a.max_payouts ?? "∞"})</span></div>` : ""}</div>`).join("")}</div>` : "";
+  };
+  body.innerHTML = `
+    ${d.mode !== "live" ? `<p class="note">Simulation: this plan uses the simulated account. In live mode it reads your 👥 accounts.</p>` : ""}
+    <div class="sum"><div><b>${d.accounts.length}</b><small>accounts (limit ${d.limit})</small></div>
+      <div><b class="pos">${d.coming.length ? fmt(d.coming[0].amount) : "—"}</b><small>next payout${d.coming.length ? ` · ${day(d.coming[0].eta)}` : ""}</small></div>
+      <div><b>${d.monthly_ceiling ? fmt(d.monthly_ceiling) : "—"}</b><small>monthly ceiling (est.)</small></div></div>
+    ${lane("payout ready", "Payout ready")}${lane("funded", "Funded")}${lane("passing", "Passing")}${lane("evaluation", "In evaluation")}${lane("live", "Moved to live")}${lane("failed", "Failed")}
+    <div class="next ${n.can_fund ? "go" : ""}"><h5>🚀 Next account</h5><p>${esc(n.text)}</p>
+      ${n.price ? `<div class="row"><span>Treasury free (after a month of bills)</span><span>${fmt(n.free)} / ${fmt(n.price)}</span></div>
+      <div class="bar"><i style="width:${Math.min(100, (n.free / n.price) * 100)}%"></i></div>` : ""}
+      <p class="muted">${n.can_fund ? "ULTRON has put the purchase in your approvals. Nothing is bought for you: you buy it at Lucid, then add it under 👥." : "When the treasury covers it, ULTRON asks you to approve the purchase."}</p>
+      <button data-scale-set>${n.price ? `PRICE ${fmt(n.price)} · LIMIT ${d.limit} · EDIT` : "SET THE EVALUATION PRICE"}</button></div>
+    ${d.coming.length ? `<h5>💸 Payouts coming (your 90%)</h5>${d.coming.map((c) => `<div class="row"><span>${day(c.eta)} · ${esc(c.account)}</span><span class="pos">${fmt(c.amount)}</span></div>`).join("")}` : ""}
+    <p class="note">Estimates at ${fmt(d.pace.avg_day)}/day (${esc(d.pace.source)}), with about ${Math.round(d.pace.qualify_rate * 100)}% of days making $150+. Lucid pays up to 50% of profit, $2,000 max per payout, 5 payouts per account.</p>`;
 }
 
 async function accountAction(action, id) {
@@ -911,7 +1046,7 @@ function openRoom(id) {
   el.style.setProperty("--accent", bot.color);
   document.getElementById("room-title").innerHTML = `<b>${bot.persona?.handle || bot.name}</b> <span>${bot.name} · ${bot.persona?.vibe || ""}</span>`;
   room ||= new Room(document.getElementById("room-view"));
-  if (roomBotId !== id) { room.build(bot); room.chat = []; }
+  if (roomBotId !== id) { room.build(bot, { phase: state?.account?.phase }); room.chat = []; }
   roomBotId = id;
   room.start();
   refreshRoom();
@@ -948,6 +1083,14 @@ function openWorker(id) {
   renderWorker();
 }
 
+function wardrobeHtml(bot) {
+  const w = wardrobe(bot, "bot", { phase: state?.account?.phase });
+  const worn = Object.values(w.wear).map((id) => ITEMS[id].label).join(" · ");
+  const earn = w.earned.map((e) => `<div class="row"><span>${e.owned ? "✅" : "🔒"} ${ITEMS[e.item].label}</span><span>${e.need}</span></div>`).join("");
+  return `<h4 style="margin:14px 0 6px">👕 Wardrobe · ${w.title}</h4>
+    <div class="row"><span>Wearing</span><span style="text-align:right;max-width:65%">${worn}</span></div>${earn}`;
+}
+
 function renderWorker() {
   const bot = state?.bots.find((b) => b.id === openWorkerId);
   if (!bot) return;
@@ -977,6 +1120,7 @@ function renderWorker() {
     <div class="row"><span>Trades / wins</span><span>${bot.trades} / ${bot.wins}</span></div>
     ${pos}
     ${trades ? `<table style="margin-top:10px"><thead><tr><th>Time</th><th>Contract</th><th>Why</th><th>P&L</th></tr></thead><tbody>${trades}</tbody></table>` : ""}
+    ${wardrobeHtml(bot)}
     <button class="toggle ${enabled ? "off" : "on"}" data-bot="${bot.id}" data-action="${enabled ? "off" : "on"}">${enabled ? "SEND HOME" : "PUT ON SHIFT"}</button>`;
 }
 
@@ -1017,6 +1161,16 @@ document.addEventListener("click", async (e) => {
   }
   if (e.target.closest("[data-desk]")) openDesk();
   if (e.target.closest("[data-accounts]")) openAccounts();
+  if (e.target.closest("[data-scale]")) openScale();
+  if (e.target.closest("[data-scale-set]")) {
+    const p = prompt("What Lucid charges you for one LucidFlex 50K evaluation ($):", scaleData?.eval_price ?? "");
+    if (p !== null) {
+      const m = prompt("Most accounts you're allowed to run at once (your plan's limit):", scaleData?.limit ?? 5);
+      const r = await fetch("/api/scale", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eval_price: +p || 0, max_accounts: m === null ? null : +m }) });
+      if (!r.ok) alert((await r.json()).detail); else openScale();
+    }
+  }
   if (e.target.closest("[data-signals]")) openSignals();
   const sd = e.target.closest("[data-sig-day]");
   if (sd) openSignals(sd.dataset.sigDay);
@@ -1087,8 +1241,9 @@ renderer.domElement.addEventListener("pointerdown", (e) => (downAt = [e.clientX,
 renderer.domElement.addEventListener("pointerup", (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
-  const hit = ray.intersectObjects([...clickables, dome]).find((h) => h.object.userData.botId || h.object === dome);
+  const hit = ray.intersectObjects([...clickables, dome, skyStation], true).find((h) => h.object.userData.botId || h.object === dome || h.object.userData.station);
   if (!hit) return;
+  if (hit.object.userData.station) { location.href = "station3d.html"; return; }
   if (hit.object === dome) document.getElementById("payroll").classList.toggle("hidden");
   else openRoom(hit.object.userData.botId);
 });
@@ -1114,6 +1269,113 @@ function connect() {
 }
 connect();
 
+// ---------------------------------------------------------------- sky and market weather
+// Day and night follow the ET clock (the market's sessions); the weather follows volatility
+// (engine.weather(): storm on news or a 1.8x range spike, rain at 1.25x, fog when the tape is dead).
+// The background skyline grows with the account's profit, each district with its bot's best day.
+const SKY = [   // [ET hour, background, hemisphere sky, sun colour, light level]
+  [0, "#0d0838", "#5b4bd6", "#7d6cff", 0.55],
+  [4, "#0d0838", "#5b4bd6", "#7d6cff", 0.55],
+  [6, "#4a1f6e", "#ff9ec7", "#ffb3a1", 0.8],
+  [10, "#2a2a9c", "#a99bff", "#e2d8ff", 1.15],
+  [15, "#2a2a9c", "#a99bff", "#e2d8ff", 1.15],
+  [16.5, "#5a2a7a", "#ffb37a", "#ffcf8a", 1.0],
+  [18.5, "#22127a", "#8f7bff", "#c9b8ff", 0.9],
+  [21, "#0d0838", "#5b4bd6", "#7d6cff", 0.55],
+  [24, "#0d0838", "#5b4bd6", "#7d6cff", 0.55],
+];
+const WEATHER = {
+  clear: { icon: "☀️", text: "calm", fog: [90, 230], dim: 1 },
+  fog: { icon: "🌫️", text: "quiet tape", fog: [30, 140], dim: 0.85 },
+  rain: { icon: "🌧️", text: "volatile", fog: [70, 200], dim: 0.8 },
+  storm: { icon: "⛈️", text: "storm", fog: [55, 170], dim: 0.6 },
+};
+const sky = { bg: new THREE.Color("#22127a"), top: new THREE.Color("#8f7bff"), sun: new THREE.Color("#c9b8ff"), level: 1, hour: 20, kind: "clear", news: false,
+  skylineGrow: 1, skylineTo: 1, flash: 0, nextFlash: 0, rainOpacity: 0 };
+const _a = new THREE.Color(), _b = new THREE.Color();
+
+const RAIN_N = 1400;
+const rainPos = new Float32Array(RAIN_N * 6);
+for (let i = 0; i < RAIN_N; i++) {
+  const x = (Math.random() - 0.5) * 220, y = Math.random() * 120, z = (Math.random() - 0.5) * 220;
+  rainPos.set([x, y, z, x - 0.3, y - 2.2, z], i * 6);
+}
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3));
+const rainMat = new THREE.LineBasicMaterial({ color: "#a9c4ff", transparent: true, opacity: 0, depthWrite: false });
+const rain = new THREE.LineSegments(rainGeo, rainMat);
+rain.frustumCulled = false;
+rain.visible = false;
+scene.add(rain);
+
+const PREVIEW = new URLSearchParams(location.search);   // ?weather=storm&hour=7 previews a sky
+function applyWeather(s) {
+  const [hh, mm] = String(PREVIEW.get("hour") || s.clock || "20:00").split(":").map(Number);
+  sky.hour = (hh || 0) + (mm || 0) / 60;
+  const w = PREVIEW.get("weather") ? { kind: PREVIEW.get("weather") } : s.weather || {};
+  sky.kind = WEATHER[w.kind] ? w.kind : "clear";
+  sky.news = !!w.news;
+  const profit = (s.account && s.account.profit) || 0;
+  sky.skylineTo = Math.min(1.6, Math.max(0.85, 1 + (profit / 3000) * 0.2));
+  const chip = document.getElementById("weather-chip");
+  if (chip) {
+    const W = WEATHER[sky.kind];
+    chip.textContent = `${W.icon} ${innerWidth < 640 ? "" : W.text}`.trim();
+    chip.title = `Market weather: ${sky.news ? "news hold" : W.text}${w.vol_ratio ? ` · range ${w.vol_ratio}x normal` : ""}`;
+    chip.className = sky.kind;
+  }
+}
+
+function updateSky(dt, t) {
+  let i = 0;
+  while (i < SKY.length - 2 && SKY[i + 1][0] <= sky.hour) i++;
+  const [h0, bg0, top0, sun0, l0] = SKY[i], [h1, bg1, top1, sun1, l1] = SKY[i + 1];
+  const f = h1 > h0 ? Math.min(1, Math.max(0, (sky.hour - h0) / (h1 - h0))) : 0;
+  const W = WEATHER[sky.kind];
+  const k = Math.min(1, dt * 0.6);   // ease toward the target so changes drift in, never snap
+  sky.bg.lerp(_a.set(bg0).lerp(_b.set(bg1), f).multiplyScalar(W.dim), k);
+  sky.top.lerp(_a.set(top0).lerp(_b.set(top1), f), k);
+  sky.sun.lerp(_a.set(sun0).lerp(_b.set(sun1), f), k);
+  sky.level += ((l0 + (l1 - l0) * f) * W.dim - sky.level) * k;
+  scene.background.copy(sky.bg);
+  scene.fog.color.copy(sky.bg);
+  scene.fog.near += (W.fog[0] - scene.fog.near) * k;
+  scene.fog.far += (W.fog[1] - scene.fog.far) * k;
+
+  // storm: lightning every few seconds
+  if (sky.kind === "storm" && t > sky.nextFlash) {
+    sky.flash = 1;
+    sky.nextFlash = t + 2.5 + Math.random() * 6;
+  }
+  sky.flash = Math.max(0, sky.flash - dt * 3.5);
+  const strike = sky.flash > 0.6 || (sky.flash > 0.2 && sky.flash < 0.35) ? sky.flash : 0;   // double flicker
+  hemi.color.copy(sky.top);
+  hemi.intensity = 0.9 * sky.level + strike * 2.5;
+  sun.color.copy(sky.sun);
+  sun.intensity = 1.2 * sky.level;
+  bloom.strength = 0.7 + strike * 0.9;
+  if (strike) scene.background.lerp(_a.set("#c9d4ff"), strike * 0.35);
+
+  // rain falls in rain and storms
+  const wantRain = sky.kind === "storm" ? 0.8 : sky.kind === "rain" ? 0.5 : 0;
+  sky.rainOpacity += (wantRain - sky.rainOpacity) * Math.min(1, dt * 1.5);
+  rainMat.opacity = sky.rainOpacity;
+  rain.visible = sky.rainOpacity > 0.02;
+  if (rain.visible) {
+    const fall = dt * (sky.kind === "storm" ? 90 : 60);
+    for (let j = 0; j < RAIN_N; j++) {
+      const o = j * 6;
+      rainPos[o + 1] -= fall; rainPos[o + 4] -= fall;
+      if (rainPos[o + 4] < 0) { rainPos[o + 1] += 120; rainPos[o + 4] += 120; }
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+    rain.position.set(camera.position.x * 0.5, 0, camera.position.z * 0.5);
+  }
+
+  sky.skylineGrow += (sky.skylineTo - sky.skylineGrow) * Math.min(1, dt * 0.5);
+  skyline.scale.y = sky.skylineGrow;
+}
+
 // ---------------------------------------------------------------- render loop
 const clock = new THREE.Clock();
 function frame() {
@@ -1128,13 +1390,26 @@ function frame() {
     b.beamMat.opacity += (target - b.beamMat.opacity) * Math.min(1, dt * 4);
     b.beam.visible = b.beamMat.opacity > 0.01;
     b.halo.rotation.z += dt * (active ? 2.5 : 0.6);
-    b.halo.position.y = b.hero + 6 + Math.sin(t * 1.5 + b.pos.x) * 0.4;
+    b.grow += (b.growTo - b.grow) * Math.min(1, dt * 0.8);
+    b.towersG.scale.y = b.grow;
+    b.towersG.position.y = 1 - b.grow;   // towers start at y=1: keep their base on the platform
+    const top = b.hero * b.grow;
+    b.beam.position.y = top + 70;
+    b.label.position.y = b.labelY + top - b.hero;
+    b.halo.position.y = top + 6 + Math.sin(t * 1.5 + b.pos.x) * 0.4;
     b.haloMat.opacity = b.status === "disabled" ? 0.15 : active ? 1 : 0.6;
+    // the bot out front: bounces while it's in a trade, slumps when sent home
+    b.mascot.position.y = 1 + (active ? Math.abs(Math.sin(t * 5 + b.pos.x)) * 0.5 : Math.sin(t * 1.4 + b.pos.z) * 0.06);
+    b.mascot.rotation.z = b.status === "stopped" || b.status === "disabled" ? 0.25 : 0;
+    animateApparel(b.apparel, t);
     if (b.tvFlash > 0) {
       b.tvFlash = Math.max(0, b.tvFlash - dt * 0.8);
       b.halo.scale.setScalar(1 + b.tvFlash * 0.8);
     }
   }
+
+  updateSky(dt, t);
+  updateFlights(dt, t);
 
   vaultPulse = Math.max(0, vaultPulse - dt * 1.5);
   domeMat.emissiveIntensity = 0.9 + vaultPulse * 2.5;

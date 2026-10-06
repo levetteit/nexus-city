@@ -65,3 +65,19 @@ def test_context_filters_run_on_real_candles(real_data, params):
     because the daily goal isn't reached as early.)"""
     base, filtered = run(real_data), run(real_data, params=params)
     assert filtered["days"] == base["days"] and filtered["trades"] > 0
+
+
+def test_city_weather_follows_volatility():
+    from backend.market import Bar
+    engine = Engine()
+    engine.news = None
+    u = engine.market.underlyings["MNQ"]
+
+    def bars(rng_old, rng_new):
+        return [Bar(100, 100 + rng_old, 100, 100) for _ in range(360)] + [Bar(100, 100 + rng_new, 100, 100) for _ in range(30)]
+
+    for (old, new), kind in [((4, 4), "clear"), ((4, 7), "rain"), ((4, 12), "storm"), ((4, 1), "fog")]:
+        u.bars = bars(old, new)
+        assert engine.weather()["kind"] == kind, (old, new)
+    u.bars = []
+    assert engine.weather() == {"kind": "clear", "vol_ratio": None, "news": False}
