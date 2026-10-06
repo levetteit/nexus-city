@@ -12,6 +12,7 @@ import json
 import os
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -20,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import TICK_SECONDS
 from .bots.pointer import SIGNALS
+from .backtest import ET
 from .engine import Engine
 
 MODE = os.getenv("STARNET_MODE", "sim")
@@ -30,6 +32,7 @@ notifier = None   # phone notifications (live mode only), see notify.py
 scorecard = None  # live vs backtest checks (live mode only), see scorecard.py
 reports = None    # end-of-day reports (live mode only), see report.py
 history = None    # saved 1m candles for future backtests (live mode only), see history.py
+desk = None       # the bots' evening meeting / morning briefing on Claude (live mode only), see desk.py
 clients: set[WebSocket] = set()
 
 
@@ -54,7 +57,7 @@ async def run_city() -> None:
 async def run_live() -> None:
     """Poll for new real candles and step the bots through each one."""
     global engine, router, notifier
-    global scorecard, reports, history
+    global scorecard, reports, history, desk
     from . import execution, live, news, notify
     from .report import DayReports
     from .scorecard import Scorecard
@@ -75,6 +78,11 @@ async def run_live() -> None:
     scorecard.start_day(engine, partial=True)   # we may have come up mid-day
     reports = DayReports(live.DATA_DIR)
     reports.start_day(engine, partial=True)
+    from .desk import TradingDesk
+    desk = TradingDesk(live.DATA_DIR)
+    if desk.enabled:
+        engine.desk = desk
+    morning_done = ""
     last_poll = 0.0
     last_order_error = ""
     while True:
@@ -87,6 +95,10 @@ async def run_live() -> None:
             except Exception as exc:   # network hiccup: try again next poll
                 print(f"live poll failed: {exc}")
         market.release()   # candles pushed by the real-time TradingView feed
+        et = datetime.now(timezone.utc).astimezone(ET)
+        if desk.enabled and et.weekday() < 5 and (8, 40) <= (et.hour, et.minute) < (9, 25) and morning_done != et.date().isoformat():
+            morning_done = et.date().isoformat()
+            asyncio.create_task(run_desk("morning"))
         events = []
         while market.has_next():
             new = engine.tick()
@@ -117,7 +129,42 @@ async def check_day(day: dict | None, report: dict) -> None:
         print(f"replay check failed: {exc}")
     title, body = reports.message(report, scorecard.edge(engine.account), BASELINE)
     notifier.send(title, body, "report", url=f"/?report={report['day']}")
+    if desk.enabled:
+        await run_desk("evening", report)
 
+
+async def run_desk(kind: str, report: dict | None = None) -> dict | None:
+    """Hold the evening meeting or the morning briefing (Claude, in a thread), then tell the city and your phone."""
+    from .desk import context
+    if desk.running:
+        return None
+    desk.running = True
+    try:
+        recent = [reports.get(r["day"]) for r in reports.list(6)]
+        recent = [{"day": r["day"], "pnl": r["pnl"], "trades": r["trades"], "halts": r["halts"], "news": r["news"],
+                   "check": r.get("check")} for r in recent if r and (not report or r["day"] != report["day"])]
+        past = [{"day": c["day"], "mode": c["desk"], "cost_or_saved": c["desk_effect"]}
+                for c in scorecard.checks if c.get("desk")][-10:]
+        ctx = context(engine, report, recent, scorecard.status(engine.account), engine.news, desk.lessons, past)
+        out = await asyncio.to_thread(desk.evening if kind == "evening" else desk.morning, ctx)
+    except Exception as exc:
+        desk.last_error = desk.last_error or str(exc)[:200]
+        print(f"desk {kind} failed: {exc}")
+        return None
+    finally:
+        desk.running = False
+    desk.last_error = ""
+    mode = out["next_mode"] if kind == "evening" else out["mode"]
+    why = out["next_mode_why"] if kind == "evening" else out["mode_why"]
+    if kind == "evening" and report:
+        report["desk"] = {"summary": out["desk_summary"], "journals": out["journals"], "mode": mode, "why": why}
+        reports.save(report)
+    session = "overnight + London" if kind == "evening" else "New York"
+    engine.events.append({"type": "desk_meeting", "kind": kind, "mode": mode, "why": why, "session": session})
+    head = out["desk_summary"] if kind == "evening" else out["briefing"]
+    notifier.send(f"🧠 {'Desk meeting' if kind == 'evening' else 'Morning briefing'} · {session}: {mode.replace('_', ' ').upper()}",
+                  f"{why}\n{head[:220]}", "desk", url="/?desk=1")
+    return out
 
 def state() -> dict:
     snap = engine.snapshot()
@@ -129,6 +176,8 @@ def state() -> dict:
             snap["execution"] = router.status(engine.market.delay_minutes)
         if history:
             snap["history"] = history.status()
+        if desk:
+            snap["desk"] = desk.status()
         if scorecard:
             snap["scorecard"] = scorecard.status(engine.account)
         if notifier:
@@ -217,6 +266,35 @@ def toggle(bot_id: str, action: str) -> dict:
     if scorecard:
         scorecard.toggled()
     return engine.bots[bot_id].snapshot(engine.market)
+
+
+@app.get("/api/desk")
+def desk_info() -> dict:
+    if desk is None:
+        raise HTTPException(503, "the trading desk only runs in live mode")
+    return {**desk.status(), "lessons_list": desk.lessons, "days": desk.days(7)}
+
+
+@app.post("/api/desk/meeting")
+async def desk_meeting(request: Request) -> dict:
+    """Hold a meeting now (`{"kind": "morning"}` or `"evening"`)."""
+    if desk is None or not desk.enabled:
+        raise HTTPException(503, "add ANTHROPIC_API_KEY to turn the trading desk on")
+    kind = (await request.json()).get("kind", "morning")
+    if kind not in ("morning", "evening") or desk.running:
+        raise HTTPException(409, "a meeting is already running" if desk.running else "kind must be morning or evening")
+    last = reports.get(reports.list(1)[0]["day"]) if kind == "evening" and reports.list(1) else None
+    asyncio.create_task(run_desk(kind, last))
+    return {"started": kind}
+
+
+@app.post("/api/desk/act")
+async def desk_act(request: Request) -> dict:
+    """Let the desk's risk mode affect trading (true) or keep it advisory (false)."""
+    if desk is None:
+        raise HTTPException(503, "the trading desk only runs in live mode")
+    desk.set_act(bool((await request.json()).get("act")))
+    return desk.status()
 
 
 @app.get("/api/history")

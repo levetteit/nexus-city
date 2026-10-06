@@ -19,6 +19,8 @@ services:
         sync: false
       - key: STARNET_NTFY_TOPIC           # optional: ntfy topic for trade alerts (backup to web push)
         sync: false
+      - key: ANTHROPIC_API_KEY            # optional: turns on the trading desk (journals, news, daily plan)
+        sync: false
     disk:                  # keeps data/paper_trades.csv, paper_days.csv and the paper account across deploys
       name: starnet-data
       mountPath: /app/data

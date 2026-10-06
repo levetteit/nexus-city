@@ -72,6 +72,8 @@ class Scorecard:
                         break
             elif ev["type"] == "tv_signal":
                 self._day["toggled"] = True
+            elif ev["type"] == "desk_mode":
+                self._day["desk"] = ev["mode"]
         return finished
 
     def toggled(self) -> None:
@@ -145,10 +147,14 @@ class Scorecard:
             why.append("server restarted during the day")
         if day["toggled"]:
             why.append("a bot was switched on/off or a TradingView alert traded")
+        if day.get("desk"):
+            why.append(f"the desk set {day['desk'].replace('_', ' ')} (the replay trades in normal mode)")
         check = {"day": day["day"].isoformat(), "live_pnl": live_pnl, "replay_pnl": replay_pnl,
                  "live_trades": len(live), "replay_trades": len(replay), "matched": matched,
                  "only_live": [label(t) for t in only_live], "only_replay": [label(t) for t in unmatched],
-                 "verdict": "match" if same else "drift", "explained_by": why}
+                 "verdict": "match" if same else "drift", "explained_by": why,
+                 "desk": day.get("desk"),   # with a desk mode on, live - replay = what the mode cost (-) or saved (+)
+                 "desk_effect": round(live_pnl - replay_pnl, 2) if day.get("desk") else None}
         self.checks = [c for c in self.checks if c["day"] != check["day"]] + [check]
         os.makedirs(self.data_dir, exist_ok=True)
         with open(self.path, "w") as f:

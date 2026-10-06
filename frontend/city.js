@@ -490,6 +490,7 @@ function renderAccount(a) {
     <div class="row"><span>Micros open</span><span>${a.open_micros} / ${a.max_micros}</span></div>
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
     ${state.mode === "live" ? `<button class="reports-btn" data-reports>📒 DAILY REPORTS</button>` : ""}
+    ${deskRow(state)}
     ${scoreRows(state)}
     ${historyRows(state)}
     ${newsRows(state)}
@@ -534,6 +535,62 @@ function newsRows(s) {
     : `<div class="row"><span>News</span><span>no high-impact USD news ahead</span></div>`;
   return `<div class="row"><span><b>📰 News filter</b></span><span>${n.error ? "using saved calendar" : "on"}</span></div>${hold}${next}`;
 }
+
+// ---------------------------------------------------------------- trading desk
+// everything the desk writes comes from a model that read the web: always escape it
+const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+function deskRow(s) {
+  const d = s.desk;
+  if (!d) return "";
+  if (!d.enabled) return `<div class="row"><span><b>🧠 Desk</b></span><span>off · add ANTHROPIC_API_KEY</span></div>`;
+  const mode = d.mode.replace("_", " ").toUpperCase();
+  return `<div class="row"><span><b>🧠 Desk mode</b></span><span class="${d.mode === "normal" ? "pos" : "neg"}">${d.act ? mode : "advisory"}${d.running ? " · meeting…" : ""}</span></div>
+    ${d.why ? `<div class="row"><span></span><span style="text-align:right;max-width:75%">${esc(d.why)}</span></div>` : ""}
+    <button class="desk-btn" data-desk>🧠 DESK NOTES & JOURNALS</button>`;
+}
+
+let deskBot = null;
+async function openDesk(botId = null) {
+  deskBot = botId;
+  const panel = document.getElementById("desk"), body = document.getElementById("desk-body");
+  panel.classList.remove("hidden");
+  body.innerHTML = `<p class="note">loading…</p>`;
+  let d;
+  try { d = await (await fetch("/api/desk")).json(); } catch { body.innerHTML = `<p class="note">the desk only runs in live mode</p>`; return; }
+  if (!d.enabled) {
+    body.innerHTML = `<p class="note">The desk runs on Claude. Add an <b>ANTHROPIC_API_KEY</b> environment variable on Render to switch it on.</p>`;
+    return;
+  }
+  const name = (id) => { const b = state?.bots.find((x) => x.id === id); return b?.persona?.handle || b?.name || id; };
+  const days = d.days.map((day) => {
+    const m = day.morning, e = day.evening;
+    const journals = (e?.journals || []).filter((j) => !botId || j.bot_id === botId).map((j) => `
+      <div class="entry"><b>${name(j.bot_id)}</b> · ${esc(j.mood)}<br>${esc(j.entry)}
+        <small>lesson: ${esc(j.lesson)}</small><small>focus: ${esc(j.focus_tomorrow)}</small></div>`).join("");
+    const notes = (m?.bot_notes || []).filter((n) => !botId || n.bot_id === botId).map((n) => `<li><b>${name(n.bot_id)}</b>: ${esc(n.note)}</li>`).join("");
+    return `<h4>${new Date(day.day + "T12:00").toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}</h4>
+      ${m ? `<div class="entry"><b>☀️ Morning briefing</b> <span class="mode ${m.mode}">${m.mode.replace("_", " ")}</span><br>${esc(m.briefing)}
+        <ul>${m.drivers.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${m.watch.length ? `<small>watch: ${esc(m.watch.join(" · "))}</small>` : ""}
+        <small>${esc(m.mode_why)}</small>${notes ? `<ul>${notes}</ul>` : ""}</div>` : ""}
+      ${e && !botId ? `<div class="entry"><b>🌙 Desk meeting</b> <span class="mode ${e.next_mode}">${e.next_mode.replace("_", " ")}</span><br>${esc(e.desk_summary)}<small>${esc(e.next_mode_why)}</small></div>` : ""}
+      ${journals}`;
+  }).join("");
+  body.innerHTML = `
+    <div class="row"><span>Risk mode</span><span><span class="mode ${d.mode}">${d.mode.replace("_", " ")}</span>${d.until ? ` until ${new Date(d.until).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}` : ""}</span></div>
+    <div class="row"><span>Desk can take risk off</span><span>${d.act ? "yes" : "no (advisory only)"}</span></div>
+    ${d.error ? `<small>last error: ${esc(d.error)}</small>` : ""}
+    <div class="actions">
+      <button data-desk-meeting="morning">HOLD BRIEFING NOW</button>
+      <button data-desk-meeting="evening">HOLD REVIEW NOW</button>
+      <button data-desk-act="${d.act ? "off" : "on"}">${d.act ? "MAKE ADVISORY ONLY" : "LET DESK ACT"}</button>
+    </div>
+    ${!botId && d.lessons_list.length ? `<h4>STANDING LESSONS</h4><ul>${d.lessons_list.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
+    ${botId ? `<h4>${name(botId).toUpperCase()}'S JOURNAL</h4>` : ""}
+    ${days || `<p class="note">No meetings yet. The first desk meeting runs after today's close (~6pm ET); the morning briefing runs at 8:40 ET on weekdays.</p>`}`;
+}
+document.getElementById("room-journal").onclick = () => openDesk(roomBotId);
+if (new URLSearchParams(location.search).get("desk")) setTimeout(() => openDesk(), 1500);
 
 // ---------------------------------------------------------------- daily reports
 async function openReports(day = null) {
@@ -587,14 +644,17 @@ async function toggleReport(day, open = false) {
     ${r.news.length ? `<div class="row"><span>News pauses</span><span>${r.news.join(", ")}</span></div>` : ""}
     ${r.halts.length ? `<div class="row"><span>Stopped</span><span>${r.halts.join(", ")}</span></div>` : ""}
     ${r.partial ? `<small class="note">the server restarted during this day, so some trades may be missing</small>` : ""}
+    ${r.desk ? `<div class="trade"><b>🧠 Desk</b> · next session ${r.desk.mode.replace("_", " ")}<small>${esc(r.desk.summary)}</small>
+      ${r.desk.journals.map((j) => `<small><b>${esc(j.bot_id)}</b> (${esc(j.mood)}): ${esc(j.entry)}</small>`).join("")}</div>` : ""}
     ${trades || `<p class="note">no trades</p>`}`;
 }
 
 const wantReport = new URLSearchParams(location.search).get("report");
 if (wantReport) setTimeout(() => openReports(wantReport), 1500);
 navigator.serviceWorker?.addEventListener("message", (e) => {
-  const day = e.data?.open && new URL(e.data.open, location.href).searchParams.get("report");
-  if (day) openReports(day);
+  const u = e.data?.open && new URL(e.data.open, location.href);
+  if (u?.searchParams.get("report")) openReports(u.searchParams.get("report"));
+  else if (u?.searchParams.get("desk")) openDesk();
 });
 
 // ---------------------------------------------------------------- activity feed
@@ -622,6 +682,8 @@ function feedEvents(events) {
     else if (ev.type === "account_halt") feed(`<b>Account</b> ${ev.reason}`, /cap|target/.test(ev.reason) ? "win" : "loss");
     else if (ev.type === "tv_signal") feed(`${who} TradingView: ${ev.action}`);
     else if (ev.type === "new_session") feed(`<b>New trading day</b>`, "muted2");
+    else if (ev.type === "desk_mode") feed(`🧠 <b>Desk</b> ${ev.mode.replace("_", " ")} until ${ev.until} · ${esc(ev.why)}`, "think");
+    else if (ev.type === "desk_meeting") feed(`🧠 <b>${ev.kind === "evening" ? "Desk meeting" : "Morning briefing"}</b> · ${ev.session}: ${ev.mode.replace("_", " ")} · ${esc(ev.why)}`, "think");
     else if (ev.type === "news_hold") feed(`📰 <b>${ev.title}</b> at ${ev.at} · no new trades until ${ev.until}`, "think");
   }
 }
@@ -733,6 +795,17 @@ document.addEventListener("click", async (e) => {
   }
   if (e.target.closest("[data-reset]")) await fetch("/api/account/reset", { method: "POST" });
   if (e.target.closest("[data-reports]")) openReports();
+  if (e.target.closest("[data-desk]")) openDesk();
+  const dm = e.target.closest("[data-desk-meeting]");
+  if (dm) {
+    const r = await fetch("/api/desk/meeting", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: dm.dataset.deskMeeting }) });
+    dm.textContent = r.ok ? "MEETING STARTED… (1-2 MIN)" : (await r.json()).detail;
+  }
+  const da = e.target.closest("[data-desk-act]");
+  if (da) {
+    await fetch("/api/desk/act", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ act: da.dataset.deskAct === "on" }) });
+    openDesk(deskBot);
+  }
   const rd = e.target.closest("[data-report-day]");
   if (rd) toggleReport(rd.dataset.reportDay);
   const pb = e.target.closest("[data-push]");

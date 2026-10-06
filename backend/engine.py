@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 
 from .account import PropAccount
 from .bots.base import Bot
@@ -17,6 +18,8 @@ class Engine:
     def __init__(self, broker: Broker | None = None, market=None, account: PropAccount | None = None,
                  workers=None, params: dict | None = None, news=None) -> None:
         self.news = news                # NewsCalendar: no trades around high-impact releases (news.py)
+        self.desk = None                # TradingDesk: may take risk off for a session (desk.py)
+        self._desk_seen = None
         self._news_seen: set = set()
         self.broker = broker or PaperBroker()
         self.events: list[dict] = []
@@ -64,7 +67,18 @@ class Engine:
 
     def _news_check(self) -> None:
         now = getattr(self.market, "now", None)
-        if self.news is None or now is None:
+        if now is None:
+            return
+        if self.desk is not None:
+            mode = self.desk.mode_now(now)
+            for bot in self.bots.values():
+                bot.desk_mode = mode
+            key = mode and (mode["mode"], mode["until"])
+            if key and key != self._desk_seen:
+                self.events.append({"type": "desk_mode", "mode": mode["mode"], "why": mode["why"],
+                                    "until": datetime.fromisoformat(mode["until"]).strftime("%a %H:%M")})
+            self._desk_seen = key
+        if self.news is None:
             return
         hold = self.news.blackout(now)
         for bot in self.bots.values():

@@ -316,6 +316,42 @@ Settings (environment variables):
 
 To backtest with a calendar: `--news data/news_calendar.json`.
 
+## Trading desk: journals, news and a daily plan (`backend/desk.py`)
+
+The bots hold two meetings a day on Claude (`claude-opus-5-5`):
+
+- **🌙 Evening meeting**, after each day's report:
+  - Every bot writes a journal entry in its own voice about its actual trades (why in, why out, what it learned).
+  - The desk updates its **standing lessons**, which are fed back into every later meeting. That's how they learn.
+  - The desk sets the risk mode for the overnight and London session.
+- **☀️ Morning briefing**, 08:40 ET on weekdays:
+  - A web search for what is moving NQ/ES today (the 8:30 data, Fed, megacap news, geopolitics).
+  - A plan, a one-line note for each bot, and the risk mode for New York.
+
+The desk is built to compete and never quit, and to treat discipline as the weapon.
+**It can only take risk off**:
+
+- `normal`: trade as usual (the default)
+- `cautious`: no adds, positions stay at 3 contracts
+- `sit_out`: no new trades until the next meeting
+
+It can't touch the strategy, the stops, or the goal and cap. The replay check trades
+every day in normal mode, so each non-normal mode's cost or savings is measured, and
+the desk sees that history. You can make the desk advisory-only from its panel.
+
+**Turn it on:** add `ANTHROPIC_API_KEY` in Render → Environment. Without a key the desk
+stays off and nothing else changes. Expect roughly 4 Claude calls and up to 10 web
+searches a day, which works out to a few dollars a month.
+
+**Where to see it:**
+
+- 🧠 Desk notes in the account panel: briefings, meetings, lessons, and "hold a meeting now"
+- **JOURNAL** in each bot's room
+- The desk section of each daily report
+- A push after each meeting
+
+Everything is saved in `data/desk/`.
+
 ## Candle history (`backend/history.py`)
 
 Yahoo only keeps about 30 days of 1-minute candles, so live mode saves them as they come in:
