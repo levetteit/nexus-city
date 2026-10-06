@@ -497,6 +497,7 @@ function renderAccount(a) {
     <div class="row"><span>Micros open</span><span>${a.open_micros} / ${a.max_micros}</span></div>
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
     ${state.mode === "live" ? `<button class="reports-btn" data-reports>📒 DAILY REPORTS</button>` : ""}
+    ${state.accounts ? `<button class="desk-btn" data-accounts>👥 MY LUCID ACCOUNTS (${state.accounts.count})${state.accounts.payouts_ready ? ` · ${fmt(state.accounts.payouts_ready)} READY` : ""}</button>` : ""}
     ${deskRow(state)}
     ${scoreRows(state)}
     ${historyRows(state)}
@@ -542,6 +543,83 @@ function newsRows(s) {
     ? n.next.slice(0, 3).map((e) => `<div class="row"><span>${e.time}</span><span>${e.title}</span></div>`).join("")
     : `<div class="row"><span>News</span><span>no high-impact USD news ahead</span></div>`;
   return `<div class="row"><span><b>📰 News filter</b></span><span>${n.error ? "using saved calendar" : "on"}</span></div>${hold}${next}`;
+}
+
+// ---------------------------------------------------------------- lucid accounts
+let acctData = null;
+async function openAccounts() {
+  const panel = document.getElementById("accounts"), body = document.getElementById("accounts-body");
+  panel.classList.remove("hidden");
+  try { acctData = await (await fetch("/api/accounts")).json(); } catch { body.innerHTML = `<p class="note">accounts are tracked in live mode</p>`; return; }
+  const d = acctData;
+  const cards = d.accounts.map((a) => {
+    const room = Math.max(0, a.room), roomPct = Math.min(100, (room / 2000) * 100);
+    const status = a.phase === "failed" ? "failed" : a.halted ? `stopped today: ${esc(a.halted)}` : a.can_enter ? "trading" : "no new entries today";
+    const stage = a.phase === "evaluation"
+      ? `<div class="row"><span>Target</span><span>${money(a.profit)} / ${fmt(a.target)}</span></div>
+         <div class="bar"><i style="width:${Math.max(0, Math.min(100, (a.profit / a.target) * 100))}%"></i></div>`
+      : a.phase === "funded"
+      ? `<div class="row"><span>Payout cycle</span><span>${a.cycle_days}/${a.payout_days} days ≥ ${fmt(a.payout_day_min)} · net ${money(a.cycle_net)}</span></div>
+         <div class="bar"><i style="width:${Math.min(100, (a.cycle_days / a.payout_days) * 100)}%"></i></div>
+         <div class="row"><span>Payout</span><span class="${a.payout_eligible ? "pos" : ""}">${a.payout_eligible ? `up to ${fmt(a.payout_limit)} · ${a.safe_payout ? `take ${fmt(a.safe_payout)}` : "wait for cushion"}` : "not yet"}</span></div>
+         <div class="row"><span>Paid out</span><span>${fmt(a.paid_out)} (${a.payouts}/${a.max_payouts ?? "∞"})</span></div>` : "";
+    return `<div class="card ${a.phase}">
+      <h5><span>${esc(a.name)}</span><span><span class="tag3 ${a.phase}">${a.phase.toUpperCase()}</span>${a.routed ? `<span class="tag3 route">OWN WEBHOOK</span>` : ""}</span></h5>
+      <div class="row"><span>Balance</span><span>${fmt(a.balance)} · today <b class="${a.day_pnl >= 0 ? "pos" : "neg"}">${money(a.day_pnl)}</b></span></div>
+      <div class="row"><span>Room to MLL ${fmt(a.mll)}${a.mll_locked ? " 🔒" : ""}</span><span class="${room < 500 ? "neg" : ""}">${fmt(room)}</span></div>
+      <div class="bar room"><i style="width:${roomPct}%"></i></div>
+      ${stage}
+      <div class="row"><span>Status</span><span>${status}</span></div>
+      <div class="actions">
+        ${a.payout_eligible ? `<button class="go" data-acct="payout" data-id="${a.id}">💸 PAYOUT</button>` : ""}
+        <button data-acct="sync" data-id="${a.id}">SYNC</button>
+        <button data-acct="webhook" data-id="${a.id}">${a.routed ? "WEBHOOK ✓" : "ADD WEBHOOK"}</button>
+        <button data-acct="remove" data-id="${a.id}">REMOVE</button>
+      </div></div>`;
+  }).join("");
+  body.innerHTML = `
+    <div class="sum"><div><b>${d.count}</b><small>accounts</small></div>
+      <div><b class="pos">${fmt(d.payouts_ready)}</b><small>payouts ready now</small></div>
+      <div><b>${fmt(d.paid_out * 0.9)}</b><small>you've kept (90%)</small></div></div>
+    ${cards || `<p class="note">Add each Lucid account you buy. The bots' trades are applied to every account, so you can see each one's drawdown room, evaluation progress and payouts. Give an account its own TradersPost webhook and accounts that must stop (target reached, daily stop, close to the MLL) are left out of new trades automatically.</p>`}
+    <button class="add" data-acct="add">＋ ADD A LUCID ACCOUNT</button>`;
+}
+
+async function accountAction(action, id) {
+  const a = acctData?.accounts.find((x) => x.id === id);
+  const post = async (path, body) => {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
+    if (!r.ok) alert((await r.json()).detail);
+    return r.ok;
+  };
+  const ask = (q, v) => prompt(q, v ?? "");
+  if (action === "add" || action === "sync") {
+    const name = action === "add" ? ask("Account name (e.g. Flex #1):", `Flex #${(acctData?.count || 0) + 1}`) : a.name;
+    if (name === null) return;
+    const phase = ask("Phase (evaluation or funded):", a?.phase === "funded" ? "funded" : "evaluation");
+    if (!phase) return;
+    const balance = ask("Balance from your Lucid dashboard ($):", a ? Math.round(a.balance) : 50000);
+    if (!balance) return;
+    const mll = ask("Max Loss Limit / MLL ($):", a ? Math.round(a.mll) : 48000);
+    if (!mll) return;
+    let payouts = 0, cycle = 0;
+    if (phase.trim() === "funded") {
+      payouts = ask("Payouts taken so far:", a?.payouts ?? 0); if (payouts === null) return;
+      cycle = ask("Days this payout cycle with $150+ profit:", a?.cycle_days ?? 0); if (cycle === null) return;
+    }
+    const body = { name, phase: phase.trim(), balance: +balance, mll: +mll, payouts: +payouts, cycle_days: +cycle };
+    if (action === "add") body.webhook = ask("Optional: this account's own TradersPost webhook URL (leave empty if it copies the main strategy):", "") || "";
+    await post(action === "add" ? "/api/accounts" : `/api/accounts/${id}/sync`, body);
+  } else if (action === "payout") {
+    const amt = ask(`Record a payout you requested at Lucid for ${a.name}.\nAllowed up to $${a.payout_limit.toLocaleString()} (min $500). Suggested $${(a.safe_payout || 0).toLocaleString()}.\n\nAmount:`, a.safe_payout || a.payout_limit);
+    if (amt) await post(`/api/accounts/${id}/payout`, { amount: +amt });
+  } else if (action === "webhook") {
+    const url = ask(`TradersPost webhook URL for ${a.name} only (empty = it copies the main strategy):`, "");
+    if (url !== null) await post(`/api/accounts/${id}/webhook`, { url });
+  } else if (action === "remove") {
+    if (confirm(`Stop tracking ${a.name}? (This doesn't touch the account at Lucid.)`)) await post(`/api/accounts/${id}/remove`);
+  }
+  openAccounts();
 }
 
 // ---------------------------------------------------------------- trading desk
@@ -690,6 +768,7 @@ function feedEvents(events) {
     else if (ev.type === "account_halt") feed(`<b>Account</b> ${ev.reason}`, /cap|target/.test(ev.reason) ? "win" : "loss");
     else if (ev.type === "tv_signal") feed(`${who} TradingView: ${ev.action}`);
     else if (ev.type === "new_session") feed(`<b>New trading day</b>`, "muted2");
+    else if (ev.type === "acct_event") feed(`👥 ${esc(ev.text)}`, { passed: "win", payout: "win", failed: "loss", halt: "think" }[ev.what] || "");
     else if (ev.type === "desk_mode") feed(`🧠 <b>Desk</b> ${ev.mode.replace("_", " ")} until ${ev.until} · ${esc(ev.why)}`, "think");
     else if (ev.type === "desk_meeting") feed(`🧠 <b>${ev.kind === "evening" ? "Desk meeting" : "Morning briefing"}</b> · ${ev.session}: ${ev.mode.replace("_", " ")} · ${esc(ev.why)}`, "think");
     else if (ev.type === "news_hold") feed(`📰 <b>${ev.title}</b> at ${ev.at} · no new trades until ${ev.until}`, "think");
@@ -828,6 +907,9 @@ document.addEventListener("click", async (e) => {
     }
   }
   if (e.target.closest("[data-desk]")) openDesk();
+  if (e.target.closest("[data-accounts]")) openAccounts();
+  const ac = e.target.closest("[data-acct]");
+  if (ac) await accountAction(ac.dataset.acct, ac.dataset.id);
   const dm = e.target.closest("[data-desk-meeting]");
   if (dm) {
     const r = await fetch("/api/desk/meeting", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: dm.dataset.deskMeeting }) });

@@ -148,6 +148,27 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
   padding: 8px max(14px, env(safe-area-inset-left)) calc(max(10px, env(safe-area-inset-bottom)) + var(--hb, 0px)); }
 #chart .chart-info b { font-size: 13px; }
 
+/* ---------- lucid accounts ---------- */
+#accounts { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(600px, calc(100vw - 24px)); max-height: 82vh; overflow: auto; z-index: 9; font-size: 12.5px; }
+#accounts .row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; }
+#accounts .sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+#accounts .sum div { background: rgba(255, 255, 255, .05); border-radius: 8px; padding: 8px; text-align: center; }
+#accounts .sum b { display: block; font-size: 15px; }
+#accounts .sum small { color: var(--muted); font-size: 10px; }
+#accounts .card { background: rgba(255, 255, 255, .04); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; border-left: 3px solid #7c5cff; }
+#accounts .card.funded { border-left-color: var(--green); } #accounts .card.failed { border-left-color: var(--red); opacity: .7; }
+#accounts .card h5 { margin: 0 0 6px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+#accounts .tag3 { font-family: var(--pixel); font-size: 7px; padding: 3px 5px; border-radius: 4px; background: #3a2c8f; margin-left: 4px; }
+#accounts .tag3.funded { background: #12684a; } #accounts .tag3.failed { background: #6b1022; } #accounts .tag3.route { background: #2b3d6b; }
+#accounts .bar { height: 5px; background: rgba(255, 255, 255, .08); border-radius: 3px; overflow: hidden; margin: 2px 0 6px; }
+#accounts .bar i { display: block; height: 100%; background: linear-gradient(90deg, #7c5cff, var(--gold)); }
+#accounts .bar.room i { background: linear-gradient(90deg, var(--red), var(--gold), var(--green)); }
+#accounts .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+#accounts button { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: rgba(124, 92, 255, .15); color: var(--text);
+  font-family: var(--pixel); font-size: 8px; cursor: pointer; }
+#accounts button.go { background: rgba(67, 240, 160, .18); }
+#accounts .add { width: 100%; padding: 10px; font-size: 9px; }
+
 /* ---------- trading desk ---------- */
 #desk { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(600px, calc(100vw - 24px)); max-height: 82vh; overflow: auto; z-index: 9; font-size: 12.5px; line-height: 1.45; }
 #desk .row { display: flex; justify-content: space-between; gap: 10px; margin: 4px 0; }

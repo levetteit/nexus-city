@@ -33,6 +33,7 @@ scorecard = None  # live vs backtest checks (live mode only), see scorecard.py
 reports = None    # end-of-day reports (live mode only), see report.py
 history = None    # saved 1m candles for future backtests (live mode only), see history.py
 desk = None       # the bots' evening meeting / morning briefing on Claude (live mode only), see desk.py
+book = None       # your Lucid accounts, each tracked through the trades (live mode only), see accounts.py
 clients: set[WebSocket] = set()
 
 
@@ -57,7 +58,7 @@ async def run_city() -> None:
 async def run_live() -> None:
     """Poll for new real candles and step the bots through each one."""
     global engine, router, notifier
-    global scorecard, reports, history, desk
+    global scorecard, reports, history, desk, book
     from . import execution, live, news, notify
     from .report import DayReports
     from .scorecard import Scorecard
@@ -71,6 +72,10 @@ async def run_live() -> None:
     engine = Engine(market=market, account=live.load_account(), news=calendar)
     live.load_careers(engine)
     router = execution.TradersPostRouter(live.DATA_DIR)
+    from .accounts import AccountBook
+    book = AccountBook(live.DATA_DIR)
+    router.account_urls = book.urls
+    router.url_names = lambda: {a.webhook: a.name for a in book.accounts if a.webhook}
     router.start()
     while market.i + 1 < market.warm_until:   # read history, don't trade it
         engine.tick(trade=False)
@@ -103,8 +108,10 @@ async def run_live() -> None:
         while market.has_next():
             new = engine.tick()
             live.record(engine, new)
-            router.handle(engine, new, market.delay_minutes)   # real orders, if armed
-            notifier.handle(engine, new, real=router.armed)     # buzz your phone
+            alerts = book.observe(engine, new)                  # each Lucid account follows the trades it's in
+            router.handle(engine, new, market.delay_minutes, book)   # real orders, if armed
+            notifier.handle(engine, new + alerts, real=router.armed)   # buzz your phone
+            new += alerts
             report = reports.observe(engine, new)
             finished = scorecard.observe(engine, new)
             if report:   # a trading day just ended: replay it, compare with paper trading, send the report
@@ -178,6 +185,9 @@ def state() -> dict:
             snap["history"] = history.status()
         if desk:
             snap["desk"] = desk.status()
+        if book:
+            st = book.status()
+            snap["accounts"] = {k: st[k] for k in ("count", "payouts_ready", "total_balance", "paid_out")}
         if scorecard:
             snap["scorecard"] = scorecard.status(engine.account)
         if notifier:
@@ -445,6 +455,51 @@ def push_test() -> dict:
     n = _notifier()
     n.send("💰 Test: MNQ OG closed +$420", "pointer against (PROC) · today +$420", "test")
     return n.status()
+
+
+def _book():
+    if book is None:
+        raise HTTPException(503, "accounts are only tracked in live mode")
+    return book
+
+
+@app.get("/api/accounts")
+def accounts_list() -> dict:
+    return _book().status()
+
+
+@app.post("/api/accounts")
+async def accounts_add(request: Request) -> dict:
+    """Add a Lucid account: name, phase, balance, mll, payouts, cycle_days, optional webhook."""
+    b = await request.json()
+    try:
+        _book().add(str(b.get("name", "")), b["phase"], float(b["balance"]), float(b["mll"]),
+                    int(b.get("payouts") or 0), int(b.get("cycle_days") or 0), str(b.get("webhook") or ""))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    return book.status()
+
+
+@app.post("/api/accounts/{acc_id}/{action}")
+async def accounts_action(acc_id: str, action: str, request: Request) -> dict:
+    """sync (phase, balance, mll, payouts, cycle_days) · payout (amount) · webhook (url) · remove"""
+    b = await request.json() if action != "remove" else {}
+    try:
+        acc = _book().get(acc_id)
+        if action == "sync":
+            acc.account.sync(b["phase"], float(b["balance"]), float(b["mll"]), int(b.get("payouts") or 0), int(b.get("cycle_days") or 0))
+        elif action == "payout":
+            acc.account.take_payout(float(b["amount"]))
+        elif action == "webhook":
+            book.set_webhook(acc_id, str(b.get("url") or ""))
+        elif action == "remove":
+            book.remove(acc_id)
+        else:
+            raise HTTPException(404)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    book.save()
+    return book.status()
 
 
 @app.post("/api/account/payout")
