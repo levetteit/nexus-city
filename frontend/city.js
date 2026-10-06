@@ -515,6 +515,7 @@ function renderAccount(a) {
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
     ${state.mode === "live" ? `<button class="reports-btn" data-reports>📒 DAILY REPORTS</button>` : ""}
     ${state.accounts ? `<button class="desk-btn" data-accounts>👥 MY LUCID ACCOUNTS (${state.accounts.count})${state.accounts.payouts_ready ? ` · ${fmt(state.accounts.payouts_ready)} READY` : ""}</button>` : ""}
+    ${state.mode === "live" ? `<button class="desk-btn" data-signals>🎯 SIGNAL CHECK VS. YOUR INDICATOR</button>` : ""}
     ${deskRow(state)}
     ${scoreRows(state)}
     ${historyRows(state)}
@@ -560,6 +561,91 @@ function newsRows(s) {
     ? n.next.slice(0, 3).map((e) => `<div class="row"><span>${e.time}</span><span>${e.title}</span></div>`).join("")
     : `<div class="row"><span>News</span><span>no high-impact USD news ahead</span></div>`;
   return `<div class="row"><span><b>📰 News filter</b></span><span>${n.error ? "using saved calendar" : "on"}</span></div>${hold}${next}`;
+}
+
+// ---------------------------------------------------------------- signal check
+async function sigPost(day, action, body) {
+  const r = await fetch(`/api/signals/${day}/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) alert((await r.json()).detail);
+}
+
+async function openSignals(day = null) {
+  const panel = document.getElementById("signals"), body = document.getElementById("signals-body");
+  panel.classList.remove("hidden");
+  let list;
+  try { list = await (await fetch("/api/signals")).json(); } catch { body.innerHTML = `<p class="note">live mode only</p>`; return; }
+  const st = list.stats;
+  const head = `<p class="note">Compare each PROC the bots traded with Andrew Macre's indicator on your MNQ chart (same timeframe, same candle time).
+    Your ✅/❌ show exactly where our rebuild of his indicator differs, so it can be fixed.</p>
+    <div class="row"><span>Your checks so far</span><span>${st.reviewed ? `${st.match_pct}% match · ${st.reviewed} checked · ${st.missed} missed` : "none yet"}</span></div>`;
+  if (!day) {
+    body.innerHTML = head + (list.days.map((d) => `<div class="day" data-sig-day="${d.day}"><div class="row"><b>${d.day}</b>
+      <span>${d.signals} traded PROC${d.signals === 1 ? "" : "s"} · ${d.reviewed}/${d.signals} checked${d.no ? ` · ${d.no} ❌` : ""}</span></div></div>`).join("")
+      || `<p class="note">The first PROCs show up here after the bots' first trades.</p>`);
+    return;
+  }
+  const doc = await (await fetch(`/api/signals/${day}`)).json();
+  const tfs = ["3m", "4m", "5m", "6m"];
+  const counts = Object.keys(doc.counts).length ? `<table><tr><th>PROCs seen</th>${tfs.map((t) => `<th>${t}</th>`).join("")}</tr>
+    ${Object.entries(doc.counts).map(([s, c]) => `<tr><td>${s}</td>${tfs.map((t) => `<td>${c[t] || 0}</td>`).join("")}</tr>`).join("")}</table>
+    <small class="note">How many PROCs our engine saw per killzone. If your indicator shows far fewer, ours is too loose.</small>` : "";
+  const cards = doc.signals.map((s) => {
+    const v = doc.votes[s.id]?.vote;
+    return `<div class="sig">
+      <div class="row"><b>${s.tf}m PROC ${s.side === "long" ? "↑ LONG" : "↓ SHORT"} · ${s.clock} candle</b><span>${s.session || ""} · ${esc(s.handle)}</span></div>
+      <small>off the ${s.zone.tf}m ${s.zone.kind} ${s.zone.bottom.toFixed(2)}–${s.zone.top.toFixed(2)} · closed ${s.closed} · entry ${s.entry.toFixed(2)}</small>
+      <canvas data-sig-chart="${s.id}"></canvas>
+      <div class="actions">
+        <button class="yes ${v === "yes" ? "on" : ""}" data-sig-vote="yes" data-id="${s.id}" data-day="${day}">✅ ON MY CHART</button>
+        <button class="no ${v === "no" ? "on" : ""}" data-sig-vote="no" data-id="${s.id}" data-day="${day}">❌ NOT ON MY CHART</button>
+      </div>${doc.votes[s.id]?.note ? `<small>note: ${esc(doc.votes[s.id].note)}</small>` : ""}</div>`;
+  }).join("");
+  const missed = doc.missed.map((m) => `<li>${m.clock} · ${m.tf}m ${m.side}${m.note ? ` · ${esc(m.note)}` : ""}</li>`).join("");
+  body.innerHTML = `${head}<div class="actions"><button data-signals>← ALL DAYS</button></div><h4 style="margin:10px 0 4px">${day}</h4>${counts}
+    ${cards || `<p class="note">No traded PROCs this day.</p>`}
+    ${missed ? `<div class="sig"><b>PROCs you saw that the bots missed</b><ul>${missed}</ul></div>` : ""}
+    <div class="actions"><button data-sig-missed="${day}">＋ ADD A PROC THE BOTS MISSED</button></div>`;
+  for (const s of doc.signals) drawSignal(body.querySelector(`[data-sig-chart="${s.id}"]`), s);
+}
+
+function drawSignal(canvas, s) {
+  const dpr = devicePixelRatio || 1, W = canvas.clientWidth, H = canvas.clientHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const g = canvas.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const tf = s.tf, bars = [];
+  for (const [t, o, h, l, c] of s.candles) {   // 1m candles -> the PROC's timeframe, clock-aligned
+    const k = t - (t % tf), last = bars[bars.length - 1];
+    if (last && last[0] === k) { last[2] = Math.max(last[2], h); last[3] = Math.min(last[3], l); last[4] = c; }
+    else bars.push([k, o, h, l, c]);
+  }
+  if (!bars.length) { g.fillStyle = "#7f88b5"; g.font = "12px Inter, sans-serif"; g.fillText("chart ready after the day closes", 10, H / 2); return; }
+  let lo = Math.min(...bars.map((b) => b[3]), s.zone.bottom), hi = Math.max(...bars.map((b) => b[2]), s.zone.top);
+  const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
+  const L = 4, R = W - 4, step = (R - L) / bars.length;
+  const x = (i) => L + (i + 0.5) * step, y = (p) => 4 + (1 - (p - lo) / (hi - lo)) * (H - 8);
+  const idx = (t) => bars.findIndex((b) => b[0] === t - (t % tf));
+  const zi = Math.max(0, bars.findIndex((b) => b[0] >= s.zone.created - (s.zone.created % tf)));
+  g.fillStyle = s.zone.side === "long" ? "rgba(8,153,129,.3)" : "rgba(242,54,70,.3)";
+  g.fillRect(x(zi) - step / 2, y(s.zone.top), R - x(zi) + step / 2, Math.max(2, y(s.zone.bottom) - y(s.zone.top)));
+  bars.forEach(([, o, h, l, c], i) => {
+    g.strokeStyle = g.fillStyle = c >= o ? "#26d07c" : "#ff4d6d";
+    g.beginPath(); g.moveTo(x(i), y(h)); g.lineTo(x(i), y(l)); g.stroke();
+    g.fillRect(x(i) - step * 0.3, Math.min(y(o), y(c)), step * 0.6, Math.max(1, Math.abs(y(o) - y(c))));
+  });
+  const pi = idx(s.t);
+  if (pi >= 0) {
+    g.strokeStyle = s.side === "long" ? "#4dff9a" : "#ff5470"; g.lineWidth = 2;
+    g.strokeRect(x(pi) - step * 0.6, y(s.box.high) - 2, step * 1.2, y(s.box.low) - y(s.box.high) + 4);
+    g.fillStyle = g.strokeStyle; g.font = "bold 10px Inter, sans-serif";
+    g.fillText(`${s.tf}m PROC`, Math.min(x(pi) + step, R - 50), y(s.box.high) - 4);
+  }
+  const ei = idx(s.entry_t);
+  if (ei >= 0) {
+    g.fillStyle = "#ffd34d"; g.beginPath();
+    const ey = y(s.entry), up = s.side === "long";
+    g.moveTo(x(ei), ey); g.lineTo(x(ei) - 6, ey + (up ? 10 : -10)); g.lineTo(x(ei) + 6, ey + (up ? 10 : -10)); g.fill();
+  }
 }
 
 // ---------------------------------------------------------------- lucid accounts
@@ -925,6 +1011,25 @@ document.addEventListener("click", async (e) => {
   }
   if (e.target.closest("[data-desk]")) openDesk();
   if (e.target.closest("[data-accounts]")) openAccounts();
+  if (e.target.closest("[data-signals]")) openSignals();
+  const sd = e.target.closest("[data-sig-day]");
+  if (sd) openSignals(sd.dataset.sigDay);
+  const sv = e.target.closest("[data-sig-vote]");
+  if (sv) {
+    const current = sv.classList.contains("on");
+    const note = !current && sv.dataset.sigVote === "no" ? prompt("Optional: what's different on your chart? (e.g. no PROC there, different timeframe, the zone isn't untapped)", "") ?? "" : "";
+    await sigPost(sv.dataset.day, "vote", { id: sv.dataset.id, vote: current ? "" : sv.dataset.sigVote, note });
+    openSignals(sv.dataset.day);
+  }
+  const sm = e.target.closest("[data-sig-missed]");
+  if (sm) {
+    const day = sm.dataset.sigMissed;
+    const clock = prompt("Time of the PROC candle on your chart (ET, HH:MM, e.g. 09:42):", "");
+    const tf = clock && prompt("Its timeframe in minutes (3, 4, 5 or 6):", "3");
+    const side = tf && prompt("Direction (long or short):", "long");
+    const note = side && (prompt("Optional note:", "") ?? "");
+    if (side) { await sigPost(day, "missed", { clock, tf: +tf, side: side.trim().toLowerCase(), note }); openSignals(day); }
+  }
   const ac = e.target.closest("[data-acct]");
   if (ac) await accountAction(ac.dataset.acct, ac.dataset.id);
   const dm = e.target.closest("[data-desk-meeting]");

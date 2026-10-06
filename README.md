@@ -571,6 +571,25 @@ The city's account panel still tracks paper P&L from the bots' fills. Your real
 fills (slippage, commissions) are in TradersPost and Tradovate. Run paper for a
 while, then start with **one** evaluation account before connecting more.
 
+## Signal check against Macre's indicator (`backend/signals.py`)
+
+The PROC engine is a rebuild of the TradingView indicators, and the backtest is
+only as good as that rebuild. **🎯 Signal check** in the account panel lists
+every PROC the bots traded each day, with a mini chart of:
+
+- the candles around it
+- the FFVG/IFFVG it reacted to
+- the pointer candle
+- the entry
+
+Each signal is labeled by its candle's open time, as TradingView does. Mark each one
+**✅ on my chart** or **❌ not on my chart** (with a note), and add PROCs your
+indicator printed that the bots missed. A per-killzone table shows how many PROCs
+the engine saw on each timeframe. On the 21 days that's about 40 per day inside
+the killzones; if your indicator shows far fewer, the rebuild is too loose. The
+agreement score and the mismatches show exactly what to fix. Saved in
+`data/signals/`.
+
 ## Tests and the watchdog
 
 **Tests.** `python -m pytest tests` checks the things that cost money when they break:
