@@ -189,11 +189,19 @@ class Bot:
 
     news_hold = None   # a NewsEvent while the engine's news filter blocks new trades (see news.py)
 
-    def _news_blocked(self, what: str) -> bool:
-        if self.news_hold is None:
+    desk_mode = None   # the trading desk's active risk mode, if not normal (see desk.py)
+
+    def _news_blocked(self, what: str, adding: bool = False) -> bool:
+        """News pause, or the desk taking risk off: sit_out blocks entries, cautious blocks adds."""
+        why = None
+        if self.news_hold is not None:
+            why = f"{self.news_hold.label} news"
+        elif self.desk_mode and (self.desk_mode["mode"] == "sit_out" or (adding and self.desk_mode["mode"] == "cautious")):
+            why = f"desk: {self.desk_mode['mode'].replace('_', ' ')}"
+        if why is None:
             return False
         if hasattr(self, "last_event"):
-            self.last_event = f"{what} skipped · {self.news_hold.label} news"
+            self.last_event = f"{what} skipped · {why}"
         return True
 
     def _open(self, entry: Entry, u: Underlying, market: Market) -> None:
@@ -214,7 +222,7 @@ class Bot:
     def add(self, market: Market, why: str) -> bool:
         """Size up the open position by `contracts`, up to `max_contracts`."""
         pos = self.position
-        if self._news_blocked("add"):
+        if self._news_blocked("add", adding=True):
             return False
         want = min(self.cfg.contracts, self.cfg.max_contracts - pos.qty)
         qty = self.account.request(self.cfg.id, self.cfg.underlying, want, adding=True) if want > 0 else 0

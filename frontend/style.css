@@ -148,6 +148,21 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
   padding: 8px max(14px, env(safe-area-inset-left)) calc(max(10px, env(safe-area-inset-bottom)) + var(--hb, 0px)); }
 #chart .chart-info b { font-size: 13px; }
 
+/* ---------- trading desk ---------- */
+#desk { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(600px, calc(100vw - 24px)); max-height: 82vh; overflow: auto; z-index: 9; font-size: 12.5px; line-height: 1.45; }
+#desk .row { display: flex; justify-content: space-between; gap: 10px; margin: 4px 0; }
+#desk h4 { font-family: var(--pixel); font-size: 9px; color: var(--muted); margin: 14px 0 6px; letter-spacing: 1px; }
+#desk .mode { display: inline-block; font-family: var(--pixel); font-size: 9px; padding: 3px 6px; border-radius: 4px; background: #12684a; color: var(--green); }
+#desk .mode.cautious { background: #6b5310; color: var(--gold); } #desk .mode.sit_out { background: #6b1022; color: #ffb3c0; }
+#desk .entry { background: rgba(255, 255, 255, .04); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+#desk .entry b { color: var(--accent, #ffcc33); }
+#desk .entry small, #desk small { color: var(--muted); display: block; margin-top: 4px; }
+#desk ul { margin: 4px 0; padding-left: 18px; }
+#desk .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+#desk .actions button, #account button.desk-btn { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: rgba(124, 92, 255, .15);
+  color: var(--text); font-family: var(--pixel); font-size: 8px; cursor: pointer; }
+#account button.desk-btn { width: 100%; margin-top: 6px; font-size: 9px; padding: 8px; }
+
 /* ---------- daily reports ---------- */
 #reports { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 24px)); max-height: 80vh; overflow: auto; z-index: 9; font-size: 12.5px; }
 #reports .day { border-top: 1px solid rgba(255, 255, 255, .07); padding: 8px 0; cursor: pointer; }

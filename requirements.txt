@@ -2,3 +2,4 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 tzdata>=2024.1   # timezone data for Windows (Linux/macOS already have it)
 pywebpush>=2.0   # phone notifications (web push)
+anthropic>=1.11,<2
