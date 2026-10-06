@@ -484,10 +484,19 @@ the same address or to anyone who opted out, and every contact comes with the pa
 | Email | `STARNET_SMTP_HOST`, `STARNET_SMTP_PORT`, `STARNET_SMTP_USER`, `STARNET_SMTP_PASSWORD`, `STARNET_MAIL_FROM`, `STARNET_MAIL_ADDRESS` | Outreach sends itself, with your postal address and an opt-out line (CAN-SPAM) |
 | Facebook Page | `STARNET_FB_PAGE_ID`, `STARNET_FB_PAGE_TOKEN` (a Page access token with `pages_manage_posts`); `STARNET_FB_PAGE_VENTURE` (default `V-PPS`) | The Page belongs to one venture, Padilla Property Solutions: its posts go out on their own, in Spanish, written after reading the Page's latest posts. Other ventures never post there |
 | LinkedIn | `STARNET_LINKEDIN_TOKEN` (scopes `openid profile w_member_social`; expires every 60 days) | Posts go out on your profile. When the token expires, posts fail with a note to renew it |
-| Instagram, TikTok | not yet: every post needs an image or a video (and TikTok's API needs their audit) | Their posts wait in your queue |
+| Instagram | `STARNET_IG_USER_ID` (the Instagram professional account linked to the Page); the Page token must also have `instagram_basic` and `instagram_content_publish` | Padilla's posts go to Instagram too, each with its image card |
+| TikTok | not yet: every post needs a video, and TikTok's API needs their audit | Its posts wait in your queue |
 | Fiverr, Etsy | none: they have no seller API, and bots break their terms | The crew prepares; you publish and reply there |
 
 Refunds and payouts aren't wired at all: they stay in your Stripe dashboard.
+
+**Image cards** (`backend/station/media.py`): every Facebook and Instagram post gets a branded 1080x1350 card
+(headline, up to 3 points, call to action) drawn with Pillow and the bundled Inter font, in the venture's
+colors. The card's words go through QA with the post. Cards are served at `/media/<random name>` without the
+password, because Instagram downloads the image itself; on Render the public address comes from
+`RENDER_EXTERNAL_URL` automatically (elsewhere set `STARNET_PUBLIC_URL`).
+
+**Outreach is off for every venture** until you press **Allow outreach** on that venture's card.
 
 What the station can't do: move money out, refund, sign anything, run a marketplace account, or touch the
 trading bots' orders and risk. The **Stop all outbound** button on the Command tab stops every outgoing post,

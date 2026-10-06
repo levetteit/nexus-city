@@ -67,12 +67,19 @@ class Ultron:
         if not s.get("ventures", "V-PPS"):
             s.create("ventures", {"id": "V-PPS", "name": "Padilla Property Solutions", "category": "solar", "stage": "operate",
                                   "owner": "owner", "owner_business": True, "unit": "station", "planned": True,
-                                  "offer": "Solar panel and battery systems for homes in Puerto Rico (details to confirm with the owner)",
-                                  "objective": "More qualified solar leads (messages and calls) from the Facebook Page",
-                                  "language": "es", "market": "Puerto Rico", "channels": ["facebook"], "links": {},
-                                  "notes": "The Facebook Page still shows its old name, 'The Auto Plug PR', until the owner can rename "
-                                           "it on Oct 13: write as Padilla Property Solutions. Learn from the Page's own recent posts.",
-                                  "compliance": ["No savings, price, financing or incentive claims unless the owner has provided them",
+                                  "offer": "Solar panel and battery systems for homes, installed anywhere in Puerto Rico, with financing available",
+                                  "objective": "More qualified solar leads (DMs and WhatsApp messages) from Facebook and Instagram",
+                                  "language": "es", "market": "Puerto Rico (the whole island)", "channels": ["facebook", "instagram"],
+                                  "links": {},
+                                  "notes": "We cover the entire island. Customers reach us by DM (Facebook or Instagram) or by the WhatsApp "
+                                           "number listed on the Page: every post's call to action is DM or WhatsApp. Financing is "
+                                           "available, with payments from $100. The Facebook Page still shows its old name, 'The Auto "
+                                           "Plug PR', until the owner can rename it on Oct 13: write as Padilla Property Solutions. "
+                                           "Learn from the Page's own recent posts.",
+                                  "compliance": ["Payment amounts (like 'desde $100') only together with the down payment, term and APR "
+                                                 "(Truth in Lending), which the owner hasn't provided yet: until then say 'financiamiento "
+                                                 "disponible' or 'pagos accesibles', never a dollar amount",
+                                                 "No savings, price or incentive claims unless the owner has provided them",
                                                  "Don't mention a federal tax credit for home solar unless the owner confirms one applies",
                                                  "Don't promise power during outages except for systems with batteries",
                                                  "Facts about LUMA, net metering or local programs only if accurate and current"],
@@ -140,7 +147,7 @@ class Ultron:
         for v in selling:
             mp = (v.get("marketing_plan") or {}).get("outreach") or {}
             last = v.get("outreach_day")
-            if mp.get("use") and (not last or (now.date() - datetime.fromisoformat(last).date()).days >= 2):
+            if v.get("outreach_allowed") and mp.get("use") and (not last or (now.date() - datetime.fromisoformat(last).date()).days >= 2):
                 return {"kind": "outreach", "venture": v["id"]}
         for r in s.all("routines"):
             spec = next((x for x in research.ROUTINES if x["id"] == r["id"]), None)

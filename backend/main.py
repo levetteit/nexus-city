@@ -276,7 +276,8 @@ class PasswordGate:
         return False, False
 
     async def __call__(self, scope, receive, send):
-        if not self.token or scope["type"] not in ("http", "websocket") or scope["path"] in OPEN_PATHS:
+        if (not self.token or scope["type"] not in ("http", "websocket") or scope["path"] in OPEN_PATHS
+                or scope["path"].startswith("/media/")):   # post images: Instagram fetches them itself
             return await self.app(scope, receive, send)
         ok, set_cookie = self._authorized(dict(scope["headers"]))
         if not ok:
@@ -890,6 +891,27 @@ async def station_feedback(request: Request) -> dict:
     if not note:
         raise HTTPException(400, "note is empty")
     return _station().store.event("owner.feedback", "owner", note, ref=str(b.get("ref") or "")[:40] or None)
+
+
+@app.get("/media/{name}")
+def station_media(name: str):
+    """A post's image card. Names are 128-bit random, so they're unguessable; nothing else is served here."""
+    from .station import media
+    path = media.path_for(os.getenv("STARNET_DATA_DIR", "data"), name)
+    if not path:
+        raise HTTPException(404)
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@app.post("/api/station/ventures/{rid}/outreach")
+async def station_venture_outreach(rid: str, request: Request) -> dict:
+    """Let the Outreach Agent contact businesses for this venture (`{"on": true}`). Off for every venture by default."""
+    st = _station()
+    if not st.store.get("ventures", rid):
+        raise HTTPException(404)
+    on = bool((await request.json()).get("on"))
+    return st.store.update("ventures", rid, {"outreach_allowed": on}, "owner", f"outreach {'allowed' if on else 'off'} for {rid}",
+                           kind="venture.outreach_allowed")
 
 
 @app.post("/api/station/ventures/{rid}/link")

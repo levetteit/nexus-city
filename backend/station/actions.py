@@ -149,7 +149,11 @@ def dispatch(store: Store, action: dict, outbound_on: bool) -> dict:
                 return _manual(store, action, f"{p.get('platform')} isn't connected")
             if not connectors.platform_allowed(p.get("platform", ""), action.get("venture")):
                 return _manual(store, action, f"the connected {p.get('platform')} account belongs to another venture")
-            res = connectors.post_social(p["platform"], p["text"], p.get("link", ""))
+            from .media import public_url
+            image_url = public_url(p["image"]) if p.get("image") else ""
+            if p.get("image") and not image_url:
+                return _manual(store, action, "the card has no public address (set STARNET_PUBLIC_URL)")
+            res = connectors.post_social(p["platform"], p["text"], p.get("link", ""), image_url)
         else:
             return _manual(store, action, "no connector for this kind")
     except connectors.ConnectorError as exc:

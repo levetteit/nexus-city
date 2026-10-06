@@ -109,7 +109,8 @@ def test_seeds_once_without_duplicates(tmp_path):
     assert [a["name"] for a in again.store.all("agents")][:2] == ["ULTRON", "Market Research Agent"]
     assert len(again.store.all("agents")) == 12 and len(again.store.all("ventures")) == 2
     pps = again.store.get("ventures", "V-PPS")
-    assert pps["language"] == "es" and pps["channels"] == ["facebook"] and pps["owner_business"]
+    assert pps["language"] == "es" and pps["channels"] == ["facebook", "instagram"] and pps["owner_business"]
+    assert not pps.get("outreach_allowed")
     teams = {a["department"] for a in again.store.all("agents")}
     assert {"marketing", "finance", "legal", "warroom"} <= teams
     assert again.store.get("ventures", "V-001")["stage"] == "operate"
@@ -159,6 +160,7 @@ def test_research_to_venture_to_tasks(ultron):
     assert len(link) == 1 and link[0]["payload"]["price_usd"] == 25
     u.tick(now=now)
     assert u.store.get("tasks", owner_task["id"])["status"] == "queued"
+    u.store.update("ventures", v["id"], {"outreach_allowed": True}, "owner")   # the owner allows outreach for this one
     # QA passes the link; Stripe isn't connected, so it waits for the owner instead of being dropped;
     # marketing writes the channel plan; the agent drafts; outreach is drafted and QA'd
     ran = drain(u, now)
@@ -505,30 +507,51 @@ def test_solar_venture_owns_the_page_writes_spanish_and_studies_its_posts(tmp_pa
     monkeypatch.setenv("STARNET_FB_PAGE_TOKEN", "pagetok")
     monkeypatch.setattr(connectors, "facebook_recent_posts",
                         lambda limit=12: [{"at": "2026-10-01", "text": "¡Instala tus placas solares con nosotros!", "url": ""}])
-    sent = []
-    monkeypatch.setattr(connectors, "_facebook_post", lambda text, link: sent.append((text, link)) or {"id": "fb1"})
-    monkeypatch.setitem(connectors.SOCIAL["facebook"], "post", connectors._facebook_post)
     u.cfg.update({"audited": MON_0900.date().isoformat(), "kicked_off": True})
     for r in u.store.all("routines"):
         u.store.update("routines", r["id"], {"last_run": MON_0900.isoformat()}, "test")
     assert u.next_job(MON_0900) == {"kind": "marketing_plan", "venture": "V-PPS"}
     u.run_job({"kind": "marketing_plan", "venture": "V-PPS"}, now=MON_0900)
     prompt = fake.calls[-1]["messages"][0]["content"]
-    assert "Puerto Rico" in prompt and "Instala tus placas" in prompt and "fixed: facebook" in prompt
+    assert "Puerto Rico" in prompt and "Instala tus placas" in prompt and "fixed: facebook, instagram" in prompt
+    assert "hasn't allowed outreach" in prompt
     assert u.next_job(MON_0900) == {"kind": "content", "venture": "V-PPS"}     # no link needed: it has its own channel
-    fake_posts = {"posts": [{"platform": "facebook", "text": "Energía solar para tu hogar", "angle": "tips"}]}
+    card = {"headline": "Energía solar para tu hogar", "points": ["Servicio en toda la isla"], "cta": "Escríbenos por DM"}
+    fake_posts = {"posts": [{"platform": "facebook", "text": "Energía solar para tu hogar", "angle": "tips", "card": card},
+                            {"platform": "instagram", "text": "Energía solar ☀️", "angle": "tips", "card": card}]}
     orig = fake.create
     fake.create = lambda **kw: orig(**kw) if "posts" not in str(kw.get("output_config")) else NS(
         stop_reason="end_turn", usage=NS(input_tokens=1, output_tokens=1, cache_read_input_tokens=0, cache_creation_input_tokens=0,
                                          server_tool_use=None), content=[NS(type="text", text=json.dumps(fake_posts))])
     fake.beta.messages.create = fake.create
     u.run_job({"kind": "content", "venture": "V-PPS"}, now=MON_0900)
-    post = u.store.find("actions", kind="social.post", venture="V-PPS")[0]
+    post, ig = sorted(u.store.find("actions", kind="social.post", venture="V-PPS"), key=lambda a: a["payload"]["platform"])
     assert post["payload"]["link"] == ""                                        # no link back to its own Page
+    from backend.station import media
+    assert media.path_for(str(tmp_path), post["payload"]["image"])              # each post has its own card
     actions.qa(u.store, u.brain, post)
     assert "compliance" in fake.calls[-1]["messages"][0]["content"]
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    monkeypatch.delenv("STARNET_PUBLIC_URL", raising=False)
+    assert actions.dispatch(u.store, u.store.get("actions", post["id"]), True)["status"] == "manual"   # no public address yet
+    u.store.update("actions", post["id"], {"status": "ready"}, "test")
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://starnet-city.onrender.com")
+    sent_fb = []
+    monkeypatch.setitem(connectors.SOCIAL["facebook"], "post", lambda text, link, image_url="": sent_fb.append((text, image_url)) or {"id": "fb1"})
     assert actions.dispatch(u.store, u.store.get("actions", post["id"]), True)["status"] == "sent"
-    assert sent == [("Energía solar para tu hogar", "")]
+    assert sent_fb == [("Energía solar para tu hogar", f"https://starnet-city.onrender.com/media/{post['payload']['image']}")]
+    # Instagram: the same Page's account, with the card
+    monkeypatch.setenv("STARNET_IG_USER_ID", "1784")
+    calls = []
+
+    def graph(method, url, headers=None, form=None, body=None):
+        calls.append((method, url, form))
+        return {"id": "box1"} if url.endswith("/media") else {"status_code": "FINISHED"} if "status_code" in url else {"id": "ig1"}
+    monkeypatch.setattr(connectors, "_http_json", graph)
+    actions.qa(u.store, u.brain, ig)
+    assert actions.dispatch(u.store, u.store.get("actions", ig["id"]), True)["status"] == "sent"
+    assert calls[0][1].endswith("1784/media") and calls[0][2]["image_url"].endswith(ig["payload"]["image"])
+    assert calls[-1][1].endswith("1784/media_publish") and calls[-1][2]["creation_id"] == "box1"
     # another venture's Facebook post never lands on the solar Page
     other = actions.create(u.store, "social.post", "A-006", "V-001", {"platform": "facebook", "text": "trading", "link": ""}, "x")
     actions.qa(u.store, u.brain, other)
@@ -538,3 +561,24 @@ def test_solar_venture_owns_the_page_writes_spanish_and_studies_its_posts(tmp_pa
     fake.warroom = {"verdicts": [{"venture": "V-PPS", "verdict": "kill", "why": "x", "evidence": [], "changes": []}], "lessons": []}
     warroom.convene(u.store, u.brain, u.treasury, u.health, u.cfg, u.request, MON_0900)
     assert u.store.get("ventures", "V-PPS")["stage"] == "operate" and not u.store.find("approvals", kind="venture_decision")
+
+
+def test_media_route_is_public_but_unguessable(tmp_path, monkeypatch):
+    import importlib
+    from fastapi.testclient import TestClient
+    from backend.station import media
+    monkeypatch.setenv("STARNET_MODE", "sim")
+    monkeypatch.setenv("STARNET_PASSWORD", "pw")
+    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
+    import backend.main as main
+    importlib.reload(main)
+    name = media.render_card(str(tmp_path), "Padilla Property Solutions", "Energía solar", ["Toda la isla"], "DM", "solar")
+    with TestClient(main.app) as c:
+        r = c.get(f"/media/{name}")                                   # no password: Instagram fetches it
+        assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg" and r.content[:2] == b"\xff\xd8"
+        assert c.get("/media/../station/ledger.jsonl").status_code in (401, 404)   # never served
+        assert c.get("/media/..%2Fstation%2Fledger.jsonl").status_code == 404
+        assert c.get("/media/abc.jpg").status_code == 404
+        assert c.get("/api/station").status_code == 401                 # everything else still needs the password
+        c.auth = ("x", "pw")
+        assert c.post("/api/station/ventures/V-PPS/outreach", json={"on": True}).json()["outreach_allowed"] is True

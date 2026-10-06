@@ -137,8 +137,9 @@ def send_email(to: str, subject: str, body: str) -> dict:
 # Facebook Page   STARNET_FB_PAGE_ID, STARNET_FB_PAGE_TOKEN (a Page access token with pages_manage_posts); the Page
 #                 belongs to one venture (STARNET_FB_PAGE_VENTURE, default V-PPS): other ventures never post there
 # LinkedIn        STARNET_LINKEDIN_TOKEN (w_member_social; expires every 60 days), optional STARNET_LINKEDIN_PERSON
-# Instagram and TikTok need an image or a video with every post; until those are built, their posts
-# wait in the posting queue on the Command Board with a Copy button.
+# Instagram       STARNET_IG_USER_ID (the Instagram professional account linked to the Page; same Page token,
+#                 which also needs instagram_basic + instagram_content_publish). Every post carries a card (media.py).
+# TikTok needs a video with every post and an audited app: its posts wait in the posting queue.
 def _http_json(method: str, url: str, headers: Optional[dict] = None, form: Optional[dict] = None,
                body: Optional[dict] = None) -> dict:
     data, hdrs = None, dict(headers or {})
@@ -165,18 +166,45 @@ def _http_json(method: str, url: str, headers: Optional[dict] = None, form: Opti
         raise ConnectorError(f"can't reach {url.split('/')[2]}: {exc.reason}"[:200])
 
 
-def _facebook_post(text: str, link: str) -> dict:
-    page, token = os.getenv("STARNET_FB_PAGE_ID"), os.getenv("STARNET_FB_PAGE_TOKEN")
+def _graph_base() -> str:
     version = os.getenv("STARNET_META_GRAPH_VERSION", "")   # empty: the app's default Graph API version
-    base = "https://graph.facebook.com/" + (f"{version}/" if version else "")
-    form = {"message": text, "access_token": token}
-    if link:
-        form["link"] = link
+    return "https://graph.facebook.com/" + (f"{version}/" if version else "")
+
+
+def _facebook_post(text: str, link: str, image_url: str = "") -> dict:
+    page, token = os.getenv("STARNET_FB_PAGE_ID"), os.getenv("STARNET_FB_PAGE_TOKEN")
     try:
-        res = _http_json("POST", f"{base}{page}/feed", form=form)
+        if image_url:   # a photo post: the card, with the text (and link) as its caption
+            res = _http_json("POST", f"{_graph_base()}{page}/photos", form={
+                "url": image_url, "caption": text + (f"\n\n{link}" if link else ""), "access_token": token})
+        else:
+            form = {"message": text, "access_token": token}
+            if link:
+                form["link"] = link
+            res = _http_json("POST", f"{_graph_base()}{page}/feed", form=form)
     except ConnectorError as exc:
         raise ConnectorError(f"Facebook: {exc}")
-    return {"platform": "facebook", "id": res.get("id")}
+    return {"platform": "facebook", "id": res.get("post_id") or res.get("id")}
+
+
+def _instagram_post(text: str, link: str, image_url: str = "") -> dict:
+    """Instagram only takes posts with an image: create the media container, wait for it, publish it."""
+    ig, token = os.getenv("STARNET_IG_USER_ID"), os.getenv("STARNET_FB_PAGE_TOKEN")
+    if not image_url:
+        raise ConnectorError("Instagram needs an image with every post")
+    try:
+        box = _http_json("POST", f"{_graph_base()}{ig}/media", form={"image_url": image_url, "caption": text, "access_token": token})
+        for _ in range(6):
+            st = _http_json("GET", f"{_graph_base()}{box['id']}?" + urllib.parse.urlencode({"fields": "status_code", "access_token": token}))
+            if st.get("status_code") in ("FINISHED", None):
+                break
+            if st.get("status_code") == "ERROR":
+                raise ConnectorError("Instagram couldn't process the image")
+            time.sleep(3)
+        res = _http_json("POST", f"{_graph_base()}{ig}/media_publish", form={"creation_id": box["id"], "access_token": token})
+    except ConnectorError as exc:
+        raise ConnectorError(f"Instagram: {exc}")
+    return {"platform": "instagram", "id": res.get("id")}
 
 
 def _linkedin_person() -> str:
@@ -215,7 +243,7 @@ def page_venture() -> str:
 
 
 def platform_allowed(platform: str, venture: Optional[str]) -> bool:
-    if platform.lower() == "facebook":
+    if platform.lower() in ("facebook", "instagram"):   # the Page and its linked Instagram account
         return venture == page_venture()
     return True
 
@@ -225,8 +253,7 @@ def facebook_recent_posts(limit: int = 12) -> list[dict]:
     page, token = os.getenv("STARNET_FB_PAGE_ID"), os.getenv("STARNET_FB_PAGE_TOKEN")
     if not (page and token):
         return []
-    version = os.getenv("STARNET_META_GRAPH_VERSION", "")
-    base = "https://graph.facebook.com/" + (f"{version}/" if version else "")
+    base = _graph_base()
     q = urllib.parse.urlencode({"fields": "message,created_time,permalink_url", "limit": limit, "access_token": token})
     res = _http_json("GET", f"{base}{page}/posts?{q}")
     return [{"at": x.get("created_time", "")[:10], "text": (x.get("message") or "")[:700], "url": x.get("permalink_url", "")}
@@ -236,6 +263,8 @@ def facebook_recent_posts(limit: int = 12) -> list[dict]:
 SOCIAL: dict = {
     "facebook": {"configured": lambda: bool(os.getenv("STARNET_FB_PAGE_ID") and os.getenv("STARNET_FB_PAGE_TOKEN")),
                  "post": _facebook_post},
+    "instagram": {"configured": lambda: bool(os.getenv("STARNET_IG_USER_ID") and os.getenv("STARNET_FB_PAGE_TOKEN")),
+                  "post": _instagram_post},
     "linkedin": {"configured": lambda: bool(os.getenv("STARNET_LINKEDIN_TOKEN")), "post": _linkedin_post},
 }
 
@@ -244,14 +273,14 @@ def social_configured(platform: str) -> bool:
     return platform.lower() in SOCIAL and SOCIAL[platform.lower()]["configured"]()
 
 
-def post_social(platform: str, text: str, link: str = "") -> dict:
+def post_social(platform: str, text: str, link: str = "", image_url: str = "") -> dict:
     if not social_configured(platform):
         raise ConnectorError(f"{platform} isn't connected")
-    return SOCIAL[platform.lower()]["post"](text, link)
+    return SOCIAL[platform.lower()]["post"](text, link, **({"image_url": image_url} if image_url else {}))
 
 
 def status() -> dict:
     return {"stripe": stripe_configured(), "stripe_webhook": bool(os.getenv("STRIPE_WEBHOOK_SECRET")),
             "email": email_configured(), "social": sorted(p for p in SOCIAL if social_configured(p)),
-            "instagram": "queue (needs an image per post: coming next)", "tiktok": "queue (needs a video; API needs TikTok's audit)",
+            "tiktok": "queue (needs a video; API needs TikTok's audit)",
             "fiverr": "manual (no seller API)", "etsy": "manual until funded"}
