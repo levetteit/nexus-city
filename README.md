@@ -451,7 +451,18 @@ counted. Agents can never book revenue.
 Anything with a monthly cost (next on the list: Printify Premium, ~$29/month, up to 20% off product costs)
 waits until the pool can cover two months of it plus a month of bills; then ULTRON asks you to approve it.
 
-**Autonomous ventures: the crew hunts, launches, sells and delivers** (`backend/station/digital.py`). The
+**Claude credits left** (`backend/station/credits.py`): the agents' fuel, on the board's Command tab, the
+City's top bar (⛽) and the 3D station's HUD. Anthropic has no API for the prepaid balance, so: tap **I
+added credits** with the amount whenever you top up in the Anthropic Console, and the station counts down
+from it with the cost of every Claude call it and the trading desk make (the desk's calls are booked to the
+City; they don't count against the station's $50 cap). With `ANTHROPIC_ADMIN_KEY` (an Admin API key,
+`sk-ant-admin...`) it also reads Anthropic's own cost report every hour and uses the larger number, so usage
+outside the station comes off too. When Anthropic answers "credit balance is too low", the counter shows
+empty, ULTRON stops starting Claude jobs (they wait, they aren't failed) and tries one every 20 minutes, so
+credits added without being recorded are picked up on their own. Below `STARNET_CREDITS_LOW` ($5) you get
+one warning per top-up. The Jarvis brief carries the same numbers.
+
+ (`backend/station/digital.py`). The
 research routines rank first what the crew can run end to end through the station's own rails, with $0 and
 no work from you: digital products it writes and designs itself (guides, checklists, planners, workbooks,
 template packs, printables), sold on the station storefront and as Etsy digital downloads, with Pinterest

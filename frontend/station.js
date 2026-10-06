@@ -62,7 +62,32 @@ function stat(k, v, s = "", cls = "") {
   return `<div class="stat"><div class="k">${esc(k)}</div><div class="v ${cls}">${v}</div><div class="s">${esc(s)}</div></div>`;
 }
 
+function renderCredits() {
+  const c = S.credits;
+  if (!c) return;
+  const el = $("#credits");
+  el.className = `glass credits ${c.state}`;
+  const big = c.state === "empty" ? "Empty" : c.remaining == null ? "Not recorded" : money(c.remaining);
+  const why = {
+    empty: "Anthropic says the balance is used up. The agents wait and try again every 20 minutes.",
+    low: "Running low: top up in the Anthropic Console, then record it here.",
+    ok: "The agents can work.",
+    unknown: "Record what you added in the Anthropic Console so the station can count down from it.",
+  }[c.state] || "";
+  el.innerHTML = `<div class="label">CLAUDE CREDITS LEFT</div><div class="big">${big}</div>
+    <div class="muted small">${esc(why)}</div>
+    <div class="muted small" style="margin-top:6px">Added ${money(c.added)} · used ${money(c.used)} since ${c.since ? esc(ago(c.since)) : "—"} · today ${money(c.today)} · ${money(c.per_day_7d)}/day this week${c.days_left ? ` · about ${c.days_left} days left` : ""}${c.reported != null ? ` · Anthropic's report ${money(c.reported)}` : c.admin_key ? "" : " · add ANTHROPIC_ADMIN_KEY to check against Anthropic's own report"}</div>
+    <div class="row"><input id="cr-amount" type="number" min="1" step="1" placeholder="$ added" inputmode="decimal" /><button class="btn primary" id="cr-add">I added credits</button>
+      <a class="btn" href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">Anthropic billing</a></div>`;
+  $("#cr-add").onclick = () => {
+    const amount = parseFloat($("#cr-amount").value);
+    if (!(amount > 0)) return;
+    act(() => api("/api/station/credits", { amount }), `Recorded ${money(amount)} of credits.`);
+  };
+}
+
 function renderCommand() {
+  renderCredits();
   const m = S.mission || {}, t = S.treasury;
   $("#mission-name").textContent = m.name || "—";
   $("#mission-goal").textContent = m.goal || "";

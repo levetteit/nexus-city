@@ -99,6 +99,8 @@ async def run_live() -> None:
     desk = TradingDesk(live.DATA_DIR)
     if desk.enabled:
         engine.desk = desk
+        # the desk's Claude calls are real money: the city's AI cost, and they come off the credits count
+        desk.on_usage = lambda usage: station and station.treasury.charge_ai(usage, "DESK", "V-001", "trading desk", unit="city")
     morning_done = ""
     last_poll = 0.0
     last_order_error = ""
@@ -192,8 +194,10 @@ def state() -> dict:
     snap = engine.snapshot()
     snap["mode"] = MODE
     if station:
+        cr = station.credits or {}
         snap["station"] = {"coordinating": station.busy, "approvals": len(station.store.find("approvals", status="pending")),
-                           "owner_tasks": len(station.store.find("tasks", status="waiting_owner"))}
+                           "owner_tasks": len(station.store.find("tasks", status="waiting_owner")),
+                           "credits": {"state": cr.get("state", "unknown"), "remaining": cr.get("remaining")}}
     if MODE == "live":
         snap["delay_min"] = round(engine.market.delay_minutes, 1)
         snap["feed"] = engine.market.feed
@@ -809,6 +813,19 @@ async def station_money(request: Request) -> dict:
         raise HTTPException(400, str(exc))
 
 
+@app.post("/api/station/credits")
+async def station_credits(request: Request) -> dict:
+    """You added Claude credits in the Anthropic Console: `{"amount": 20, "note": "..."}`. Returns the new count."""
+    from .station import credits
+    b = await request.json()
+    st = _station()
+    try:
+        credits.add(st.store, float(b.get("amount", 0)), str(b.get("note", "")))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    return credits.summary(st.store, st.treasury)
+
+
 @app.post("/api/station/stripe/webhook")
 async def station_stripe_webhook(request: Request) -> dict:
     """Stripe → paid checkouts book themselves into the treasury. Verified by the webhook's signing secret."""
@@ -1018,6 +1035,7 @@ def jarvis_brief(request: Request) -> dict:
             "outbound": o["outbound"], "connectors": o["connectors"], "alerts": [e["summary"] for e in o["alerts"]],
             "warroom": {k: (o["warroom"] or {}).get(k) for k in ("at", "summary", "stop_doing", "start_doing")},
             "leads_7d": sum(1 for l in o["leads"] if l["created_at"] >= (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()),
+            "credits": {k: o["credits"][k] for k in ("state", "remaining", "added", "used", "today", "per_day_7d", "days_left")},
             "error": o["error"]}
 
 

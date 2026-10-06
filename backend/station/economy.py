@@ -138,10 +138,10 @@ class Treasury:
             prev = e["hash"]
         return {"entries": len(self.entries), "intact": not bad, "broken_at": bad[:10]}
 
-    def charge_ai(self, usage, agent: str, venture: Optional[str], note: str) -> float:
+    def charge_ai(self, usage, agent: str, venture: Optional[str], note: str, unit: str = "station") -> float:
         cost = usage_cost(usage)
         if cost > 0:
-            self.book("ai_usage", cost, "station", "api_usage", note, venture=venture, agent=agent)
+            self.book("ai_usage", cost, unit, "api_usage", note, venture=venture, agent=agent)
         return cost
 
     def sync_payouts(self, account) -> int:
@@ -159,7 +159,8 @@ class Treasury:
     # ---------------------------------------------------------------- reading
     def ai_spent(self, month: Optional[str] = None) -> float:
         month = month or datetime.now(timezone.utc).strftime("%Y-%m")
-        return round(sum(e["amount"] for e in self.entries if e["kind"] == "ai_usage" and e["at"].startswith(month)), 2)
+        return round(sum(e["amount"] for e in self.entries if e["kind"] == "ai_usage" and e["at"].startswith(month)
+                         and e.get("unit", "station") == "station"), 2)   # the station's cap; the desk's calls are the city's
 
     def ai_allowed(self, estimate: float = 1.0) -> bool:
         return self.ai_spent() + estimate <= AI_BUDGET

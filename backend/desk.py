@@ -204,11 +204,19 @@ class TradingDesk:
         return out
 
     # ---------------------------------------------------------------- Claude calls
+    on_usage = None   # set by the server: books each call's cost (station treasury, the city's unit) and the credits count
+
     def _request(self, **kw):
         import anthropic
         try:
-            return self.client.beta.messages.create(
+            resp = self.client.beta.messages.create(
                 model=MODEL, betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kw)
+            if self.on_usage:
+                try:
+                    self.on_usage(resp.usage)
+                except Exception:
+                    pass   # bookkeeping never breaks the desk
+            return resp
         except anthropic.APIStatusError as exc:
             self.last_error = f"Claude API {exc.status_code}: {exc.message}"[:200]
             raise
