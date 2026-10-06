@@ -473,7 +473,14 @@ function renderAccount(a) {
   const stage = a.target
     ? `<div class="row"><span>Target</span><span>${money(a.profit)} / ${fmt(a.target)}</span></div>
        <div class="bar"><i style="width:${Math.max(0, Math.min(100, (a.profit / a.target) * 100))}%"></i></div>`
-    : `<div class="row"><span>Payout</span><span class="${a.payout_eligible ? "pos" : ""}">${a.payout_eligible ? "eligible" : `${a.profitable_days} / ${a.payout_days} profitable days`}</span></div>`;
+    : `<div class="row"><span>Payout cycle</span><span>${a.cycle_days} / ${a.payout_days} days ≥ ${fmt(a.payout_day_min)} · net ${money(a.cycle_net)}</span></div>
+       <div class="bar"><i style="width:${Math.min(100, (a.cycle_days / a.payout_days) * 100)}%"></i></div>
+       <div class="row"><span>Payout</span><span class="${a.payout_eligible ? "pos" : ""}">${a.payout_eligible
+         ? `up to ${fmt(a.payout_limit)} · ${a.safe_payout ? `take ${fmt(a.safe_payout)}` : `wait (keeps ${fmt(a.keep_room)} room)`}`
+         : "not yet"}</span></div>
+       <div class="row"><span>Paid out</span><span>${fmt(a.paid_out)} (${a.payouts}/${a.max_payouts ?? "∞"}) · you keep ${fmt(a.paid_out * 0.9)}</span></div>
+       ${a.scale_micros ? `<div class="row"><span>Scaling plan</span><span>${a.scale_micros} micros max today</span></div>` : ""}
+       ${a.payout_eligible ? `<button class="desk-btn" data-payout="${a.safe_payout || a.payout_limit}">💸 RECORD A PAYOUT</button>` : ""}`;
   document.getElementById("acct-sum").innerHTML = `
     <span>${fmt(a.balance)}</span>
     <span class="${a.day_pnl >= 0 ? "pos" : "neg"}">today ${money(a.day_pnl)}</span>
@@ -497,7 +504,8 @@ function renderAccount(a) {
     ${alertRows(state)}
     ${execRows(state)}
     ${a.halted ? `<div class="halt">${a.halted}</div>` : ""}
-    ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET EVALUATION</button>` : ""}`;
+    ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET EVALUATION</button>` : ""}
+    ${state.mode === "live" ? `<button class="desk-btn" data-sync>🔄 SYNC WITH MY LUCID ACCOUNT</button>` : ""}`;
 }
 
 function scoreRows(s) {
@@ -795,6 +803,30 @@ document.addEventListener("click", async (e) => {
   }
   if (e.target.closest("[data-reset]")) await fetch("/api/account/reset", { method: "POST" });
   if (e.target.closest("[data-reports]")) openReports();
+  const pay = e.target.closest("[data-payout]");
+  if (pay) {
+    const a = state.account;
+    const amt = prompt(`Record a payout you requested at Lucid.\n\nAllowed: $${a.payout_limit.toLocaleString()} max (min $500).\nSuggested: $${(a.safe_payout || 0).toLocaleString()} (keeps $${a.keep_room.toLocaleString()} above the MLL, which locks at $50,100 after a payout).\n\nAmount:`, pay.dataset.payout);
+    if (amt) {
+      const r = await fetch("/api/account/payout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount: +amt }) });
+      if (!r.ok) alert((await r.json()).detail);
+    }
+  }
+  if (e.target.closest("[data-sync]")) {
+    const a = state.account;
+    const phase = prompt("Sync with your Lucid dashboard.\n\nPhase (evaluation or funded):", a.phase === "failed" ? "evaluation" : a.phase);
+    if (phase) {
+      const balance = prompt("Account balance ($):", Math.round(a.balance));
+      const mll = balance && prompt("Max Loss Limit / MLL ($):", Math.round(a.mll));
+      const extra = mll && phase.trim() === "funded"
+        ? [prompt("Payouts taken so far:", a.payouts), prompt("Days this payout cycle with $150+ profit:", a.cycle_days)] : [0, 0];
+      if (mll && extra[0] !== null && extra[1] !== null) {
+        const r = await fetch("/api/account/sync", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phase: phase.trim(), balance: +balance, mll: +mll, payouts: +extra[0], cycle_days: +extra[1] }) });
+        alert(r.ok ? "Synced. The bots now trade with your real account's numbers." : (await r.json()).detail);
+      }
+    }
+  }
   if (e.target.closest("[data-desk]")) openDesk();
   const dm = e.target.closest("[data-desk-meeting]");
   if (dm) {

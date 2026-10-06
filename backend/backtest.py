@@ -141,7 +141,7 @@ class ReplayMarket:
 
 
 # ---------------------------------------------------------------- one run
-def run(data: dict[str, list], params: dict | None = None, news=None, workers=None) -> dict:
+def run(data: dict[str, list], params: dict | None = None, news=None, workers=None, payouts: bool = False) -> dict:
     """Replay `data` once. Failed or stuck evaluations are reset and counted, like buying a new one.
     `news` is an optional NewsCalendar (news.py): no trades around high-impact releases."""
     market = ReplayMarket(data)
@@ -150,6 +150,7 @@ def run(data: dict[str, list], params: dict | None = None, news=None, workers=No
     trades, by_session, reasons = [], Counter(), Counter()
     open_session: dict[str, str] = {}
     passes = fails = funded_days = trims = 0
+    paid: list[tuple[str, float]] = []
     last_day = 0
     while market.has_next():
         for ev in engine.tick():
@@ -168,6 +169,9 @@ def run(data: dict[str, list], params: dict | None = None, news=None, workers=No
             last_day = market.day
             if acct.phase == "funded":
                 funded_days += 1
+            if payouts and acct.safe_payout:   # take the suggested payout as soon as it's there
+                paid.append((str(trading_day(market.now)), acct.safe_payout))
+                acct.take_payout(acct.safe_payout)
             if acct.phase == "failed" or "reset" in acct.halted:
                 fails += 1
                 engine.reset_account()   # keeps day_history
@@ -188,7 +192,8 @@ def run(data: dict[str, list], params: dict | None = None, news=None, workers=No
         "profit_factor": round(sum(wins) / -sum(losses), 2) if losses and sum(losses) < 0 else None,
         "evals_passed": passes, "evals_failed": fails,
         "pnl_by_session": {k: round(v, 2) for k, v in by_session.items()},
-        "exits": dict(reasons), "trims": trims,
+        "exits": dict(reasons), "trims": trims, "funded_days": funded_days,
+        "payouts": paid, "take_home": round(0.9 * sum(a for _, a in paid), 2),
     }
 
 
@@ -275,6 +280,8 @@ def _print_result(title: str, r: dict) -> None:
           f"avg loss ${r['avg_loss']:,.0f} · profit factor {r['profit_factor']}")
     print(f"  evaluations passed {r['evals_passed']} · failed/reset {r['evals_failed']}")
     print(f"  P&L by session {r['pnl_by_session']} · exits {r['exits']}")
+    if r.get("payouts"):
+        print(f"  payouts {r['payouts']} · you keep (90%) ${r['take_home']:,.0f} over {r['funded_days']} funded days")
 
 
 def main() -> None:
@@ -284,6 +291,7 @@ def main() -> None:
     ap.add_argument("--params", help='JSON of strategy settings for a single run, e.g. \'{"sessions": ["NEW YORK"]}\'')
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--out", help="write results as JSON here")
+    ap.add_argument("--payouts", action="store_true", help="take the suggested payout whenever the funded account allows one")
     ap.add_argument("--news", metavar="JSON", help="news calendar (data/news_calendar.json format): skip trades around releases")
     ap.add_argument("--make-sample", metavar="FOLDER", help="write synthetic test files and exit")
     a = ap.parse_args()
@@ -308,7 +316,7 @@ def main() -> None:
             from .news import NewsCalendar
             with open(a.news) as f:
                 cal = NewsCalendar(NewsCalendar.parse(json.load(f), high_only=False))
-        out = run(data, json.loads(a.params) if a.params else None, cal)
+        out = run(data, json.loads(a.params) if a.params else None, cal, payouts=a.payouts)
         _print_result("backtest:", out)
     if a.out:
         with open(a.out, "w") as f:

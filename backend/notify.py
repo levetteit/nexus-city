@@ -109,6 +109,11 @@ class Notifier:
             return (f"{icon} {who} closed {money(whole)}{tag}", f"{ev['reason']} · today {money(day)}", "trade")
         if ev["type"] == "news_hold":
             return (f"📰 {ev['title']} at {ev['at']} ET", f"bots paused for news · no new trades until {ev['until']}", "news")
+        if ev["type"] == "account_passed":
+            return ("🏆 Evaluation PASSED → funded", "The bots switch to the funded rules. Pass the real account at Lucid too, then sync it in the app.", "account")
+        if ev["type"] == "payout_ready":
+            safe = f"suggested ${ev['safe']:,.0f} keeps a safe cushion" if ev["safe"] else "wait: a payout now would leave too little room above the MLL"
+            return (f"💸 Payout #{ev['number']} available: up to ${ev['limit']:,.0f}", f"{safe} · balance ${ev['balance']:,.0f}", "account")
         if ev["type"] == "account_halt":
             good = any(k in ev["reason"] for k in ("cap", "target"))
             return (f"{'🏁' if good else '🛑'} Account: done for the day", ev["reason"], "account")

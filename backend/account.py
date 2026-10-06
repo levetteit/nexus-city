@@ -52,12 +52,23 @@ class PropRules:
     max_micros: int
     payout_days: int                    # profitable days needed before a payout request
     payout_buffer: float                # funded balance must exceed start + this to request
+    payout_day_min: float = 0.0         # a day counts toward payout_days only with at least this profit
+    payout_min: float = 0.0             # smallest payout request
+    payout_max: float = 0.0             # largest payout request ($)
+    payout_share: float = 1.0           # ...and at most this share of the profit
+    max_payouts: Optional[int] = None   # payouts per account before it moves to a live account
+    funded_scaling: tuple = ()          # ((profit from, max micros), ...): funded size limit by profit, set each session
 
 
 LUCIDFLEX_50K = PropRules(
     name="LucidFlex 50K", start_balance=50_000, profit_target=3_000, max_loss=2_000,
     mll_lock_offset=100, eval_consistency=0.5, funded_consistency=None, min_eval_days=2,
     max_micros=40, payout_days=5, payout_buffer=0,
+    # LucidFlex funded (support.lucidtrading.com, Oct 2026): 5 days of $150+ per payout cycle and a
+    # positive cycle, payouts $500 up to 50% of profit / $2,000, 5 payouts then live, 90/10 split,
+    # the MLL locks at $50,100 after the first payout, scaling plan 20/30/40 micros at $0/$1k/$2k profit.
+    payout_day_min=150, payout_min=500, payout_max=2_000, payout_share=0.5, max_payouts=5,
+    funded_scaling=((0, 20), (1_000, 30), (2_000, 40)),
 )
 
 LUCIDPRO_50K = PropRules(
@@ -80,12 +91,27 @@ class Guards:
     thin_room: float = 500.0           # a day stop below this -> only one 3-contract position at a time
     thin_micros: int = 3
     max_open_micros: int = 12          # e.g. two bots at the full 6
+    payout_keep_room: float = 1_500.0  # funded: suggested payouts leave at least this much above the MLL
+
+
+def funded_guards() -> Guards:
+    """Funded-stage guards. Same as the evaluation unless overridden: LucidFlex funded has no
+    consistency rule, so the $1,200 cap is no longer required there, but on our 21 real days a
+    higher cap only helped in one half of the data. Override with STARNET_FUNDED_* env vars."""
+    import os
+    g = Guards()
+    for env, attr in (("STARNET_FUNDED_DAILY_GOAL", "daily_goal"), ("STARNET_FUNDED_DAILY_CAP", "daily_cap"),
+                      ("STARNET_FUNDED_DAILY_STOP", "daily_stop"), ("STARNET_FUNDED_KEEP_ROOM", "payout_keep_room")):
+        if os.getenv(env):
+            setattr(g, attr, float(os.environ[env]))
+    return g
 
 
 @dataclass
 class PropAccount:
     rules: PropRules = field(default_factory=lambda: LUCIDFLEX_50K)
-    guards: Guards = field(default_factory=Guards)
+    eval_guards: Guards = field(default_factory=Guards)
+    funded_guards: Guards = field(default_factory=funded_guards)
     phase: str = "evaluation"          # evaluation | funded | failed
     balance: float = 0.0
     eod_high: float = 0.0
@@ -104,9 +130,18 @@ class PropAccount:
     day_history: list[tuple[str, float]] = field(default_factory=list)   # (phase, closed P&L) per day
     open_micros: dict[str, int] = field(default_factory=dict)   # bot id -> contracts held
     symbol_owner: dict[str, str] = field(default_factory=dict)  # symbol -> bot id holding it
+    # funded payout cycle
+    cycle_days: int = 0                # days in this payout cycle with at least payout_day_min profit
+    cycle_start: float = 0.0           # balance when this payout cycle began
+    payouts: list[list] = field(default_factory=list)   # [day number, amount] per payout taken
+    scale_micros: int = 0              # funded scaling-plan limit for this session (0 = none)
 
     def __post_init__(self) -> None:
         self.reset("evaluation")
+
+    @property
+    def guards(self) -> Guards:
+        return self.funded_guards if self.phase == "funded" else self.eval_guards
 
     # ---- lifecycle ----------------------------------------------------------
     def reset(self, phase: str = "evaluation") -> None:
@@ -119,6 +154,7 @@ class PropAccount:
         self.mll_locked = False
         self.day_realized = self.day_open = self.best_day = 0.0
         self.days = self.profitable_days = 0
+        self.cycle_days, self.cycle_start, self.payouts = 0, r.start_balance, []
         self.open_micros.clear()
         self.symbol_owner.clear()
         self._note(f"{r.name} {phase} started at ${r.start_balance:,.0f}")
@@ -131,6 +167,10 @@ class PropAccount:
         self.halted = ""
         self.loss_streak = 0
         self.day_peak = 0.0
+        self.scale_micros = 0
+        if self.phase == "funded" and self.rules.funded_scaling:   # the scaling plan updates once per session
+            self.scale_micros = max(m for p, m in self.rules.funded_scaling if self.profit >= p) \
+                if self.profit >= self.rules.funded_scaling[0][0] else self.rules.funded_scaling[0][1]
         if room < g.min_room:
             self.halted = f"only ${self.balance - self.mll:,.0f} above the MLL · reset recommended"
             self._note(self.halted)
@@ -166,7 +206,7 @@ class PropAccount:
     def max_micros(self) -> int:
         g = self.guards
         cap = g.thin_micros if self.day_stop < g.thin_room else g.max_open_micros   # near the MLL: size down
-        return min(self.rules.max_micros, cap)
+        return min(self.rules.max_micros, cap, self.scale_micros or cap)
 
     @property
     def goal_reached(self) -> bool:
@@ -179,12 +219,74 @@ class PropAccount:
     @property
     def payout_eligible(self) -> bool:
         r = self.rules
-        if self.phase != "funded" or self.profitable_days < r.payout_days or self.profit <= 0:
+        if self.phase != "funded" or self.cycle_days < r.payout_days or self.profit <= 0:
             return False
-        if self.balance < r.start_balance + r.payout_buffer:
+        if self.balance <= self.cycle_start or self.balance < r.start_balance + r.payout_buffer:
+            return False   # the cycle must be net positive
+        if r.max_payouts is not None and len(self.payouts) >= r.max_payouts:
+            return False
+        if self.payout_limit < r.payout_min:
             return False
         c = r.funded_consistency
         return not c or self.best_day <= c * self.profit
+
+    @property
+    def payout_limit(self) -> float:
+        """The largest payout the firm allows right now."""
+        r = self.rules
+        cap = min(self.profit * r.payout_share, r.payout_max or float("inf"))
+        return max(0.0, float(int(cap)))
+
+    @property
+    def locked_mll(self) -> float:
+        return self.rules.start_balance + self.rules.mll_lock_offset
+
+    @property
+    def safe_payout(self) -> float:
+        """Our suggestion: the most we can take while keeping `payout_keep_room` above the
+        MLL afterwards (it locks at start + $100 after a payout). 0 = wait and build more profit."""
+        if not self.payout_eligible:
+            return 0.0
+        room_after = self.balance - self.locked_mll - self.guards.payout_keep_room
+        amount = float(int(min(self.payout_limit, room_after) // 50 * 50))
+        return amount if amount >= self.rules.payout_min else 0.0
+
+    def take_payout(self, amount: float) -> None:
+        """Record a payout taken at the firm: balance down, MLL locked, new payout cycle."""
+        if not self.payout_eligible:
+            raise ValueError("not eligible for a payout yet")
+        if not self.rules.payout_min <= amount <= self.payout_limit:
+            raise ValueError(f"payout must be ${self.rules.payout_min:,.0f}-${self.payout_limit:,.0f}")
+        if self.balance - amount <= self.locked_mll:
+            raise ValueError("that payout would put the balance at or below the MLL")
+        self.balance -= amount
+        self.eod_high = self.balance
+        self.mll, self.mll_locked = self.locked_mll, True
+        self.payouts.append([self.days, round(amount, 2)])
+        self.cycle_days, self.cycle_start = 0, self.balance
+        self._note(f"payout #{len(self.payouts)}: ${amount:,.0f} (you keep ${amount * 0.9:,.0f}) · MLL locked at ${self.mll:,.0f}")
+        self._start_day_limits()
+
+    def _start_day_limits(self) -> None:
+        """Re-derive today's stop and size after the balance or MLL changed mid-day."""
+        g = self.guards
+        self.day_stop = min(g.daily_stop, self.balance - self.mll - g.mll_cushion)
+
+    def sync(self, phase: str, balance: float, mll: float, payouts_taken: int = 0, cycle_days: int = 0) -> None:
+        """Match the paper account to the real one (from the Lucid dashboard)."""
+        if phase not in ("evaluation", "funded"):
+            raise ValueError("phase must be evaluation or funded")
+        if not mll < balance:
+            raise ValueError("the MLL must be below the balance")
+        self.phase, self.balance, self.mll = phase, float(balance), float(mll)
+        self.eod_high = max(self.balance, self.mll + self.rules.max_loss)
+        self.mll_locked = self.mll >= self.locked_mll
+        self.payouts = [[self.days, 0.0] for _ in range(int(payouts_taken))]
+        # before the first payout the cycle runs from the funded start; after one, from now (unknown)
+        self.cycle_days = int(cycle_days)
+        self.cycle_start = self.rules.start_balance if not self.payouts else self.balance
+        self._note(f"synced with the firm: {phase}, balance ${balance:,.0f}, MLL ${mll:,.0f}")
+        self._start_day()
 
     # ---- position budget ----------------------------------------------------
     def request(self, bot_id: str, symbol: str, qty: int, adding: bool = False) -> int:
@@ -258,6 +360,8 @@ class PropAccount:
         self.best_day = max(self.best_day, day)
         if day > 0:
             self.profitable_days += 1
+        if self.phase == "funded" and day >= self.rules.payout_day_min:
+            self.cycle_days += 1
         # EOD drawdown: trails the highest close, locks at start + offset
         self.eod_high = max(self.eod_high, self.balance)
         lock = r.start_balance + r.mll_lock_offset
@@ -271,7 +375,7 @@ class PropAccount:
             self.reset("funded")
             return
         if self.payout_eligible:
-            self._note(f"payout eligible: {self.profitable_days} profitable days, +${self.profit:,.0f}")
+            self._note(f"payout eligible: up to ${self.payout_limit:,.0f} (suggested ${self.safe_payout:,.0f})")
 
         self.day_realized = self.day_open = 0.0
         self._start_day()
@@ -288,5 +392,10 @@ class PropAccount:
             "best_day": round(self.best_day, 2), "consistency": self.consistency, "days": self.days,
             "profitable_days": self.profitable_days, "payout_days": r.payout_days,
             "payout_eligible": self.payout_eligible, "open_micros": sum(self.open_micros.values()),
+            "cycle_days": self.cycle_days, "payout_day_min": r.payout_day_min,
+            "cycle_net": round(self.balance - self.cycle_start, 2), "payout_limit": self.payout_limit,
+            "safe_payout": self.safe_payout, "keep_room": g.payout_keep_room,
+            "payouts": len(self.payouts), "max_payouts": r.max_payouts,
+            "paid_out": round(sum(a for _, a in self.payouts), 2), "scale_micros": self.scale_micros,
             "max_micros": self.max_micros, "log": self.log[-8:][::-1],
         }
