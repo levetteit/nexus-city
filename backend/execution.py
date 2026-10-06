@@ -65,6 +65,7 @@ class TradersPostRouter:
         self.webhooks = webhooks if webhooks is not None else [u.strip() for u in env.split(",") if u.strip()]
         self.state_path = os.path.join(data_dir, "execution.json")
         self.armed = False
+        self.last_px: dict[str, float] = {}   # last price seen per symbol, sent with every order
         self.open: dict[str, dict] = {}      # symbol -> {"side", "qty", "contract", "targets"} we have on for real
         self.account_urls = lambda: []       # per-account webhooks (accounts.py sets this)
         self.url_names = lambda: {}          # webhook -> account name, for the order log (never the URL itself)
@@ -131,6 +132,10 @@ class TradersPostRouter:
             if bot is None or bot.cfg.instrument != "future":
                 continue
             symbol = bot.cfg.underlying
+            try:
+                self.last_px[symbol] = round(engine.market.underlyings[symbol].price, 2)
+            except (AttributeError, KeyError, TypeError):
+                pass
             if ev["type"] == "trade_open":
                 if delay_min > MAX_DATA_DELAY_MIN:
                     self.blocked += 1
@@ -189,6 +194,11 @@ class TradersPostRouter:
 
     def _enqueue(self, symbol: str, msg: dict, reason: str, contract: Optional[str] = None,
                  targets: Optional[list[str]] = None) -> None:
+        # Every order is a market order and carries the last price: Tradovate gives TradersPost no quotes, and a
+        # subscription that defaults to limit orders would otherwise reject an exit or add that has no price.
+        msg = {"orderType": "market", **msg}
+        if "signalPrice" not in msg and self.last_px.get(symbol):
+            msg["signalPrice"] = self.last_px[symbol]
         payload = {"ticker": contract or front_month(symbol), **msg, "time": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         if self.queue is not None:
             self.queue.put_nowait((symbol, payload, reason, targets if targets is not None else self.all_urls()))
