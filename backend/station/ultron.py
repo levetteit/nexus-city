@@ -64,6 +64,21 @@ class Ultron:
                                   "success_criteria": "Payouts taken", "kill_criteria": "Account failure (the desk's own rules)",
                                   "next_action": "Trade the killzones", "opportunity": None}, "A-001",
                      "the trading city joins the station as Venture #1")
+        if not s.get("ventures", "V-PPS"):
+            s.create("ventures", {"id": "V-PPS", "name": "Padilla Property Solutions", "category": "solar", "stage": "operate",
+                                  "owner": "owner", "owner_business": True, "unit": "station", "planned": True,
+                                  "offer": "Solar panel and battery systems for homes in Puerto Rico (details to confirm with the owner)",
+                                  "objective": "More qualified solar leads (messages and calls) from the Facebook Page",
+                                  "language": "es", "market": "Puerto Rico", "channels": ["facebook"], "links": {},
+                                  "notes": "The Facebook Page still shows its old name, 'The Auto Plug PR', until the owner can rename "
+                                           "it on Oct 13: write as Padilla Property Solutions. Learn from the Page's own recent posts.",
+                                  "compliance": ["No savings, price, financing or incentive claims unless the owner has provided them",
+                                                 "Don't mention a federal tax credit for home solar unless the owner confirms one applies",
+                                                 "Don't promise power during outages except for systems with batteries",
+                                                 "Facts about LUMA, net metering or local programs only if accurate and current"],
+                                  "success_criteria": "Leads from the Page every week", "kill_criteria": "None: the owner's own business",
+                                  "next_action": "Marketing Lead studies the Page and writes the channel plan", "opportunity": None},
+                     "owner", "the owner's solar business joins the station; it owns the Facebook Page")
         if not s.get("missions", "M-001"):
             s.create("missions", {"id": "M-001", "name": "First Dollar", "priority": 1, "state": "active", "owner": "owner",
                                   "goal": "Real money in from a $0-capital venture as fast as possible, then fund the first "
@@ -120,7 +135,7 @@ class Ultron:
             if not v.get("marketing_plan"):
                 return {"kind": "marketing_plan", "venture": v["id"]}
         for v in selling:
-            if v.get("links") and v.get("content_day") != now.date().isoformat():
+            if (v.get("links") or v.get("channels")) and v.get("content_day") != now.date().isoformat():
                 return {"kind": "content", "venture": v["id"]}
         for v in selling:
             mp = (v.get("marketing_plan") or {}).get("outreach") or {}
@@ -273,7 +288,9 @@ class Ultron:
         """A platform got connected: what was waiting in the owner's queue for it goes out on its own."""
         live = {"stripe.payment_link": connectors.stripe_configured(), "outreach.email": connectors.email_configured()}
         for a in self.store.find("actions", status="manual"):
-            ok = live.get(a["kind"]) if a["kind"] in live else connectors.social_configured(a["payload"].get("platform", ""))
+            plat = a["payload"].get("platform", "")
+            ok = live.get(a["kind"]) if a["kind"] in live else (connectors.social_configured(plat)
+                                                                 and connectors.platform_allowed(plat, a.get("venture")))
             if ok:
                 self.store.update("actions", a["id"], {"status": "ready"}, "A-001", "connector is live now: sending it", kind="action.requeued")
 
@@ -295,7 +312,7 @@ class Ultron:
     def _propose(self, now: datetime) -> None:
         """Keep one $0-capital launch proposal in front of the owner while there's room for an experiment."""
         s = self.store
-        live = [v for v in s.all("ventures") if v["id"] != "V-001" and v["stage"] in ACTIVE_STAGES]
+        live = [v for v in s.all("ventures") if v["id"] != "V-001" and not v.get("owner_business") and v["stage"] in ACTIVE_STAGES]
         if len(live) >= MAX_EXPERIMENTS or self._approval_for("launch_venture", None, pending_only=True):
             return
         taken = {v.get("opportunity") for v in s.all("ventures")}

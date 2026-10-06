@@ -464,6 +464,11 @@ months of them plus a month of bills; then ULTRON asks you to approve funding th
 
 Specialists (Service Delivery, Listing/SEO, ...) are still added only when a venture needs that role.
 
+**Your own businesses** can be ventures too. **Padilla Property Solutions** (`V-PPS`, solar in Puerto Rico) is
+one: it writes in Puerto Rican Spanish, follows its own compliance list (no savings, price or incentive
+claims you haven't provided), doesn't count against the experiment limit, and the War Room can change its
+tactics but never pause or kill it.
+
 **What leaves the station** (`backend/station/actions.py`): every post, email and Stripe change is an
 action. It must pass Compliance & QA (one revision allowed, then it's stopped and the War Room sees why),
 stay under its daily cap, and the outbound switch must be on. Then it's sent by its connector, or, if that
@@ -477,7 +482,7 @@ the same address or to anyone who opted out, and every contact comes with the pa
 | Stripe | `STRIPE_API_KEY` (a restricted key: Products, Prices, Payment Links write; Checkout Sessions read) | Agents create the checkout link for a venture on their own |
 | Stripe sales | `STRIPE_WEBHOOK_SECRET` from a webhook to `https://<your app>/api/station/stripe/webhook` (event `checkout.session.completed`) | Every paid checkout books itself into the treasury with Stripe's fee; the Auditor books any the webhook missed |
 | Email | `STARNET_SMTP_HOST`, `STARNET_SMTP_PORT`, `STARNET_SMTP_USER`, `STARNET_SMTP_PASSWORD`, `STARNET_MAIL_FROM`, `STARNET_MAIL_ADDRESS` | Outreach sends itself, with your postal address and an opt-out line (CAN-SPAM) |
-| Facebook Page | `STARNET_FB_PAGE_ID`, `STARNET_FB_PAGE_TOKEN` (a Page access token with `pages_manage_posts`) | Posts go out to your Page on their own |
+| Facebook Page | `STARNET_FB_PAGE_ID`, `STARNET_FB_PAGE_TOKEN` (a Page access token with `pages_manage_posts`); `STARNET_FB_PAGE_VENTURE` (default `V-PPS`) | The Page belongs to one venture, Padilla Property Solutions: its posts go out on their own, in Spanish, written after reading the Page's latest posts. Other ventures never post there |
 | LinkedIn | `STARNET_LINKEDIN_TOKEN` (scopes `openid profile w_member_social`; expires every 60 days) | Posts go out on your profile. When the token expires, posts fail with a note to renew it |
 | Instagram, TikTok | not yet: every post needs an image or a video (and TikTok's API needs their audit) | Their posts wait in your queue |
 | Fiverr, Etsy | none: they have no seller API, and bots break their terms | The crew prepares; you publish and reply there |

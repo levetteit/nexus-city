@@ -98,6 +98,7 @@ def drain(u, now, kinds=None, limit=40):
 def ultron(tmp_path):
     fake = FakeClaude([opp("Resume rewrite gig on Fiverr"), opp("Etsy planner shop", cost=29, rec="watchlist", score=60)])
     u = Ultron(str(tmp_path), client=fake)
+    u.store.update("ventures", "V-PPS", {"stage": "paused"}, "test")   # the solar business has its own test
     return u, fake
 
 
@@ -106,7 +107,9 @@ def test_seeds_once_without_duplicates(tmp_path):
     again = Ultron(str(tmp_path), client=None)
     assert len(again.store.all("routines")) == 5
     assert [a["name"] for a in again.store.all("agents")][:2] == ["ULTRON", "Market Research Agent"]
-    assert len(again.store.all("agents")) == 12 and len(again.store.all("ventures")) == 1
+    assert len(again.store.all("agents")) == 12 and len(again.store.all("ventures")) == 2
+    pps = again.store.get("ventures", "V-PPS")
+    assert pps["language"] == "es" and pps["channels"] == ["facebook"] and pps["owner_business"]
     teams = {a["department"] for a in again.store.all("agents")}
     assert {"marketing", "finance", "legal", "warroom"} <= teams
     assert again.store.get("ventures", "V-001")["stage"] == "operate"
@@ -138,7 +141,7 @@ def test_research_to_venture_to_tasks(ultron):
     u.tick(now=MON_0900)
     assert len(u.store.find("approvals", status="pending")) == 1                    # one proposal at a time
     u.decide(pending[0]["id"], "approve")
-    v = next(v for v in u.store.all("ventures") if v["id"] != "V-001")
+    v = next(v for v in u.store.all("ventures") if v["id"] not in ("V-001", "V-PPS"))
     assert v["stage"] == "approved" and u.store.get("opportunities", v["opportunity"])["status"] == "promoted"
     # validation plans the venture into tasks with dependencies, staffing one specialist
     now = MON_0900.replace(hour=9, minute=1)
@@ -492,3 +495,46 @@ def test_facebook_and_linkedin_connectors(monkeypatch):
     with pytest.raises(connectors.ConnectorError, match="expired"):
         connectors.post_social("linkedin", "x")
     assert connectors.status()["social"] == ["facebook", "linkedin"]
+
+
+def test_solar_venture_owns_the_page_writes_spanish_and_studies_its_posts(tmp_path, monkeypatch):
+    from backend.station import actions, connectors
+    fake = FakeClaude([opp("x")])
+    u = Ultron(str(tmp_path), client=fake)
+    monkeypatch.setenv("STARNET_FB_PAGE_ID", "1150312211499349")
+    monkeypatch.setenv("STARNET_FB_PAGE_TOKEN", "pagetok")
+    monkeypatch.setattr(connectors, "facebook_recent_posts",
+                        lambda limit=12: [{"at": "2026-10-01", "text": "¡Instala tus placas solares con nosotros!", "url": ""}])
+    sent = []
+    monkeypatch.setattr(connectors, "_facebook_post", lambda text, link: sent.append((text, link)) or {"id": "fb1"})
+    monkeypatch.setitem(connectors.SOCIAL["facebook"], "post", connectors._facebook_post)
+    u.cfg.update({"audited": MON_0900.date().isoformat(), "kicked_off": True})
+    for r in u.store.all("routines"):
+        u.store.update("routines", r["id"], {"last_run": MON_0900.isoformat()}, "test")
+    assert u.next_job(MON_0900) == {"kind": "marketing_plan", "venture": "V-PPS"}
+    u.run_job({"kind": "marketing_plan", "venture": "V-PPS"}, now=MON_0900)
+    prompt = fake.calls[-1]["messages"][0]["content"]
+    assert "Puerto Rico" in prompt and "Instala tus placas" in prompt and "fixed: facebook" in prompt
+    assert u.next_job(MON_0900) == {"kind": "content", "venture": "V-PPS"}     # no link needed: it has its own channel
+    fake_posts = {"posts": [{"platform": "facebook", "text": "Energía solar para tu hogar", "angle": "tips"}]}
+    orig = fake.create
+    fake.create = lambda **kw: orig(**kw) if "posts" not in str(kw.get("output_config")) else NS(
+        stop_reason="end_turn", usage=NS(input_tokens=1, output_tokens=1, cache_read_input_tokens=0, cache_creation_input_tokens=0,
+                                         server_tool_use=None), content=[NS(type="text", text=json.dumps(fake_posts))])
+    fake.beta.messages.create = fake.create
+    u.run_job({"kind": "content", "venture": "V-PPS"}, now=MON_0900)
+    post = u.store.find("actions", kind="social.post", venture="V-PPS")[0]
+    assert post["payload"]["link"] == ""                                        # no link back to its own Page
+    actions.qa(u.store, u.brain, post)
+    assert "compliance" in fake.calls[-1]["messages"][0]["content"]
+    assert actions.dispatch(u.store, u.store.get("actions", post["id"]), True)["status"] == "sent"
+    assert sent == [("Energía solar para tu hogar", "")]
+    # another venture's Facebook post never lands on the solar Page
+    other = actions.create(u.store, "social.post", "A-006", "V-001", {"platform": "facebook", "text": "trading", "link": ""}, "x")
+    actions.qa(u.store, u.brain, other)
+    assert actions.dispatch(u.store, u.store.get("actions", other["id"]), True)["status"] == "manual"
+    # and the War Room can improve it, never pause or kill it
+    from backend.station import warroom
+    fake.warroom = {"verdicts": [{"venture": "V-PPS", "verdict": "kill", "why": "x", "evidence": [], "changes": []}], "lessons": []}
+    warroom.convene(u.store, u.brain, u.treasury, u.health, u.cfg, u.request, MON_0900)
+    assert u.store.get("ventures", "V-PPS")["stage"] == "operate" and not u.store.find("approvals", kind="venture_decision")

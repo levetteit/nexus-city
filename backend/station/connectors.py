@@ -134,7 +134,8 @@ def send_email(to: str, subject: str, body: str) -> dict:
 
 
 # ---------------------------------------------------------------------------- Social
-# Facebook Page   STARNET_FB_PAGE_ID, STARNET_FB_PAGE_TOKEN (a Page access token with pages_manage_posts)
+# Facebook Page   STARNET_FB_PAGE_ID, STARNET_FB_PAGE_TOKEN (a Page access token with pages_manage_posts); the Page
+#                 belongs to one venture (STARNET_FB_PAGE_VENTURE, default V-PPS): other ventures never post there
 # LinkedIn        STARNET_LINKEDIN_TOKEN (w_member_social; expires every 60 days), optional STARNET_LINKEDIN_PERSON
 # Instagram and TikTok need an image or a video with every post; until those are built, their posts
 # wait in the posting queue on the Command Board with a Copy button.
@@ -206,6 +207,30 @@ def _linkedin_post(text: str, link: str) -> dict:
         hint = " (the token has probably expired: make a new one and update STARNET_LINKEDIN_TOKEN)" if "401" in str(exc) else ""
         raise ConnectorError(f"LinkedIn: {exc}{hint}")
     return {"platform": "linkedin", "id": res.get("id")}
+
+
+def page_venture() -> str:
+    """The Facebook Page is Padilla Property Solutions' Page: only that venture posts there."""
+    return os.getenv("STARNET_FB_PAGE_VENTURE", "V-PPS")
+
+
+def platform_allowed(platform: str, venture: Optional[str]) -> bool:
+    if platform.lower() == "facebook":
+        return venture == page_venture()
+    return True
+
+
+def facebook_recent_posts(limit: int = 12) -> list[dict]:
+    """The Page's own latest posts, so the crew writes in its voice and doesn't repeat itself."""
+    page, token = os.getenv("STARNET_FB_PAGE_ID"), os.getenv("STARNET_FB_PAGE_TOKEN")
+    if not (page and token):
+        return []
+    version = os.getenv("STARNET_META_GRAPH_VERSION", "")
+    base = "https://graph.facebook.com/" + (f"{version}/" if version else "")
+    q = urllib.parse.urlencode({"fields": "message,created_time,permalink_url", "limit": limit, "access_token": token})
+    res = _http_json("GET", f"{base}{page}/posts?{q}")
+    return [{"at": x.get("created_time", "")[:10], "text": (x.get("message") or "")[:700], "url": x.get("permalink_url", "")}
+            for x in res.get("data", []) if x.get("message")]
 
 
 SOCIAL: dict = {
