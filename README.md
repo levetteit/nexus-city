@@ -68,6 +68,7 @@ backend/
   execution.py   real orders to your Lucid accounts via TradersPost (armed from the city, with safety checks)
   notify.py      phone notifications for every trade (web push to the home-screen app, or ntfy)
 station/       the Space Station: ULTRON, the Research Station, ventures, approvals, the shared treasury
+frontend/station3d.html  the 3D orbital station: ULTRON's core, every module, the crew at work, pets, ventures as planets
 frontend/station.html  the station's Command Board (Command, Approvals, Ventures, Research, Treasury, Crew, Log)
 frontend/room.js  the bots' streamer rooms: robot, monitors, emotions, gadgets
 Dockerfile, render.yaml   one-click hosting (password-protected) so you can watch from your phone
@@ -420,8 +421,25 @@ Everything is saved in `data/desk/`.
 ## Space Station: ULTRON's business operations (`backend/station/`)
 
 The city's trading desk is Venture #1 of a bigger economy. Tap 🛰️ in the city's top bar (or open
-`/station.html`) for the **Space Station**, where ULTRON, the station's commander, runs a crew of AI agents
+`/station3d.html`) for the **Space Station**, where ULTRON, the station's commander, runs a crew of AI agents
 that research, validate and start online businesses. ULTRON reports to Jarvis, the owner's operations lead.
+
+**The orbital station (3D).** ULTRON's command core sits in the middle, ringed by the modules: Research Lab,
+Revenue Ops, Marketing & Media, Creative Lab, Marketplace Deck, Finance Observatory, Legal & QA, War Room,
+Engineering Bay, Agent Quarters, the Crew Lounge, the Approval Chamber and the City Dock (where the trading
+bots appear). Every agent is a robot that walks to its department while it works, with what it's doing
+floating above it; idle agents rest in the lounge, benched ones in quarters. Ventures orbit as planets
+(colour = stage, size = health). Real events play out live: a post going out fires a beam from the
+Marketing dish, a lead or sale sends a courier to the Finance Observatory, a milestone sets off fireworks.
+Tap the core, any module, robot or planet for its details; approve or reject from the Approval Chamber.
+`Labels` cycles between who's working, everyone, and off. The 2D Command Board (`/station.html`) is one
+tap away for the full records.
+
+**Milestones and pets.** Each agent's work count comes from the audit log (tasks delivered, routines run,
+QA calls, plans, posts drafted, War Room sessions, audits). Crossing 1, 5, 15, 40 and 100 earns First
+delivery, Reliable, Veteran, Legend and Hall of Fame, once, with an event in the log; Reliable and up each
+bring a pet (robo-cat, drone, star-jelly, comet-fox) that follows the agent around the station. The station
+also tracks its own firsts: first opportunity, venture, post, lead, sale, $100, $1,000, War Room session.
 
 **One treasury, everyone earns their keep.** The city and the station pay into one pool and draw their
 bills from it, so whichever side is earning keeps the other running. Each side, venture and agent has its

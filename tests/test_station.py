@@ -713,3 +713,26 @@ def test_a_bad_key_or_network_doesnt_burn_the_day(tmp_path, monkeypatch):
     for r in u.store.all("routines"):
         u.store.update("routines", r["id"], {"last_run": MON_0900.isoformat()}, "test")
     assert u.next_job(MON_0900.replace(minute=30)) == {"kind": "marketing_plan", "venture": "V-PPS"}
+
+
+def test_milestones_and_pets_come_from_real_work(tmp_path):
+    from backend.station import recognition
+    u = Ultron(str(tmp_path), client=FakeClaude([opp("x")]))
+    for i in range(5):
+        u.store.event("task.completed", "A-006", f"delivered {i}")
+    u.store.event("task.completed", "owner", "owner work doesn't count for agents")
+    awarded = recognition.update(u.store)
+    a = u.store.get("agents", "A-006")
+    assert a["work"] == 5 and [m["title"] for m in a["achievements"]] == ["First delivery", "Reliable"]
+    assert a["pet"]["kind"] == "robo-cat" and a["pet"]["name"] in recognition.PET_NAMES["robo-cat"]
+    assert awarded and awarded[0]["agent"] == "A-006"
+    assert recognition.update(u.store) == []                                    # once only
+    assert sum(1 for e in u.store.events(200) if e["kind"] == "agent.milestone") == 1
+    assert u.store.get("agents", "A-002").get("pet") is None                   # nothing earned, nothing given
+    ms = {m["title"]: m["at"] for m in recognition.station_milestones(u.store, u.treasury)}
+    assert ms["First sale"] is None
+    u.record("income", 150, "station", "first order", venture="V-PPS")
+    ms = {m["title"]: m["at"] for m in recognition.station_milestones(u.store, u.treasury)}
+    assert ms["First sale"] and ms["$100 earned"] and not ms["$1,000 earned"]
+    u.tick(now=MON_0900)
+    assert u.overview()["milestones"][4]["title"] == "First sale"

@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
-from . import actions, connectors, crew, finance, marketing, research, results, warroom
+from . import actions, connectors, crew, finance, marketing, recognition, research, results, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
 from .store import STAGES, Store, now_iso
@@ -51,6 +51,8 @@ class Ultron:
         self.brain = Brain(self.treasury, client)
         self.notify = notify or (lambda title, body: None)
         self.busy: Optional[str] = None      # what ULTRON is coordinating right now
+        self._recognized_at: Optional[datetime] = None
+        self.milestones: list[dict] = []
         self.last_error = ""
         self.cfg = self.store.load_doc("ultron.json") or {"mandate": research.MANDATE, "kicked_off": False,
                                                            "reported": "", "budget_warned": "", "reminded": {}}
@@ -120,6 +122,10 @@ class Ultron:
         self._watch_tasks(now)
         self._watch_money(now)
         self._requeue_connected()
+        if not self._recognized_at or now - self._recognized_at >= timedelta(minutes=5):
+            self._recognized_at = now
+            recognition.update(self.store)
+            self.milestones = recognition.station_milestones(self.store, self.treasury)
         self._propose(now)
         if (now.hour, now.minute) >= REPORT_AT and self.cfg.get("reported") != now.date().isoformat():
             self.report(now, engine)
@@ -519,7 +525,8 @@ class Ultron:
                        "sent": sorted(s.find("actions", status="sent"), key=lambda a: a.get("sent_at", ""), reverse=True)[:15],
                        "rejected": s.find("actions", status="rejected")[-10:], "failed": s.find("actions", status="failed")[-10:]},
             "lessons": s.load_doc("lessons.json") or [],
-            "leads": sorted(s.all("leads"), key=lambda l: l["created_at"], reverse=True)[:40], "research_focus": self.cfg.get("research_focus", ""),
+            "leads": sorted(s.all("leads"), key=lambda l: l["created_at"], reverse=True)[:40],
+            "milestones": self.milestones or recognition.station_milestones(s, self.treasury), "research_focus": self.cfg.get("research_focus", ""),
             "warroom": s.load_doc(s.list_docs("warroom-", 1)[0]) if s.list_docs("warroom-", 1) else None,
             "audit": s.load_doc(s.list_docs("audit-", 1)[0]) if s.list_docs("audit-", 1) else None,
             "alerts": [e for e in s.events(60) if e["severity"] in ("WARNING", "CRITICAL", "ACTION NEEDED", "WAITING FOR OWNER")][:12],
