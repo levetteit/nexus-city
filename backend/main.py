@@ -447,6 +447,35 @@ def push_test() -> dict:
     return n.status()
 
 
+@app.post("/api/account/payout")
+async def account_payout(request: Request) -> dict:
+    """Record a payout you took at the firm (`{"amount": 1000}`)."""
+    try:
+        engine.account.take_payout(float((await request.json())["amount"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    _save_account()
+    return engine.account.snapshot()
+
+
+@app.post("/api/account/sync")
+async def account_sync(request: Request) -> dict:
+    """Match the paper account to the real one: phase, balance, MLL, payouts taken, cycle days."""
+    b = await request.json()
+    try:
+        engine.account.sync(b["phase"], float(b["balance"]), float(b["mll"]), int(b.get("payouts", 0)), int(b.get("cycle_days", 0)))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    _save_account()
+    return engine.account.snapshot()
+
+
+def _save_account() -> None:
+    if MODE == "live":
+        from . import live
+        live.save_account(engine.account)
+
+
 @app.post("/api/account/reset")
 def reset_account() -> dict:
     """Start a fresh evaluation (e.g. after a failed one)."""

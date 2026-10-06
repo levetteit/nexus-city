@@ -51,11 +51,17 @@ class Engine:
             self.events.clear()
             return []
         if self.market.day != before:
-            phase = self.account.phase
+            phase, could_pay = self.account.phase, self.account.payout_eligible
             self.account.end_of_day()
             for bot in self.bots.values():
                 bot.new_session()
             self.events.append({"type": "new_session", "phase_change": phase != self.account.phase})
+            if phase == "evaluation" and self.account.phase == "funded":
+                self.events.append({"type": "account_passed"})
+            if self.account.payout_eligible and not could_pay:
+                a = self.account
+                self.events.append({"type": "payout_ready", "limit": a.payout_limit, "safe": a.safe_payout,
+                                    "balance": round(a.balance, 2), "number": len(a.payouts) + 1})
         if not self.account.can_trade:
             self._halt_all("account failed" if self.account.phase == "failed" else self.account.halted)
         self._news_check()

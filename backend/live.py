@@ -27,7 +27,7 @@ from .fetch_data import SOURCES, fetch_recent
 
 DATA_DIR = os.getenv("STARNET_DATA_DIR", "data")
 ACCOUNT_FIELDS = ("phase", "balance", "eod_high", "mll", "mll_locked", "best_day", "days",
-                  "profitable_days", "day_realized", "day_history")
+                  "profitable_days", "day_realized", "day_history", "cycle_days", "cycle_start", "payouts")
 
 
 def _rows(raw: dict[int, tuple]) -> list[tuple]:

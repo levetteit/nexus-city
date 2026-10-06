@@ -256,6 +256,40 @@ there are still **no per-trade stops**.
 | End of day | flattens everything 5 minutes before the close |
 | Walk away | 3 pointer inverses in a day and that bot stops for the day |
 
+### Funded account and payouts (LucidFlex 50K, rules as of Oct 2026)
+
+When the evaluation passes, the account switches to the funded rules with its own
+guards (`funded_guards()`: the same goal, cap and stop by default, with overrides
+through `STARNET_FUNDED_DAILY_GOAL` / `_CAP` / `_STOP` / `_KEEP_ROOM`).
+
+**Lucid's funded rules, built in:**
+
+- No consistency rule and no buffer; 90/10 split.
+- A payout cycle needs **5 days of at least $150 profit** and a **net-positive cycle**.
+- Payouts are **$500 minimum, up to 50% of profit or $2,000**, and 5 payouts per account before it moves to a live account.
+- After a payout the MLL locks at **$50,100**.
+- Scaling plan: 20, 30 or 40 micros at $0, $1k or $2k of profit, set each session. It never binds, because we use 12 at most.
+
+**In the app:**
+
+- The account panel shows the cycle progress, the largest payout allowed, and a
+  **suggested payout** that keeps `$1,500` above the locked MLL afterwards.
+- You get a 💸 push when a payout opens up.
+- **Record a payout** mirrors one you requested at Lucid.
+- **Sync with my Lucid account** sets the phase, balance, MLL, payouts taken and cycle days from your dashboard.
+
+**What the 21 real days say:**
+
+- The evaluation passed on day 6 (Sep 15).
+- The funded account made about $6,400 over the next 14 days.
+- Taking every suggested payout gave one payout of $1,950 (you keep $1,755) on Sep 28, with the second due on Oct 6.
+
+Lucid's payout limits, not the bots, cap the take-home: about $2,000 per account
+per cycle of 5+ days. The way to scale is more accounts and fast, steady $150+
+days, not bigger days.
+
+    python -m backend.backtest data/*_1m.csv --payouts
+
 ### Add a worker
 
 ```python
