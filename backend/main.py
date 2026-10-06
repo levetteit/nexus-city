@@ -36,6 +36,7 @@ desk = None       # the bots' evening meeting / morning briefing on Claude (live
 book = None       # your Lucid accounts, each tracked through the trades (live mode only), see accounts.py
 watchdog = None   # pushes when the feed or data stops (live mode only), see watchdog.py
 signals = None    # the bots' PROCs for you to check against your indicator (live mode only), see signals.py
+station = None    # ULTRON and the Space Station (both modes), see station/
 clients: set[WebSocket] = set()
 
 
@@ -189,6 +190,9 @@ async def run_desk(kind: str, report: dict | None = None) -> dict | None:
 def state() -> dict:
     snap = engine.snapshot()
     snap["mode"] = MODE
+    if station:
+        snap["station"] = {"coordinating": station.busy, "approvals": len(station.store.find("approvals", status="pending")),
+                           "owner_tasks": len(station.store.find("tasks", status="waiting_owner"))}
     if MODE == "live":
         snap["delay_min"] = round(engine.market.delay_minutes, 1)
         snap["feed"] = engine.market.feed
@@ -212,17 +216,40 @@ def state() -> dict:
     return snap
 
 
+async def run_station() -> None:
+    """ULTRON's loop: housekeeping every 15 s, and one research/agent job at a time in a thread."""
+    while True:
+        try:
+            job = station.tick(engine, real_account=MODE == "live")
+            if job:
+                await asyncio.to_thread(station.run_job, job)
+        except Exception as exc:   # the station must never take the city down
+            station.last_error = str(exc)[:200]
+            print(f"station tick failed: {exc}")
+        await asyncio.sleep(15)
+
+
+def _station_notify(title: str, body: str) -> None:
+    if notifier:
+        notifier.send(title, body, "station", url="/station.html")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global station
+    from .station.ultron import Ultron
+    station = Ultron(os.getenv("STARNET_DATA_DIR", "data"), notify=_station_notify)
     task = asyncio.create_task(run_live() if MODE == "live" else run_city())
+    station_task = asyncio.create_task(run_station())
     yield
     task.cancel()
+    station_task.cancel()
 
 
 app = FastAPI(title="Starnet trading city", lifespan=lifespan)
 
 PASSWORD = os.getenv("STARNET_PASSWORD")   # set this whenever the city is reachable from the internet
-OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed")   # health checks, and webhooks (they have their own secret)
+OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook")   # health checks, and webhooks (they have their own secret)
 
 
 class PasswordGate:
@@ -669,6 +696,255 @@ async def tradingview(request: Request) -> dict:
     if "ticker" in payload:
         payload["symbol"] = normalize_symbol(str(payload["ticker"]))
     return {"ok": True, "symbol": payload.get("symbol"), "results": engine.signal(payload)}
+
+
+# ---------------------------------------------------------------- the Space Station (ULTRON)
+def _station():
+    if station is None:
+        raise HTTPException(503, "the station is starting")
+    return station
+
+
+@app.get("/api/station")
+def station_overview() -> dict:
+    """Everything the Command Board shows: mission, ventures, agents, approvals, queue, treasury, feed."""
+    return _station().overview(engine)
+
+
+@app.get("/api/station/events")
+def station_events(limit: int = 100) -> list:
+    return _station().store.events(min(limit, 1000))
+
+
+@app.get("/api/station/reports")
+def station_reports() -> list:
+    """ULTRON's daily reports to Jarvis."""
+    return _station().reports()
+
+
+@app.get("/api/station/routine-runs")
+def station_routine_runs() -> list:
+    st = _station()
+    return [st.store.load_doc(n) for n in st.store.list_docs("routine-", 15)]
+
+
+@app.get("/api/station/{collection}/{rid}")
+def station_record(collection: str, rid: str) -> dict:
+    st = _station()
+    if collection not in ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions"):
+        raise HTTPException(404)
+    rec = st.store.get(collection, rid)
+    if not rec:
+        raise HTTPException(404)
+    if collection == "ventures":
+        rec["pnl"] = st.treasury.pnl("venture", rid)
+        rec["health"] = st.health(rec)
+        rec["task_list"] = st.store.find("tasks", venture=rid)
+    if collection == "agents":
+        rec["pnl"] = st.treasury.pnl("agent", rid)
+        rec["task_list"] = st.store.find("tasks", assigned_agent=rid)
+    return rec
+
+
+@app.post("/api/station/approvals/{rid}")
+async def station_decide(rid: str, request: Request) -> dict:
+    """The owner's decision: `{"decision": "approve" | "reject" | "changes", "note": "..."}`."""
+    b = await request.json()
+    try:
+        return _station().decide(rid, b.get("decision", ""), str(b.get("note", ""))[:500])
+    except KeyError:
+        raise HTTPException(404)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.post("/api/station/opportunities/{rid}/{action}")
+def station_opportunity(rid: str, action: str) -> dict:
+    """Promote an opportunity into a venture (the owner's approval), or dismiss it."""
+    st = _station()
+    try:
+        if action == "promote":
+            return st.promote(rid)
+        if action == "dismiss":
+            if not st.store.get("opportunities", rid):
+                raise KeyError(rid)
+            return st.store.update("opportunities", rid, {"status": "dismissed"}, "owner", "dismissed by the owner",
+                                   kind="opportunity.dismissed")
+    except KeyError:
+        raise HTTPException(404)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    raise HTTPException(404)
+
+
+@app.post("/api/station/tasks/{rid}/done")
+async def station_task_done(rid: str, request: Request) -> dict:
+    """Tick off an owner task (`{"note": "made the Fiverr account"}`)."""
+    try:
+        note = (await request.json()).get("note", "")
+    except Exception:
+        note = ""
+    try:
+        return _station().owner_done(rid, str(note)[:500])
+    except KeyError:
+        raise HTTPException(404)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.post("/api/station/money")
+async def station_money(request: Request) -> dict:
+    """Record real money: `{"kind": "income"|"expense", "amount": 25, "unit": "station"|"city", "note": "...", "venture": "V-002"}`."""
+    b = await request.json()
+    try:
+        return _station().record(b.get("kind", ""), float(b.get("amount", 0)), b.get("unit", "station"),
+                                 str(b.get("note", ""))[:300], b.get("venture") or None)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/station/stripe/webhook")
+async def station_stripe_webhook(request: Request) -> dict:
+    """Stripe → paid checkouts book themselves into the treasury. Verified by the webhook's signing secret."""
+    from .station import connectors
+    body = await request.body()
+    try:
+        event = connectors.stripe_verify(body, request.headers.get("stripe-signature", ""))
+    except connectors.ConnectorError as exc:
+        raise HTTPException(400, str(exc))
+    if event.get("type") in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+        sale = _station().treasury.book_stripe_sale(event["data"]["object"])
+        if sale:
+            _station_notify("💵 Stripe sale", f"${sale['amount']:,.2f}" + (f" · {sale['venture']}" if sale.get("venture") else ""))
+    return {"ok": True}
+
+
+@app.post("/api/station/actions/{rid}/{what}")
+async def station_action(rid: str, what: str, request: Request) -> dict:
+    """Your outbox: `done` (you posted/sent it by hand), `send` (OK an owner-policy item), `cancel`, `result` (how it went)."""
+    from .station import actions
+    st = _station()
+    a = st.store.get("actions", rid)
+    if not a:
+        raise HTTPException(404)
+    try:
+        note = str((await request.json()).get("note", ""))[:500]
+    except Exception:
+        note = ""
+    try:
+        if what == "done":
+            return actions.owner_done(st.store, rid, note)
+        if what == "send":
+            if a["status"] != "waiting_owner":
+                raise ValueError(f"it's {a['status']}")
+            return st.store.update("actions", rid, {"owner_ok": True, "status": "ready"}, "owner", "owner OK'd sending it", kind="action.owner_ok")
+        if what == "cancel":
+            if a["status"] == "sent":
+                raise ValueError("already sent")
+            return st.store.update("actions", rid, {"status": "cancelled"}, "owner", f"owner cancelled it {note}".strip(), kind="action.cancelled")
+        if what == "result":
+            st.store.event("action.result", "owner", f"{a['kind']} result: {note}", ref=a.get("venture"))
+            return st.store.update("actions", rid, {"result": {**(a.get("result") or {}), "note": note}}, "owner", "result recorded")
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(409, str(exc))
+    raise HTTPException(404)
+
+
+@app.post("/api/station/outbound")
+async def station_outbound(request: Request) -> dict:
+    """The Station's E-STOP: `{"on": false}` stops every outgoing post, email and Stripe change at once."""
+    st = _station()
+    on = bool((await request.json()).get("on"))
+    st.cfg["outbound"] = on
+    st._save_cfg()
+    st.store.event("station.outbound", "owner", "outbound ON: QA-passed work goes out" if on else "OUTBOUND STOPPED by the owner",
+                   severity="INFO" if on else "WARNING")
+    return {"outbound": on}
+
+
+@app.post("/api/station/warroom")
+def station_warroom() -> dict:
+    """Convene the War Room now instead of waiting for Sunday or enough new results."""
+    st = _station()
+    if not st.brain.enabled:
+        raise HTTPException(503, "add ANTHROPIC_API_KEY to run the War Room")
+    st.cfg["warroom_now"] = True
+    st._save_cfg()
+    return {"queued": True}
+
+
+@app.get("/api/station/finance")
+def station_finance(month: str | None = None) -> dict:
+    from .station import connectors, finance
+    st = _station()
+    audits = st.store.list_docs("audit-", 1)
+    return {"statement": finance.statement(st.treasury, month), "audit": st.store.load_doc(audits[0]) if audits else None,
+            "chain": st.treasury.verify_chain(), "connectors": connectors.status()}
+
+
+@app.post("/api/station/feedback")
+async def station_feedback(request: Request) -> dict:
+    """Tell the station what you think about anything (`{"ref": "V-002", "note": "nobody clicks these"}`). The War Room reads it."""
+    b = await request.json()
+    note = str(b.get("note", "")).strip()[:1000]
+    if not note:
+        raise HTTPException(400, "note is empty")
+    return _station().store.event("owner.feedback", "owner", note, ref=str(b.get("ref") or "")[:40] or None)
+
+
+@app.post("/api/station/ventures/{rid}/link")
+async def station_venture_link(rid: str, request: Request) -> dict:
+    """Where customers buy (`{"name": "fiverr", "url": "https://www.fiverr.com/..."}`). Content starts once a venture has one."""
+    st = _station()
+    v = st.store.get("ventures", rid)
+    b = await request.json()
+    name, url = str(b.get("name", "")).strip().lower()[:30], str(b.get("url", "")).strip()[:500]
+    if not v:
+        raise HTTPException(404)
+    if not name or not url.startswith("https://"):
+        raise HTTPException(400, "give a name and an https:// link")
+    return st.store.update("ventures", rid, {"links": {**(v.get("links") or {}), name: url}}, "owner", f"{name} link: {url}", kind="venture.link")
+
+
+@app.post("/api/station/optout")
+async def station_optout(request: Request) -> dict:
+    """Someone asked not to be contacted: never again, by any agent."""
+    from .station import actions
+    email = str((await request.json()).get("email", ""))
+    if "@" not in email:
+        raise HTTPException(400, "not an email address")
+    actions.opt_out(_station().store, email)
+    return {"ok": True}
+
+
+@app.post("/api/station/routines/{rid}/run")
+async def station_run_routine(rid: str) -> dict:
+    """Run a research routine now instead of waiting for its slot."""
+    st = _station()
+    if not st.store.get("routines", rid):
+        raise HTTPException(404)
+    if not st.brain.enabled:
+        raise HTTPException(503, "add ANTHROPIC_API_KEY to turn research on")
+    if st.busy:
+        raise HTTPException(409, f"ULTRON is busy: {st.busy}")
+    if not st.treasury.ai_allowed():
+        raise HTTPException(409, "the station's AI budget for this month is used up")
+    st.busy = "starting a routine"
+    asyncio.get_running_loop().run_in_executor(None, st.run_job, {"kind": "routine", "routine": rid})
+    return {"started": rid}
+
+
+@app.post("/api/station/ventures/{rid}/stage")
+async def station_venture_stage(rid: str, request: Request) -> dict:
+    """The owner moves a venture (e.g. to launch, operate, paused or killed)."""
+    from .station.store import STAGES
+    st = _station()
+    stage = (await request.json()).get("stage")
+    if not st.store.get("ventures", rid):
+        raise HTTPException(404)
+    if stage not in STAGES:
+        raise HTTPException(400, f"stage must be one of {', '.join(STAGES)}")
+    return st.store.update("ventures", rid, {"stage": stage}, "owner", f"owner moved it to {stage}", kind="venture.stage")
 
 
 @app.websocket("/ws")

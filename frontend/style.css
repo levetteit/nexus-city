@@ -26,6 +26,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #tickers { display: flex; gap: 14px; overflow: hidden; flex: 1; font-size: 12px; font-weight: 700; white-space: nowrap; }
 #tickers .up { color: var(--green); }
 #tickers .down { color: var(--red); }
+#station-link { pointer-events: auto; text-decoration: none; font-size: 18px; position: relative; filter: drop-shadow(0 0 6px rgba(94, 231, 255, .7)); }
+#station-link i { position: absolute; top: -6px; right: -10px; font: 700 10px Inter, sans-serif; background: var(--red); color: #fff; border-radius: 999px; padding: 1px 5px; }
+#station-link i:empty { display: none; }
 #clock { font-family: var(--pixel); font-size: 12px; color: #c9bfff; white-space: nowrap; }
 #clock .live { color: #ff5470; text-shadow: 0 0 8px rgba(255, 84, 112, .8); font-weight: 400; }
 #clock small { font-family: Inter, sans-serif; font-size: 10px; color: var(--muted); }

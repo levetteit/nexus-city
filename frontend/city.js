@@ -359,6 +359,8 @@ const money = (v) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toLocaleString(undefin
 
 function applyState(s) {
   state = s;
+  const waiting = s.station ? s.station.approvals + s.station.owner_tasks : 0;
+  document.getElementById("station-badge").textContent = waiting || "";
   if (buildings.size === 0) s.bots.forEach((b, i) => makeBuilding(b, i, s.bots.length));
   const top = s.bots.reduce((a, b) => (b.realized > a.realized ? b : a), s.bots[0]);
 

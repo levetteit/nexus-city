@@ -67,6 +67,8 @@ backend/
   live.py        live paper trading on real candles (Yahoo, or real-time via TradingView), with trade logs
   execution.py   real orders to your Lucid accounts via TradersPost (armed from the city, with safety checks)
   notify.py      phone notifications for every trade (web push to the home-screen app, or ntfy)
+station/       the Space Station: ULTRON, the Research Station, ventures, approvals, the shared treasury
+frontend/station.html  the station's Command Board (Command, Approvals, Ventures, Research, Treasury, Crew, Log)
 frontend/room.js  the bots' streamer rooms: robot, monitors, emotions, gadgets
 Dockerfile, render.yaml   one-click hosting (password-protected) so you can watch from your phone
   engine.py      ticks the market and every bot, builds the snapshot
@@ -414,6 +416,93 @@ searches a day: roughly $0.30–0.70 a day, or $10–20 a month.
 - A push after each meeting
 
 Everything is saved in `data/desk/`.
+
+## Space Station: ULTRON's business operations (`backend/station/`)
+
+The city's trading desk is Venture #1 of a bigger economy. Tap 🛰️ in the city's top bar (or open
+`/station.html`) for the **Space Station**, where ULTRON, the station's commander, runs a crew of AI agents
+that research, validate and start online businesses. ULTRON reports to Jarvis, the owner's operations lead.
+
+**One treasury, everyone earns their keep.** The city and the station pay into one pool and draw their
+bills from it, so whichever side is earning keeps the other running. Each side, venture and agent has its
+own P&L. Only real money counts: income and expenses you record, Lucid payouts you record in the account
+panel (at the 90% trader split), and the station's own Claude usage. Paper profit is shown but never
+counted. Agents can never book revenue.
+
+**Mission 1, "First Dollar":** ventures that need **$0 of startup capital** and can start today come first.
+Ventures that need money (an Etsy store, ~$29/month) wait on the watchlist until the pool can cover two
+months of them plus a month of bills; then ULTRON asks you to approve funding them.
+
+**How work flows:**
+1. **Research Station:** five routines (times ET): Opportunity Market Radar (weekdays 08:00), Etsy and
+   Digital Product Validation Scan (Tue/Thu 09:00), Fiverr and AI Service Offer Scan (Wed 09:00), Faceless
+   Content and Music Opportunity Watch (Fri 09:00), Weekly Opportunity Command Brief (Mon 10:00). Each
+   searches the web and files scored opportunities with evidence, costs, a 7-day plan and kill criteria.
+   On first start the Radar runs right away. "Run now" runs any routine on demand.
+2. **Approval:** ULTRON keeps the best $0 opportunity in front of you as a launch proposal (up to 3 live
+   experiments). You can also promote any opportunity from the feed yourself.
+3. **Validation:** the Opportunity Validation Agent turns it into a venture with an offer, a 14-day goal and
+   6-12 tasks with dependencies. Specialists (Service Delivery, Listing/SEO, ...) are added only when a
+   venture needs that role, and reused after that.
+4. **Agents draft, you act.** Agents write the gig, the product, the listing, the outreach. Everything
+   outside the station (accounts, publishing, messages, payments) is an owner task marked
+   **WAITING FOR OWNER**, with the agent's draft attached and a Copy button. Tick it off when it's done.
+5. **ULTRON watches:** stalled or failed tasks are retried once, then escalated. Idle agents go to the Crew
+   Lounge. Every change is written to an append-only audit log (`data/station/events.jsonl`). At 08:30 ET
+   ULTRON writes a daily report for Jarvis and pushes a summary to your phone.
+
+**The teams:**
+
+| Team | Members | What they do |
+|---|---|---|
+| Command | ULTRON | Runs the loop, approvals, daily report to Jarvis |
+| Research | Market Research, Opportunity Validation | The five routines; turns approved ventures into plans |
+| Marketing & Outreach | Marketing Lead, Content Creator, Outreach Agent | A channel plan per venture; daily posts made from the crew's real work, linking to where customers buy; personal emails to businesses that publicly invite inquiries |
+| Finance | Finance Agent (treasurer), Accountant, Auditor | The pool and budgets; monthly statements with a tax set-aside estimate; a daily audit (07:00 ET) of the tamper-evident ledger, Stripe reconciliation and every agent's cost against what it delivered. Plain code: no model writes the numbers |
+| Legal | Legal Counsel, Compliance & QA | Terms, refund policies and client agreements (drafts for you to review, not legal advice); the QA gate in front of everything that leaves |
+| War Room | War Room Strategist, ULTRON in the chair | Reads every result and decides: double down, keep, modify, pivot/pause (done on the spot) or kill (your approval). Writes the lessons every agent follows and steers what research hunts next. Meets Sundays 17:00 ET, as soon as 8 new results come in, or when you press "Convene now" |
+
+Specialists (Service Delivery, Listing/SEO, ...) are still added only when a venture needs that role.
+
+**What leaves the station** (`backend/station/actions.py`): every post, email and Stripe change is an
+action. It must pass Compliance & QA (one revision allowed, then it's stopped and the War Room sees why),
+stay under its daily cap, and the outbound switch must be on. Then it's sent by its connector, or, if that
+platform isn't connected, it waits in your posting queue with a Copy button. Outreach never goes twice to
+the same address or to anyone who opted out, and every contact comes with the page where they publish it.
+
+**Connections** (set them in Render → Environment; the station never sees the keys anywhere else):
+
+| Connection | Settings | What it unlocks |
+|---|---|---|
+| Stripe | `STRIPE_API_KEY` (a restricted key: Products, Prices, Payment Links write; Checkout Sessions read) | Agents create the checkout link for a venture on their own |
+| Stripe sales | `STRIPE_WEBHOOK_SECRET` from a webhook to `https://<your app>/api/station/stripe/webhook` (event `checkout.session.completed`) | Every paid checkout books itself into the treasury with Stripe's fee; the Auditor books any the webhook missed |
+| Email | `STARNET_SMTP_HOST`, `STARNET_SMTP_PORT`, `STARNET_SMTP_USER`, `STARNET_SMTP_PASSWORD`, `STARNET_MAIL_FROM`, `STARNET_MAIL_ADDRESS` | Outreach sends itself, with your postal address and an opt-out line (CAN-SPAM) |
+| Social | not built yet: tell Jarvis which accounts | Posts go out on their own instead of waiting in your queue |
+| Fiverr, Etsy | none: they have no seller API, and bots break their terms | The crew prepares; you publish and reply there |
+
+Refunds and payouts aren't wired at all: they stay in your Stripe dashboard.
+
+What the station can't do: move money out, refund, sign anything, run a marketplace account, or touch the
+trading bots' orders and risk. The **Stop all outbound** button on the Command tab stops every outgoing post,
+email and Stripe change at once.
+
+**Setup:** it runs with the city, in both modes. Research and agent drafting need `ANTHROPIC_API_KEY` (the
+same key as the trading desk). Without it, records, approvals and the treasury still work.
+
+| Setting | Default | |
+|---|---|---|
+| `STARNET_STATION_AI_BUDGET` | `50` | $/month cap on the station's Claude usage. At the cap, research and drafting pause until next month. |
+| `STARNET_STATION_EXPERIMENTS` | `3` | Live ventures at once, besides the trading desk |
+| `STARNET_STATION_TASKS_PER_DAY` | `25` | Agent drafting runs per day |
+| `STARNET_PAYOUT_SPLIT` | `0.9` | Your share of a Lucid payout |
+| `STARNET_STATION_MODEL` | `claude-opus-5-5` | |
+| `STARNET_POSTS_PER_DAY` / `STARNET_OUTREACH_PER_DAY` | `6` / `15` | Daily caps on what goes out |
+| `STARNET_POLICY_SOCIAL` / `_OUTREACH` / `_STRIPE` | `auto` | `owner` makes that kind wait for your OK even after QA |
+| `STARNET_TAX_RATE` | `0.25` | The Accountant's tax set-aside estimate |
+
+A research routine is roughly $0.30-$1.00 of Claude usage; a drafting task, a QA check or a day's posts
+roughly $0.05-$0.30; an outreach batch or a War Room session roughly $0.30-$0.80. With marketing running
+daily, one active venture uses most of the default $50 cap: raise it once ventures are earning.
 
 ## Candle history (`backend/history.py`)
 

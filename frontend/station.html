@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>StarNet Station</title>
+  <link rel="icon" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
+  <meta name="theme-color" content="#05070f" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="station.css" />
+</head>
+<body>
+  <header id="top">
+    <div class="brand"><span class="core"></span>STARNET <b>SPACE STATION</b></div>
+    <div id="coord" class="coord">ULTRON online</div>
+    <a class="back" href="/">◀ City</a>
+  </header>
+
+  <nav id="tabs">
+    <button data-tab="command" class="on">Command</button>
+    <button data-tab="approvals">Approvals <i id="n-approvals"></i></button>
+    <button data-tab="ventures">Ventures</button>
+    <button data-tab="intel">Research</button>
+    <button data-tab="marketing">Marketing <i id="n-outbox"></i></button>
+    <button data-tab="warroom">War Room</button>
+    <button data-tab="treasury">Finance</button>
+    <button data-tab="legal">Legal</button>
+    <button data-tab="crew">Crew</button>
+    <button data-tab="log">Log</button>
+  </nav>
+
+  <main>
+    <!-- ULTRON Command Core -->
+    <section id="command" class="tab on">
+      <div class="hero glass">
+        <div class="ultron"><div class="ring"></div><div class="ring r2"></div><div class="eye"></div></div>
+        <div class="hero-text">
+          <div class="label">CURRENT MISSION</div>
+          <h1 id="mission-name">—</h1>
+          <p id="mission-goal" class="muted"></p>
+          <div id="mission-flags" class="flags"></div>
+        </div>
+      </div>
+      <div class="glass outbound"><div><b>Outbound</b> <span class="muted small" id="ob-text"></span></div>
+        <button class="btn" id="ob-toggle"></button></div>
+      <div class="stats" id="stats"></div>
+      <div class="grid2">
+        <div class="glass"><h2>Waiting for owner</h2><div id="cmd-waiting"></div></div>
+        <div class="glass"><h2>Alerts</h2><div id="cmd-alerts"></div></div>
+      </div>
+      <div class="glass"><h2>Portfolio</h2><div id="cmd-ventures"></div></div>
+      <div class="glass"><h2>ULTRON command queue</h2><div id="cmd-queue"></div></div>
+    </section>
+
+    <!-- Owner Approval Chamber -->
+    <section id="approvals" class="tab">
+      <p class="muted intro">Everything here is <b class="wfo">WAITING FOR OWNER</b>. Agents draft; spending, accounts, publishing and anything outside the station is yours.</p>
+      <h2>Decisions</h2><div id="ap-list"></div>
+      <h2>Your tasks</h2><div id="ot-list"></div>
+    </section>
+
+    <!-- Revenue Operations -->
+    <section id="ventures" class="tab">
+      <div id="pipeline" class="pipeline"></div>
+    </section>
+
+    <!-- Research Lab -->
+    <section id="intel" class="tab">
+      <div class="glass"><h2>Research routines</h2><div id="routines"></div></div>
+      <h2>Intelligence feed</h2>
+      <div id="opps"></div>
+    </section>
+
+    <!-- Marketing & Media -->
+    <section id="marketing" class="tab">
+      <div class="glass"><h2>Connections</h2><div id="conn"></div></div>
+      <h2>Your posting queue <span class="muted small">QA passed · no connector yet, so you post these</span></h2><div id="ob-manual"></div>
+      <h2>Waiting for your OK</h2><div id="ob-wait"></div>
+      <div class="grid2">
+        <div class="glass"><h2>Sent</h2><div id="ob-sent"></div></div>
+        <div class="glass"><h2>Stopped by QA</h2><div id="ob-rejected"></div></div>
+      </div>
+      <div class="glass"><h2>Opt-outs</h2>
+        <form id="optout" class="row"><input name="email" placeholder="someone@business.com asked us to stop" /><button class="btn">Never contact</button></form></div>
+    </section>
+
+    <!-- War Room -->
+    <section id="warroom" class="tab">
+      <div class="glass"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Latest session</h2>
+        <button class="btn primary" id="wr-now">Convene now</button></div><div id="wr-latest"></div></div>
+      <div class="grid2">
+        <div class="glass"><h2>Stop doing</h2><div id="wr-stop"></div></div>
+        <div class="glass"><h2>Start doing</h2><div id="wr-start"></div></div>
+      </div>
+      <div class="glass"><h2>Standing lessons <span class="muted small">fed into every agent's instructions</span></h2><div id="wr-lessons"></div></div>
+      <div class="glass"><h2>Tell the War Room</h2>
+        <form id="feedback" class="form"><select name="ref"><option value="">About the station</option></select>
+          <textarea name="note" rows="3" placeholder="What worked, what didn't, what a customer said…" required></textarea>
+          <button class="btn primary">Send</button></form></div>
+    </section>
+
+    <!-- Legal -->
+    <section id="legal" class="tab">
+      <div class="stats" id="qa-stats"></div>
+      <div class="glass"><h2>Documents from Legal Counsel <span class="muted small">drafts for your review, not legal advice</span></h2><div id="legal-docs"></div></div>
+      <div class="glass"><h2>Recent QA calls</h2><div id="qa-log"></div></div>
+    </section>
+
+    <!-- Analytics / Finance -->
+    <section id="treasury" class="tab">
+      <div class="stats" id="t-stats"></div>
+      <div class="grid2">
+        <div class="glass"><h2>Who's carrying whom</h2><div id="t-units"></div></div>
+        <div class="glass"><h2>Funding goals</h2><div id="t-goals"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="glass"><h2>Record real money</h2>
+          <form id="money" class="form">
+            <div class="row">
+              <select name="kind"><option value="income">Income</option><option value="expense">Expense</option></select>
+              <input name="amount" type="number" step="0.01" min="0.01" placeholder="Amount $" required />
+            </div>
+            <div class="row">
+              <select name="unit"><option value="station">Station</option><option value="city">City</option></select>
+              <select name="venture"><option value="">No venture</option></select>
+            </div>
+            <input name="note" placeholder="What was it? (e.g. Fiverr order #1)" required maxlength="300" />
+            <button class="btn primary">Record</button>
+            <p class="muted small">Only you record income and expenses. Agents can't. Lucid payouts from the City count automatically.</p>
+          </form>
+        </div>
+        <div class="glass"><h2>Monthly bills</h2><div id="t-bills"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="glass"><h2>Accountant: this month</h2><div id="f-statement"></div></div>
+        <div class="glass"><h2>Auditor</h2><div id="f-audit"></div></div>
+      </div>
+      <div class="glass"><h2>Ledger</h2><div id="t-ledger"></div></div>
+    </section>
+
+    <!-- Agent Quarters + Crew Lounge -->
+    <section id="crew" class="tab">
+      <h2>On duty</h2><div id="crew-duty" class="pods"></div>
+      <h2>Crew Lounge <span class="muted small">agents on break</span></h2><div id="crew-lounge" class="pods lounge"></div>
+      <h2>Leaderboard</h2><div id="crew-board"></div>
+    </section>
+
+    <!-- Audit log -->
+    <section id="log" class="tab">
+      <div class="glass"><h2>ULTRON's reports to Jarvis</h2><div id="reports"></div></div>
+      <div class="glass"><h2>Audit log</h2><div id="events"></div></div>
+    </section>
+  </main>
+
+  <div id="sheet" class="sheet hidden"><div class="sheet-card glass"><button class="x" id="sheet-x">✕</button><div id="sheet-body"></div></div></div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="station.js"></script>
+</body>
+</html>
