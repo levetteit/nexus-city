@@ -623,6 +623,7 @@ function renderAccount(a) {
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
     ${state.mode === "live" ? `<button class="reports-btn" data-reports>📒 DAILY REPORTS</button>` : ""}
     ${state.accounts ? `<button class="desk-btn" data-accounts>👥 MY LUCID ACCOUNTS (${state.accounts.count})${state.accounts.payouts_ready ? ` · ${fmt(state.accounts.payouts_ready)} READY` : ""}</button>` : ""}
+    <button class="desk-btn" data-scale>📈 SCALE PLAN: NEXT PAYOUTS & ACCOUNTS</button>
     ${state.mode === "live" ? `<button class="desk-btn" data-signals>🎯 SIGNAL CHECK VS. YOUR INDICATOR</button>` : ""}
     ${deskRow(state)}
     ${scoreRows(state)}
@@ -794,6 +795,38 @@ async function openAccounts() {
       <div><b>${fmt(d.paid_out * 0.9)}</b><small>you've kept (90%)</small></div></div>
     ${cards || `<p class="note">Add each Lucid account you buy. The bots' trades are applied to every account, so you can see each one's drawdown room, evaluation progress and payouts. Give an account its own TradersPost webhook and accounts that must stop (target reached, daily stop, close to the MLL) are left out of new trades automatically.</p>`}
     <button class="add" data-acct="add">＋ ADD A LUCID ACCOUNT</button>`;
+}
+
+// ---------------------------------------------------------------- scale plan (backend/scale.py)
+let scaleData = null;
+const STAGE_ICON = { evaluation: "🎯", passing: "✅", funded: "💼", "payout ready": "💸", live: "🏁", failed: "✖" };
+async function openScale() {
+  const panel = document.getElementById("scale"), body = document.getElementById("scale-body");
+  panel.classList.remove("hidden");
+  try { scaleData = await (await fetch("/api/scale")).json(); } catch { body.innerHTML = `<p class="note">scale plan unavailable</p>`; return; }
+  const d = scaleData, n = d.next_eval;
+  const day = (iso) => iso ? new Date(iso + "T12:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : "—";
+  const lane = (stage, label) => {
+    const rows = d.accounts.filter((a) => a.stage === stage);
+    return rows.length ? `<div class="lane"><h5>${STAGE_ICON[stage]} ${label} <small>${rows.length}</small></h5>${rows.map((a) => `
+      <div class="card ${stage.replace(" ", "-")}"><div class="row"><b>${esc(a.name)}</b><span>${a.eta ? day(a.eta) : ""}</span></div>
+      <div class="row"><span>${esc(a.next)}</span></div>
+      ${stage === "evaluation" ? `<div class="bar"><i style="width:${Math.max(0, Math.min(100, (a.profit / (a.profit + a.left)) * 100))}%"></i></div>` : ""}
+      ${a.paid_out ? `<div class="row"><span class="muted">paid out</span><span>${fmt(a.paid_out)} (${a.payouts}/${a.max_payouts ?? "∞"})</span></div>` : ""}</div>`).join("")}</div>` : "";
+  };
+  body.innerHTML = `
+    ${d.mode !== "live" ? `<p class="note">Simulation: this plan uses the simulated account. In live mode it reads your 👥 accounts.</p>` : ""}
+    <div class="sum"><div><b>${d.accounts.length}</b><small>accounts (limit ${d.limit})</small></div>
+      <div><b class="pos">${d.coming.length ? fmt(d.coming[0].amount) : "—"}</b><small>next payout${d.coming.length ? ` · ${day(d.coming[0].eta)}` : ""}</small></div>
+      <div><b>${d.monthly_ceiling ? fmt(d.monthly_ceiling) : "—"}</b><small>monthly ceiling (est.)</small></div></div>
+    ${lane("payout ready", "Payout ready")}${lane("funded", "Funded")}${lane("passing", "Passing")}${lane("evaluation", "In evaluation")}${lane("live", "Moved to live")}${lane("failed", "Failed")}
+    <div class="next ${n.can_fund ? "go" : ""}"><h5>🚀 Next account</h5><p>${esc(n.text)}</p>
+      ${n.price ? `<div class="row"><span>Treasury free (after a month of bills)</span><span>${fmt(n.free)} / ${fmt(n.price)}</span></div>
+      <div class="bar"><i style="width:${Math.min(100, (n.free / n.price) * 100)}%"></i></div>` : ""}
+      <p class="muted">${n.can_fund ? "ULTRON has put the purchase in your approvals. Nothing is bought for you: you buy it at Lucid, then add it under 👥." : "When the treasury covers it, ULTRON asks you to approve the purchase."}</p>
+      <button data-scale-set>${n.price ? `PRICE ${fmt(n.price)} · LIMIT ${d.limit} · EDIT` : "SET THE EVALUATION PRICE"}</button></div>
+    ${d.coming.length ? `<h5>💸 Payouts coming (your 90%)</h5>${d.coming.map((c) => `<div class="row"><span>${day(c.eta)} · ${esc(c.account)}</span><span class="pos">${fmt(c.amount)}</span></div>`).join("")}` : ""}
+    <p class="note">Estimates at ${fmt(d.pace.avg_day)}/day (${esc(d.pace.source)}), with about ${Math.round(d.pace.qualify_rate * 100)}% of days making $150+. Lucid pays up to 50% of profit, $2,000 max per payout, 5 payouts per account.</p>`;
 }
 
 async function accountAction(action, id) {
@@ -1128,6 +1161,16 @@ document.addEventListener("click", async (e) => {
   }
   if (e.target.closest("[data-desk]")) openDesk();
   if (e.target.closest("[data-accounts]")) openAccounts();
+  if (e.target.closest("[data-scale]")) openScale();
+  if (e.target.closest("[data-scale-set]")) {
+    const p = prompt("What Lucid charges you for one LucidFlex 50K evaluation ($):", scaleData?.eval_price ?? "");
+    if (p !== null) {
+      const m = prompt("Most accounts you're allowed to run at once (your plan's limit):", scaleData?.limit ?? 5);
+      const r = await fetch("/api/scale", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eval_price: +p || 0, max_accounts: m === null ? null : +m }) });
+      if (!r.ok) alert((await r.json()).detail); else openScale();
+    }
+  }
   if (e.target.closest("[data-signals]")) openSignals();
   const sd = e.target.closest("[data-sig-day]");
   if (sd) openSignals(sd.dataset.sigDay);

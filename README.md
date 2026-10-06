@@ -98,6 +98,7 @@ backend/
   backtest.py    replay real 1m candles through the bots; walk-forward optimizer
   fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
   live.py        live paper trading on real candles (Yahoo, or real-time via TradingView), with trade logs
+  scale.py       the Lucid scale plan: accounts by stage, next payouts, when to buy the next evaluation
   execution.py   real orders to your Lucid accounts via TradersPost (armed from the city, with safety checks)
   notify.py      phone notifications for every trade (web push to the home-screen app, or ntfy)
 station/       the Space Station: ULTRON, the Research Station, ventures, approvals, the shared treasury
@@ -355,6 +356,19 @@ per cycle of 5+ days. The way to scale is more accounts and fast, steady $150+
 days, not bigger days.
 
     python -m backend.backtest data/*_1m.csv --payouts
+
+### Scale plan (`backend/scale.py`)
+
+**📈 SCALE PLAN** in the account panel shows every account by stage (in evaluation, funded, payout ready,
+moved to live, failed), the next milestone for each with an estimated date, the payouts coming (your 90%),
+and when the treasury can buy the next evaluation. Estimates use $400/day (the latest 22-day backtest on real
+candles) until there are 10 traded paper days, then your own average, with ~55% of days making $150+.
+
+Set what Lucid charges you for an evaluation and your account limit with the button in the panel
+(`POST /api/scale`). From then on the next evaluation is a one-time treasury goal: once the pool covers it on
+top of a month of bills, ULTRON puts **Buy: Lucid evaluation #N** in your approvals. Nothing is bought for you:
+you buy it at Lucid and add it under 👥. In the simulation the plan reads the simulated account and never
+asks for money.
 
 ### Your Lucid accounts (`backend/accounts.py`)
 

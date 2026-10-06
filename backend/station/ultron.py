@@ -441,6 +441,12 @@ class Ultron:
             self.notify("🛰️ Station AI budget at 80%", f"${spent:.2f} of ${AI_BUDGET:.0f} this month")
         for g in self.treasury.summary()["goals"]:
             if g["funded"] and not self._approval_for("fund_goal", g["id"]):
+                if g.get("one_time"):
+                    self.request("fund_goal", "A-004", f"Buy: {g['name']} (${g['monthly']:,.0f})",
+                                 f"The treasury now covers it on top of a month of bills. {g.get('why', '')}",
+                                 cost=g["monthly"], reversible=False, risk="One-time purchase; an evaluation can fail",
+                                 payload={"goal": g["id"]})
+                    continue
                 self.request("fund_goal", "A-004", f"Fund: {g['name']} (${g['monthly']:.0f}/month)",
                              f"The treasury now covers {g.get('months', 1)} months of it on top of a month of bills. {g.get('why', '')}",
                              cost=g["monthly"], reversible=True, risk="Recurring cost; cancel any time", payload={"goal": g["id"]})

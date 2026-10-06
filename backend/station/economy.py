@@ -156,6 +156,30 @@ class Treasury:
             self._save_cfg()
         return len(payouts) - n
 
+    def set_eval_goal(self, goal: Optional[dict]) -> None:
+        """The scale plan's one-time goal for the next Lucid evaluation (backend/scale.py): one at a time."""
+        keep = [g for g in self.cfg["goals"] if not g["id"].startswith("lucid-eval-") or (goal and g["id"] == goal["id"])]
+        if goal and not any(g["id"] == goal["id"] for g in keep):
+            keep.append(goal)
+        elif goal:
+            keep = [goal if g["id"] == goal["id"] else g for g in keep]   # the price may have changed
+        if keep != self.cfg["goals"]:
+            self.cfg["goals"] = keep
+            self._save_cfg()
+
+    def set_scale(self, eval_price: Optional[float], max_accounts: Optional[int]) -> dict:
+        sc = self.cfg.setdefault("scale", {})
+        if eval_price is not None:
+            if eval_price < 0 or eval_price > 5000:
+                raise ValueError("evaluation price must be $0-$5,000")
+            sc["eval_price"] = round(float(eval_price), 2) or None
+        if max_accounts is not None:
+            if not 1 <= int(max_accounts) <= 20:
+                raise ValueError("account limit must be 1-20")
+            sc["max_accounts"] = int(max_accounts)
+        self._save_cfg()
+        return sc
+
     # ---------------------------------------------------------------- reading
     def flights(self, n: int = 6) -> list[dict]:
         """The latest real money in, as shuttle flights: a Lucid payout flies from the city's vault up to the
