@@ -316,6 +316,20 @@ Settings (environment variables):
 
 To backtest with a calendar: `--news data/news_calendar.json`.
 
+## Candle history (`backend/history.py`)
+
+Yahoo only keeps about 30 days of 1-minute candles, so live mode saves them as they come in:
+
+- **On startup:** it backfills the last 29 days.
+- **At every day roll:** it saves the newest days again.
+
+Everything goes to `data/history/{MNQ,MES,M2K}_1m.csv` on the Render disk. The
+account panel shows how many days are saved, with download links (also at
+`/api/history/MNQ.csv`). Feed the files to the backtester to re-test and
+re-optimize on more data as it builds up:
+
+    python -m backend.backtest MNQ_1m.csv MES_1m.csv M2K_1m.csv --optimize
+
 ## Paper vs backtest check (`backend/scorecard.py`)
 
 When each trading day ends, live mode downloads that day's candles again and
