@@ -67,6 +67,8 @@ backend/
   live.py        live paper trading on real candles (Yahoo, or real-time via TradingView), with trade logs
   execution.py   real orders to your Lucid accounts via TradersPost (armed from the city, with safety checks)
   notify.py      phone notifications for every trade (web push to the home-screen app, or ntfy)
+station/       the Space Station: ULTRON, the Research Station, ventures, approvals, the shared treasury
+frontend/station.html  the station's Command Board (Command, Approvals, Ventures, Research, Treasury, Crew, Log)
 frontend/room.js  the bots' streamer rooms: robot, monitors, emotions, gadgets
 Dockerfile, render.yaml   one-click hosting (password-protected) so you can watch from your phone
   engine.py      ticks the market and every bot, builds the snapshot
@@ -414,6 +416,57 @@ searches a day: roughly $0.30–0.70 a day, or $10–20 a month.
 - A push after each meeting
 
 Everything is saved in `data/desk/`.
+
+## Space Station: ULTRON's business operations (`backend/station/`)
+
+The city's trading desk is Venture #1 of a bigger economy. Tap 🛰️ in the city's top bar (or open
+`/station.html`) for the **Space Station**, where ULTRON, the station's commander, runs a crew of AI agents
+that research, validate and start online businesses. ULTRON reports to Jarvis, the owner's operations lead.
+
+**One treasury, everyone earns their keep.** The city and the station pay into one pool and draw their
+bills from it, so whichever side is earning keeps the other running. Each side, venture and agent has its
+own P&L. Only real money counts: income and expenses you record, Lucid payouts you record in the account
+panel (at the 90% trader split), and the station's own Claude usage. Paper profit is shown but never
+counted. Agents can never book revenue.
+
+**Mission 1, "First Dollar":** ventures that need **$0 of startup capital** and can start today come first.
+Ventures that need money (an Etsy store, ~$29/month) wait on the watchlist until the pool can cover two
+months of them plus a month of bills; then ULTRON asks you to approve funding them.
+
+**How work flows:**
+1. **Research Station:** five routines (times ET): Opportunity Market Radar (weekdays 08:00), Etsy and
+   Digital Product Validation Scan (Tue/Thu 09:00), Fiverr and AI Service Offer Scan (Wed 09:00), Faceless
+   Content and Music Opportunity Watch (Fri 09:00), Weekly Opportunity Command Brief (Mon 10:00). Each
+   searches the web and files scored opportunities with evidence, costs, a 7-day plan and kill criteria.
+   On first start the Radar runs right away. "Run now" runs any routine on demand.
+2. **Approval:** ULTRON keeps the best $0 opportunity in front of you as a launch proposal (up to 3 live
+   experiments). You can also promote any opportunity from the feed yourself.
+3. **Validation:** the Opportunity Validation Agent turns it into a venture with an offer, a 14-day goal and
+   6-12 tasks with dependencies. Specialists (Service Delivery, Listing/SEO, ...) are added only when a
+   venture needs that role, and reused after that.
+4. **Agents draft, you act.** Agents write the gig, the product, the listing, the outreach. Everything
+   outside the station (accounts, publishing, messages, payments) is an owner task marked
+   **WAITING FOR OWNER**, with the agent's draft attached and a Copy button. Tick it off when it's done.
+5. **ULTRON watches:** stalled or failed tasks are retried once, then escalated. Idle agents go to the Crew
+   Lounge. Every change is written to an append-only audit log (`data/station/events.jsonl`). At 08:30 ET
+   ULTRON writes a daily report for Jarvis and pushes a summary to your phone.
+
+What the station can't do: spend or move money, act on any outside account, publish, contact anyone, or
+touch the trading bots' orders and risk.
+
+**Setup:** it runs with the city, in both modes. Research and agent drafting need `ANTHROPIC_API_KEY` (the
+same key as the trading desk). Without it, records, approvals and the treasury still work.
+
+| Setting | Default | |
+|---|---|---|
+| `STARNET_STATION_AI_BUDGET` | `50` | $/month cap on the station's Claude usage. At the cap, research and drafting pause until next month. |
+| `STARNET_STATION_EXPERIMENTS` | `3` | Live ventures at once, besides the trading desk |
+| `STARNET_STATION_TASKS_PER_DAY` | `25` | Agent drafting runs per day |
+| `STARNET_PAYOUT_SPLIT` | `0.9` | Your share of a Lucid payout |
+| `STARNET_STATION_MODEL` | `claude-opus-5-5` | |
+
+A research routine is roughly $0.30-$1.00 of Claude usage and a drafting task roughly $0.05-$0.30, so
+the default cap covers the full routine schedule plus a few ventures' worth of drafting.
 
 ## Candle history (`backend/history.py`)
 
