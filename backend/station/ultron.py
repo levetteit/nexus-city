@@ -25,9 +25,18 @@ from .economy import AI_BUDGET, Treasury
 from .store import STAGES, Store, now_iso
 
 ET = ZoneInfo("America/New_York")
+
+
+def _is_connection(exc) -> bool:
+    try:
+        import anthropic
+        return isinstance(exc, anthropic.APIConnectionError)
+    except ImportError:
+        return False
 MAX_EXPERIMENTS = int(os.getenv("STARNET_STATION_EXPERIMENTS", "3"))      # live ventures besides the trading desk
 TASKS_PER_DAY = int(os.getenv("STARNET_STATION_TASKS_PER_DAY", "25"))     # agent drafting runs per ET day
 STALL_MINUTES = 30
+AI_BACKOFF = timedelta(minutes=20)   # after a connection failure, wait this long instead of burning the day's slots
 ACTIVE_STAGES = ("approved", "build", "launch", "operate", "measure", "optimize", "scale")
 REPORT_AT = (8, 30)   # ET, daily
 AUDIT_AT = (7, 0)     # ET, daily
@@ -130,6 +139,8 @@ class Ultron:
             return {"kind": "metrics"}
         if not self.brain.enabled or not self.treasury.ai_allowed():
             return None
+        if self.cfg.get("ai_backoff_until") and now < datetime.fromisoformat(self.cfg["ai_backoff_until"]):
+            return None
         for v in s.all("ventures"):
             if v["stage"] == "approved" and v.get("opportunity") and not v.get("planned"):
                 return {"kind": "plan", "venture": v["id"]}
@@ -142,7 +153,9 @@ class Ultron:
         selling = [v for v in s.all("ventures") if v["id"] != "V-001" and v["stage"] in ACTIVE_STAGES and v.get("planned")
                    and v["stage"] != "approved"]
         for v in selling:
-            if not v.get("marketing_plan"):
+            mp = v.get("marketing_plan")
+            if not mp or (mp.get("failed_at") and now - datetime.fromisoformat(mp["failed_at"]) > timedelta(hours=24)) \
+                    or (not mp.get("audience") and not mp.get("failed_at")):   # an empty plan left by an earlier failure
                 return {"kind": "marketing_plan", "venture": v["id"]}
         for v in selling:
             if (v.get("links") or v.get("channels")) and v.get("content_day") != now.date().isoformat():
@@ -240,7 +253,20 @@ class Ultron:
                 self.busy = f"{t['title']} ({t['venture']})"
                 return crew.run_task(s, self.brain, t)
         except Exception as exc:
-            self.last_error = str(exc)[:200]
+            self.last_error = (self.brain.last_error or str(exc))[:200] if _is_connection(exc) else str(exc)[:200]
+            if _is_connection(exc):
+                # the network or the key, not the job: keep the job and its slot, try again in a few minutes
+                self.cfg["ai_backoff_until"] = (now + AI_BACKOFF).isoformat()
+                self._save_cfg()
+                s.event("ultron.ai_unreachable", "A-001", f"{job['kind']} waiting: {self.last_error}", severity="WARNING")
+                if job["kind"] == "plan":
+                    s.update("ventures", job["venture"], {"planned": False}, "A-001", "planning will retry")
+                if job["kind"] in ("task",):
+                    s.update("tasks", job["task"], {"status": "queued", "attempts": max(0, s.get("tasks", job["task"]).get("attempts", 1) - 1)},
+                             "A-001", "Claude unreachable: back in the queue")
+                if job["kind"] in ("qa", "revise"):
+                    s.update("actions", job["action"], {"status": job["kind"]}, "A-001", "Claude unreachable: will retry")
+                return None
             s.event("ultron.job_failed", "A-001", f"{job['kind']} failed: {self.last_error}", ref=job.get("task") or job.get("routine")
                     or job.get("venture"), severity="WARNING")
             if job["kind"] == "routine" and job.get("kickoff"):
@@ -253,7 +279,8 @@ class Ultron:
             if job["kind"] in ("content", "outreach"):
                 s.update("ventures", job["venture"], {f"{job['kind']}_day": now.date().isoformat()}, "A-001", "skipped today after a failure")
             if job["kind"] == "marketing_plan":
-                s.update("ventures", job["venture"], {"marketing_plan": {"channels": [], "angles": [], "outreach": {"use": False}}},
+                s.update("ventures", job["venture"], {"marketing_plan": {"channels": [], "angles": [], "outreach": {"use": False},
+                                                                     "failed_at": now.isoformat()}},
                          "A-001", "channel plan failed; using an empty plan until the War Room revisits it")
             if job["kind"] in ("qa", "revise"):
                 s.update("actions", job["action"], {"status": "failed", "result": {"error": self.last_error}}, "A-001", "QA could not run")
