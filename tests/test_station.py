@@ -1,6 +1,7 @@
 """The Space Station: ULTRON's records, approvals, treasury rules and the research → venture → task flow,
 with a fake Claude client (no network, no cost)."""
 import json
+import os
 from datetime import datetime
 from types import SimpleNamespace as NS
 from zoneinfo import ZoneInfo
@@ -43,6 +44,7 @@ class FakeClaude:
         self.opps, self.calls = opps, []
         self.qa = ["pass"]          # verdicts QA hands out, last one repeats
         self.warroom = {"verdicts": [], "lessons": []}
+        self.shop_briefs = []
         self.beta = NS(messages=NS(create=self.create))
 
     def create(self, **kw):
@@ -73,6 +75,8 @@ class FakeClaude:
             body = {"prospects": [{"company": "Acme Staffing", "contact_name": "", "to_email": "hello@acmestaffing.com",
                                    "source_url": "https://acmestaffing.com/contact", "why_them": "they place nurses",
                                    "subject": "Resume help for your nurses", "body": "Hi Acme team, ..."}]}
+        elif "market_notes" in props:
+            body = {"market_notes": "Occupation humor tees sell; fall mugs trending.", "products": self.shop_briefs}
         elif "verdicts" in props:
             body = {"summary": "Mixed week.", "stop_doing": ["long posts"], "start_doing": ["before/after posts"],
                     "research_focus": "B2B services for clinics", **self.warroom}
@@ -108,7 +112,7 @@ def test_seeds_once_without_duplicates(tmp_path):
     again = Ultron(str(tmp_path), client=None)
     assert len(again.store.all("routines")) == 5
     assert [a["name"] for a in again.store.all("agents")][:2] == ["ULTRON", "Market Research Agent"]
-    assert len(again.store.all("agents")) == 12 and len(again.store.all("ventures")) == 2
+    assert len(again.store.all("agents")) == 14 and len(again.store.all("ventures")) == 3
     pps = again.store.get("ventures", "V-PPS")
     assert pps["language"] == "es" and pps["channels"] == ["facebook", "instagram"] and pps["owner_business"]
     assert not pps.get("outreach_allowed")
@@ -143,7 +147,7 @@ def test_research_to_venture_to_tasks(ultron):
     u.tick(now=MON_0900)
     assert len(u.store.find("approvals", status="pending")) == 1                    # one proposal at a time
     u.decide(pending[0]["id"], "approve")
-    v = next(v for v in u.store.all("ventures") if v["id"] not in ("V-001", "V-PPS"))
+    v = next(v for v in u.store.all("ventures") if v["id"] not in ("V-001", "V-PPS", "V-ETSY"))
     assert v["stage"] == "approved" and u.store.get("opportunities", v["opportunity"])["status"] == "promoted"
     # validation plans the venture into tasks with dependencies, staffing one specialist
     now = MON_0900.replace(hour=9, minute=1)
@@ -192,6 +196,7 @@ def test_content_only_once_a_venture_has_a_link(ultron):
                                                        "outreach": {"use": False}}}, "test")
     u.cfg["audited"] = MON_0900.date().isoformat()
     u.cfg["kicked_off"] = True
+    u.cfg["shop_research_at"] = MON_0900.isoformat()
     for r in u.store.all("routines"):
         u.store.update("routines", r["id"], {"last_run": MON_0900.isoformat()}, "test")
     assert u.next_job(MON_0900) is None
@@ -735,4 +740,131 @@ def test_milestones_and_pets_come_from_real_work(tmp_path):
     ms = {m["title"]: m["at"] for m in recognition.station_milestones(u.store, u.treasury)}
     assert ms["First sale"] and ms["$100 earned"] and not ms["$1,000 earned"]
     u.tick(now=MON_0900)
-    assert u.overview()["milestones"][4]["title"] == "First sale"
+    assert next(m for m in u.overview()["milestones"] if m["title"] == "First sale")["at"]
+
+
+BRIEF = {"niche": "nurse humor", "product_type": "tshirt", "our_angle": "night-shift wordplay nobody else has",
+         "competitors": [{"shop": "ScrubLife", "listing": "Funny Nurse Shirt", "price_usd": 24.0, "url": "https://etsy.com/listing/1",
+                          "why_it_sells": "1,200 reviews"}],
+         "headline": "Running on coffee and charting", "subline": "night shift edition", "ink": "dark", "accent": "#d65c3c",
+         "title": "Funny Nurse Shirt, Night Shift Nurse Gift", "description": "Soft unisex tee for night-shift nurses.",
+         "tags": ["nurse shirt", "night shift nurse gift for her and him", "nurse shirt", "rn gift"] + [f"tag{i}" for i in range(15)],
+         "price_usd": 9.0}
+
+
+class FakePrintify:
+    """Answers like Printify's API for the calls the shop makes."""
+
+    def __init__(self):
+        self.calls, self.orders = [], []
+
+    def __call__(self, method, path, body=None):
+        self.calls.append((method, path, body))
+        if path == "/shops.json":
+            return [{"id": 77, "title": "My POS", "sales_channel": "custom_integration"}, {"id": 42, "title": "Etsy", "sales_channel": "etsy"}]
+        if path == "/catalog/blueprints.json":
+            return [{"id": 5, "title": "Unisex Jersey Short Sleeve Tee"}, {"id": 68, "title": "Ceramic Mug (11oz)"}]
+        if path.endswith("/print_providers.json"):
+            return [{"id": 29, "title": "Monster Digital"}]
+        if path.endswith("/variants.json"):
+            return {"variants": [{"id": i, "title": f"{c} / {z}", "options": {"color": c, "size": z}}
+                                 for i, (c, z) in enumerate([(c, z) for c in ("White", "Black", "Natural") for z in ("XS", "S", "M", "L", "XL", "2XL", "3XL")])]}
+        if path == "/uploads/images.json":
+            assert body["contents"] and body["file_name"].endswith(".png")
+            return {"id": "img1"}
+        if path == "/shops/42/products.json" and method == "POST":
+            return {"id": "prod1", "variants": [{"id": v["id"], "cost": 1200, "price": v["price"]} for v in body["variants"]]}
+        if path.startswith("/shops/42/orders.json"):
+            return {"data": self.orders}
+        return {}
+
+
+def test_the_crew_runs_the_etsy_shop_end_to_end(ultron, monkeypatch):
+    from backend.station import actions, connectors, shop
+    u, fake = ultron
+    fake.shop_briefs = [BRIEF, {**BRIEF, "title": "Duplicate idea"}, {**BRIEF, "headline": "Mug life", "product_type": "mug", "ink": "light"}]
+    assert shop.research_due(u.store, u.cfg, MON_0900)
+    u.run_job({"kind": "shop_research"}, now=MON_0900)
+    drafts = u.store.find("actions", kind="shop.listing")
+    assert len(drafts) == 2                                                     # the same headline twice is one product
+    tee, mug = drafts
+    assert len(tee["payload"]["tags"]) == 13 and all(len(t) <= 20 for t in tee["payload"]["tags"])
+    assert len({t.lower() for t in tee["payload"]["tags"]}) == 13               # no repeated tags
+    assert mug["payload"]["ink"] == "dark"                                      # white mugs get dark ink
+    assert all(media_ok(u, a["payload"]["image"]) for a in drafts)
+    assert not shop.research_due(u.store, u.cfg, MON_0900)                      # just ran
+    # QA, then no Printify yet: it waits in the owner's queue, never dropped
+    for a in drafts:
+        u.run_job({"kind": "qa", "action": a["id"]}, now=MON_0900)
+    out = actions.dispatch(u.store, u.store.get("actions", tee["id"]), True)
+    assert out["status"] == "manual" and "Printify" in out["manual_reason"]
+    # connect Printify: ULTRON requeues it and the Shop Manager lists it, priced above cost
+    api = FakePrintify()
+    monkeypatch.setenv("PRINTIFY_API_TOKEN", "test-token")
+    monkeypatch.setattr(connectors, "_printify", api)
+    connectors._printify_cache.clear()
+    u.tick(now=MON_0900)
+    assert u.store.get("actions", tee["id"])["status"] == "ready"
+    out = actions.dispatch(u.store, u.store.get("actions", tee["id"]), True)
+    assert out["status"] == "sent" and out["result"]["id"] == "prod1"
+    create = next(b for m, p, b in api.calls if p == "/shops/42/products.json")
+    colors = {v["options"]["color"] for v in api("GET", "/catalog/blueprints/5/print_providers/29/variants.json")["variants"]
+              if v["id"] in [x["id"] for x in create["variants"]]}
+    sizes = {v["options"]["size"] for v in api("GET", "/catalog/blueprints/5/print_providers/29/variants.json")["variants"]
+             if v["id"] in [x["id"] for x in create["variants"]]}
+    assert colors == {"White", "Natural"} and sizes == set(shop.APPAREL_SIZES)  # dark ink on light shirts, S-2XL
+    assert "AI tools" in create["description"]                                  # Etsy's disclosure, always
+    put = next(b for m, p, b in api.calls if m == "PUT")
+    assert {v["price"] for v in put["variants"]} == {shop.min_price(1200)} == {1899}   # $9 brief < cost + fees + profit
+    assert any(p.endswith("/publish.json") for _, p, _ in api.calls)
+    # the cap: STARNET_SHOP_LISTINGS_PER_DAY a day
+    monkeypatch.setitem(actions.CAPS, "shop.listing", 1)
+    assert actions.dispatch(u.store, u.store.get("actions", mug["id"]), True)["status"] == "ready"
+    # orders come back as results, once each
+    api.orders = [{"id": "o1", "created_at": "2026-10-05 12:00:00+00:00", "status": "fulfilled", "total_price": 1899,
+                   "total_shipping": 475, "line_items": [{"product_id": "prod1", "quantity": 1, "cost": 1200, "shipping_cost": 475,
+                                                          "metadata": {"title": "Funny Nurse Shirt"}}]}]
+    assert shop.sync_orders(u.store)["new"] == 1 and shop.sync_orders(u.store)["new"] == 0
+    sm = u.overview()["shop"]
+    assert sm["orders_total"] == 1 and sm["live"][0]["orders"] == 1 and sm["pipeline"]["sent"] == 1
+    assert u.treasury.summary()["station"]["income"] == 0                       # sales are booked by the owner, not the shop
+    assert sum(1 for e in u.store.events(200) if e["kind"] == "shop.order") == 1
+
+
+def media_ok(u, name):
+    from backend.station import media
+    from PIL import Image
+    path = media.path_for(os.path.dirname(u.store.dir), name)
+    return bool(path) and Image.open(path).mode == "RGBA"
+
+
+def test_old_etsy_goal_is_retired(tmp_path):
+    import os as _os
+    d = tmp_path / "station"
+    d.mkdir()
+    (d / "treasury.json").write_text(json.dumps({"goals": [{"id": "etsy-launch", "name": "Open the first Etsy store", "monthly": 29.0,
+                                                            "months": 2, "unit": "station"}]}))
+    u = Ultron(str(tmp_path), client=FakeClaude([opp("x")]))
+    assert [g["id"] for g in u.treasury.cfg["goals"]] == ["printify-premium"]
+    assert "Etsy store (~$29" not in u.store.get("missions", "M-001")["goal"]
+
+
+def test_no_api_credit_waits_instead_of_failing_jobs(tmp_path):
+    import anthropic
+    import httpx2 as httpx
+    fake = FakeClaude([opp("x")])
+    u = Ultron(str(tmp_path), client=fake)
+    u.cfg["audited"] = MON_0900.date().isoformat()
+    resp = httpx.Response(400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+
+    def broke(**kw):
+        raise anthropic.BadRequestError("Your credit balance is too low to access the Anthropic API.", response=resp,
+                                        body={"type": "error", "error": {"type": "invalid_request_error"}})
+    fake.beta.messages.create = broke
+    job = u.next_job(MON_0900)
+    assert job["kind"] == "marketing_plan"
+    u.run_job(job, now=MON_0900)
+    assert not (u.store.get("ventures", job["venture"]).get("marketing_plan") or {}).get("failed_at")   # not marked failed
+    assert u.next_job(MON_0900.replace(minute=10)) is None and "credit balance" in u.last_error
+    fake.beta.messages.create = fake.create
+    assert u.next_job(MON_0900.replace(minute=25)) == job

@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
-from . import actions, connectors, crew, finance, marketing, recognition, research, results, warroom
+from . import actions, connectors, crew, finance, marketing, recognition, research, results, shop, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
 from .store import STAGES, Store, now_iso
@@ -28,11 +28,16 @@ ET = ZoneInfo("America/New_York")
 
 
 def _is_connection(exc) -> bool:
+    """Claude is out of reach for every job, not just this one: the network, the key, or no API credit left.
+    The job keeps its place and its slot; ULTRON waits and tries again."""
     try:
         import anthropic
-        return isinstance(exc, anthropic.APIConnectionError)
     except ImportError:
         return False
+    if isinstance(exc, anthropic.APIConnectionError):
+        return True
+    return isinstance(exc, anthropic.APIStatusError) and (exc.status_code in (401, 403)
+                                                          or "credit balance" in str(getattr(exc, "message", "")).lower())
 MAX_EXPERIMENTS = int(os.getenv("STARNET_STATION_EXPERIMENTS", "3"))      # live ventures besides the trading desk
 TASKS_PER_DAY = int(os.getenv("STARNET_STATION_TASKS_PER_DAY", "25"))     # agent drafting runs per ET day
 STALL_MINUTES = 30
@@ -97,11 +102,41 @@ class Ultron:
                                   "success_criteria": "Leads from the Page every week", "kill_criteria": "None: the owner's own business",
                                   "next_action": "Marketing Lead studies the Page and writes the channel plan", "opportunity": None},
                      "owner", "the owner's solar business joins the station; it owns the Facebook Page")
+        if not s.get("ventures", shop.VENTURE):
+            s.create("ventures", {"id": shop.VENTURE, "name": "Etsy Print-on-Demand Shop", "category": "etsy", "stage": "operate",
+                                  "owner": "owner", "owner_business": True, "agent_run": True, "unit": "station", "planned": True,
+                                  "offer": "Original text-based t-shirts, sweatshirts, hoodies, mugs and posters, printed on demand "
+                                           "by Printify and sold on the owner's Etsy shop",
+                                  "objective": "Steady Etsy orders from niches that are selling now",
+                                  "market": "Etsy buyers (US first)", "channels": [], "links": {},
+                                  "agents": ["A-002", "A-SHOP", "A-DSGN", "A-011"],
+                                  "notes": "Run entirely by the crew: research what sells, design our own version, QA, list through "
+                                           "Printify, read the orders. The owner records Etsy deposits in Finance.",
+                                  "compliance": ["Original designs only: never copy another shop's design, wording, photos or layout",
+                                                 "No trademarks, brand names, sports teams, characters, celebrities, real people, "
+                                                 "song lyrics or quotes someone owns",
+                                                 "Etsy's rules: made-to-order items with a production partner; AI-assisted design "
+                                                 "disclosed in the description",
+                                                 "No 'best seller', 'official' or other claims we can't back up",
+                                                 "Title max 140 characters, 13 tags max 20 characters each"],
+                                  "success_criteria": "Orders every week", "kill_criteria": "None for the shop: the War Room "
+                                  "drops products that don't sell, not the shop",
+                                  "next_action": "Etsy Shop Manager: first best-seller scan", "opportunity": None},
+                     "owner", "the owner's Etsy shop joins the station, run end to end by the crew")
+        for a in s.find("approvals", kind="fund_goal"):
+            if a["status"] == "pending" and a["payload"].get("goal") == "etsy-launch":
+                s.update("approvals", a["id"], {"status": "withdrawn"}, "A-004", "the owner already runs the Etsy shop")
+        m = s.get("missions", "M-001")
+        if m and "first Etsy store" in m.get("goal", ""):
+            s.update("missions", "M-001", {"goal": "Real money in from $0-capital ventures as fast as possible: the solar Page, "
+                                                   "the crew-run Etsy shop and the first launched venture.",
+                                           "success_criteria": "First owner-recorded income from a station venture"},
+                     "owner", "the Etsy shop is already open: the mission is earning, not funding it")
         if not s.get("missions", "M-001"):
             s.create("missions", {"id": "M-001", "name": "First Dollar", "priority": 1, "state": "active", "owner": "owner",
-                                  "goal": "Real money in from a $0-capital venture as fast as possible, then fund the first "
-                                          "Etsy store (~$29/month) from earnings.",
-                                  "success_criteria": "First owner-recorded income from a station venture; Etsy launch funded",
+                                  "goal": "Real money in from $0-capital ventures as fast as possible: the solar Page, "
+                                          "the crew-run Etsy shop and the first launched venture.",
+                                  "success_criteria": "First owner-recorded income from a station venture",
                                   "kill_criteria": "None: re-plan if no venture earns within 30 days",
                                   "budget": f"$0 cash; station AI capped at ${AI_BUDGET:.0f}/month",
                                   "ventures": []}, "owner", "mission set by the owner")
@@ -143,6 +178,8 @@ class Ultron:
         last = self.cfg.get("metrics_at")
         if (not last or now - datetime.fromisoformat(last) >= results.METRICS_EVERY) and results.posts_to_check(s, now):
             return {"kind": "metrics"}
+        if shop.orders_due(self.cfg, now):
+            return {"kind": "shop_orders"}
         if not self.brain.enabled or not self.treasury.ai_allowed():
             return None
         if self.cfg.get("ai_backoff_until") and now < datetime.fromisoformat(self.cfg["ai_backoff_until"]):
@@ -157,7 +194,7 @@ class Ultron:
         if self.cfg.get("warroom_now") or warroom.due(s, self.cfg, now):
             return {"kind": "warroom"}
         selling = [v for v in s.all("ventures") if v["id"] != "V-001" and v["stage"] in ACTIVE_STAGES and v.get("planned")
-                   and v["stage"] != "approved"]
+                   and v["stage"] != "approved" and not v.get("agent_run")]   # the Etsy shop sells through its own pipeline
         for v in selling:
             mp = v.get("marketing_plan")
             if not mp or (mp.get("failed_at") and now - datetime.fromisoformat(mp["failed_at"]) > timedelta(hours=24)) \
@@ -175,6 +212,8 @@ class Ultron:
             spec = next((x for x in research.ROUTINES if x["id"] == r["id"]), None)
             if spec and r.get("status") == "active" and research.due(spec, now, r.get("last_run")):
                 return {"kind": "routine", "routine": r["id"]}
+        if shop.research_due(s, self.cfg, now):
+            return {"kind": "shop_research"}
         if not self.cfg.get("kicked_off") and not self.store.all("opportunities"):
             return {"kind": "routine", "routine": "R-001", "kickoff": True}   # first start: research now, not tomorrow
         if self._tasks_today(now) < TASKS_PER_DAY:
@@ -224,6 +263,16 @@ class Ultron:
                     self.cfg["capped"] = {now.date().isoformat(): sorted(set(self.cfg["capped"].get(now.date().isoformat(), [])) | {a["kind"]})}
                     self._save_cfg()
                 return out
+            if job["kind"] == "shop_research":
+                self.busy = "Etsy Shop Manager: what's selling now"
+                self.cfg["shop_research_at"] = now.isoformat()
+                self._save_cfg()
+                return shop.research(s, self.brain, now)
+            if job["kind"] == "shop_orders":
+                self.busy = "Etsy Shop Manager: reading orders"
+                self.cfg["shop_orders_at"] = now.isoformat()
+                self._save_cfg()
+                return shop.sync_orders(s, now)
             if job["kind"] == "metrics":
                 self.busy = "Auditor: reading post engagement"
                 self.cfg["metrics_at"] = now.isoformat()
@@ -267,6 +316,9 @@ class Ultron:
                 s.event("ultron.ai_unreachable", "A-001", f"{job['kind']} waiting: {self.last_error}", severity="WARNING")
                 if job["kind"] == "plan":
                     s.update("ventures", job["venture"], {"planned": False}, "A-001", "planning will retry")
+                if job["kind"] == "shop_research":
+                    self.cfg.pop("shop_research_at", None)
+                    self._save_cfg()
                 if job["kind"] in ("task",):
                     s.update("tasks", job["task"], {"status": "queued", "attempts": max(0, s.get("tasks", job["task"]).get("attempts", 1) - 1)},
                              "A-001", "Claude unreachable: back in the queue")
@@ -277,6 +329,9 @@ class Ultron:
                     or job.get("venture"), severity="WARNING")
             if job["kind"] == "routine" and job.get("kickoff"):
                 self.cfg["kicked_off"] = True   # don't hammer a failing kickoff; the schedule takes over
+                self._save_cfg()
+            if job["kind"] == "shop_research":   # try again in 6 hours, not in 2 days
+                self.cfg["shop_research_at"] = (now - shop.RESEARCH_EVERY + timedelta(hours=6)).isoformat()
                 self._save_cfg()
             if job["kind"] == "routine":   # a failed slot is skipped, not retried in a loop
                 s.update("routines", job["routine"], {"last_run": now.isoformat(), "last_error": self.last_error}, "A-001", "run failed")
@@ -334,7 +389,8 @@ class Ultron:
 
     def _requeue_connected(self) -> None:
         """A platform got connected: what was waiting in the owner's queue for it goes out on its own."""
-        live = {"stripe.payment_link": connectors.stripe_configured(), "outreach.email": connectors.email_configured()}
+        live = {"stripe.payment_link": connectors.stripe_configured(), "outreach.email": connectors.email_configured(),
+                "shop.listing": connectors.printify_configured()}
         for a in self.store.find("actions", status="manual"):
             plat = a["payload"].get("platform", "")
             ok = live.get(a["kind"]) if a["kind"] in live else (connectors.social_configured(plat)
@@ -480,6 +536,9 @@ class Ultron:
         """0-100: money, progress and time since the last progress."""
         if v["id"] == "V-001":
             return 70
+        if v["id"] == shop.VENTURE:   # judged on orders, then on listings going up
+            sm = shop.summary(self.store, 14)
+            return max(20, min(100, 40 + 12 * sm["orders_14d"] + 2 * min(10, len(sm["live"]))))
         if v.get("owner_business"):   # judged on what it brings in: leads and sales in the last 14 days
             r = results.summary(self.store, v["id"], 14)
             return max(20, min(100, 40 + 8 * r["leads"] + 10 * r["by_status"].get("won", 0) + (10 if r["posts_sent"] else 0)))
@@ -526,6 +585,7 @@ class Ultron:
                        "rejected": s.find("actions", status="rejected")[-10:], "failed": s.find("actions", status="failed")[-10:]},
             "lessons": s.load_doc("lessons.json") or [],
             "leads": sorted(s.all("leads"), key=lambda l: l["created_at"], reverse=True)[:40],
+            "shop": shop.summary(s),
             "milestones": self.milestones or recognition.station_milestones(s, self.treasury), "research_focus": self.cfg.get("research_focus", ""),
             "warroom": s.load_doc(s.list_docs("warroom-", 1)[0]) if s.list_docs("warroom-", 1) else None,
             "audit": s.load_doc(s.list_docs("audit-", 1)[0]) if s.list_docs("audit-", 1) else None,

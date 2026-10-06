@@ -448,8 +448,31 @@ panel (at the 90% trader split), and the station's own Claude usage. Paper profi
 counted. Agents can never book revenue.
 
 **Mission 1, "First Dollar":** ventures that need **$0 of startup capital** and can start today come first.
-Ventures that need money (an Etsy store, ~$29/month) wait on the watchlist until the pool can cover two
-months of them plus a month of bills; then ULTRON asks you to approve funding them.
+Anything with a monthly cost (next on the list: Printify Premium, ~$29/month, up to 20% off product costs)
+waits until the pool can cover two months of it plus a month of bills; then ULTRON asks you to approve it.
+
+**The Etsy shop, run by the crew** (`backend/station/shop.py`, venture `V-ETSY`): print-on-demand through
+Printify, end to end without you.
+1. Every 2 days, when fewer than 4 products are in the pipeline, Market Research scans what's selling on
+   Etsy now (best-seller badges, review counts, the shops selling it, their prices and the search words
+   buyers use) and the **Etsy Shop Manager** turns it into 4 product briefs: niche, product (t-shirt,
+   sweatshirt, hoodie, mug or poster), our own printed words, title, 13 tags and a price inside the band
+   the competitors prove.
+2. The **Product Designer** renders each design: original typographic artwork with the bundled Inter font,
+   print-ready (4500x5400 transparent PNG for garments). Competitors show us the niche and the price, never
+   the design: copying another shop's design, wording or photos is infringement, and Etsy removes the
+   listings and the shop for it.
+3. Compliance & QA checks each listing like any post (trademarks, phrases someone owns, claims, Etsy's
+   rules); fails get one revision.
+4. The Shop Manager creates the product in Printify (dark ink on light colors, light ink on dark, sizes
+   S-2XL), raises the price if it wouldn't cover the product cost, Etsy's fees and $4 of profit, adds Etsy's
+   AI-assisted design disclosure, and publishes. Printify puts it on the Etsy shop. At most
+   `STARNET_SHOP_LISTINGS_PER_DAY` (default 2) new listings a day, $0.20 each on Etsy.
+5. Every 6 hours it reads Printify's orders: which listing sold, units, retail and product cost. The War
+   Room sees per-listing sales. Etsy deposits aren't booked automatically: record them in Finance.
+
+The Marketplace Deck in the 3D station shows the live listings with their designs, the ones in the works
+and the orders; a sale sends a courier to the Finance Observatory.
 
 **How work flows:**
 1. **Research Station:** five routines (times ET): Opportunity Market Radar (weekdays 08:00), Etsy and
@@ -504,7 +527,8 @@ the same address or to anyone who opted out, and every contact comes with the pa
 | LinkedIn | `STARNET_LINKEDIN_TOKEN` (scopes `openid profile w_member_social`; expires every 60 days) | Posts go out on your profile. When the token expires, posts fail with a note to renew it |
 | Instagram | `STARNET_IG_USER_ID` (the Instagram professional account linked to the Page); the Page token must also have `instagram_basic` and `instagram_content_publish` | Padilla's posts go to Instagram too, each with its image card |
 | TikTok | not yet: every post needs a video, and TikTok's API needs their audit | Its posts wait in your queue |
-| Fiverr, Etsy | none: they have no seller API, and bots break their terms | The crew prepares; you publish and reply there |
+| Etsy (via Printify) | `PRINTIFY_API_TOKEN` (Printify → My profile → Connections → Generate token; scopes: shops, catalog, products, orders, uploads); optional `PRINTIFY_SHOP_ID`. Your Etsy shop must be connected in Printify (My stores → Add new store → Etsy) | The crew lists its products on Etsy and reads the orders. Printify charges your card for each order's production when the order comes in |
+| Fiverr | none: no seller API, and bots break its terms | The crew prepares; you publish and reply there |
 
 Refunds and payouts aren't wired at all: they stay in your Stripe dashboard.
 
