@@ -33,6 +33,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
   border: 1px solid rgba(120,170,255,.25); border-radius: 999px; padding: 3px 8px; white-space: nowrap; margin-left: 12px; }
 #credits-chip:empty { display: none; }
 #credits-chip.empty { color: #ff3b5c; border-color: rgba(255,59,92,.5); } #credits-chip.low { color: #ffc94d; border-color: rgba(255,201,77,.5); }
+#weather-chip { font: 700 11px Inter, sans-serif; color: #e8eeff; background: rgba(10,18,40,.7); border: 1px solid rgba(120,170,255,.25);
+  border-radius: 999px; padding: 3px 8px; white-space: nowrap; margin-left: 12px; }
+#weather-chip:empty { display: none; }
+#weather-chip.storm { border-color: rgba(255,201,77,.6); color: #ffc94d; } #weather-chip.rain { border-color: rgba(120,170,255,.6); }
 #clock { font-family: var(--pixel); font-size: 12px; color: #c9bfff; white-space: nowrap; }
 #clock .live { color: #ff5470; text-shadow: 0 0 8px rgba(255, 84, 112, .8); font-weight: 400; }
 #clock small { font-family: Inter, sans-serif; font-size: 10px; color: var(--muted); }

@@ -12,6 +12,15 @@ red ones) roll down its road to **The Vault** in the middle of town.
 
 ![city](docs/city.png)
 
+## Market weather and skyline
+
+The city's sky follows the market. Day and night follow the ET clock (dawn at 6, bright through the New York
+session, golden hour at 4:30, night after 9). The weather follows volatility: the last 30 minutes of MNQ range
+against the last day's — **storm** (lightning, heavy rain) at 1.8x or during a news hold, **rain** at 1.25x,
+**fog** when the tape is dead (0.55x or less), clear otherwise. The chip next to the fuel gauge names it.
+Each district's towers grow with its bot's best-ever profit (up to 1.8x at $16k), and the background skyline
+grows with the account's profit. Preview any sky with `/?weather=storm&hour=13`.
+
 ## Skins and apparel (`frontend/skins.js`)
 
 Every robot has its own look, in the city (standing in front of its building), in its streamer room and on

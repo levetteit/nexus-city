@@ -49,7 +49,8 @@ const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
-scene.add(new THREE.HemisphereLight("#8f7bff", "#120838", 0.9));
+const hemi = new THREE.HemisphereLight("#8f7bff", "#120838", 0.9);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight("#c9b8ff", 1.2);
 sun.position.set(30, 60, 20);
 scene.add(sun);
@@ -122,12 +123,13 @@ const runLights = new THREE.Group();
 }
 scene.add(runLights);
 
-// background skyline (instanced for speed)
+// background skyline (instanced for speed); it grows with the account's profit
+let skyline;
 {
   const count = 420;
   const mat = towerMaterial(3, 6, 0.42, 0.35);
   mat.emissiveIntensity = 0.3;
-  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, count);
+  const mesh = skyline = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, count);
   const m = new THREE.Matrix4();
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
@@ -231,6 +233,8 @@ function makeBuilding(bot, index, total) {
     [0, 0, 4, hero], [-3.2, 2.6, 3, hero * 0.55], [3.0, 2.4, 3.2, hero * 0.65],
     [-2.8, -2.8, 2.8, hero * 0.4], [3.1, -2.9, 2.6, hero * 0.35],
   ];
+  const towersG = new THREE.Group();   // grows taller with the bot's best-ever day (career_best)
+  group.add(towersG);
   towers.forEach(([x, z, w, h], i) => {
     const mat = towerMaterial(w, h, seed + i * 0.31, 0.6);
     mats.push(mat);
@@ -240,13 +244,13 @@ function makeBuilding(bot, index, total) {
       const seg = Math.min(remaining, Math.max(3, h * 0.45));
       const m = new THREE.Mesh(new THREE.BoxGeometry(width, seg, width), mat);
       m.position.set(x, y + seg / 2, z);
-      group.add(m);
+      towersG.add(m);
       y += seg; remaining -= seg; width *= 0.78;
     }
     if (i === 0) {
       const spire = new THREE.Mesh(new THREE.ConeGeometry(0.4, 4, 8), new THREE.MeshBasicMaterial({ color }));
       spire.position.set(x, y + 2, z);
-      group.add(spire);
+      towersG.add(spire);
     }
   });
 
@@ -307,7 +311,8 @@ function makeBuilding(bot, index, total) {
   mascot.position.set(0, 1, 5.3);
   mascot.scale.setScalar(1.5);
   group.add(mascot);
-  buildings.set(bot.id, { group, beam, beamMat, halo, haloMat, tag, pos, mats, hero, color, status: null, mascot, apparel: [], wearKey: "" });
+  buildings.set(bot.id, { group, beam, beamMat, halo, haloMat, tag, label, labelY: label.position.y, pos, mats, hero, color, status: null,
+    mascot, apparel: [], wearKey: "", towersG, grow: 1, growTo: 1 });
 }
 
 // ---------------------------------------------------------------- coins
@@ -419,6 +424,7 @@ function applyState(s) {
     b.tag.classList.toggle("off", bot.status === "disabled");
     b.status = bot.status;
     dressMascot(b, bot);
+    b.growTo = Math.min(1.8, Math.max(1, 1 + ((bot.career_best || 0) / 10000) * 0.5));
     const dark = ["disabled", "stopped", "walked"].includes(bot.status);
     b.mats.forEach((m) => (m.emissiveIntensity = dark ? 0.1 : bot.status === "off_duty" ? 0.35 : 0.6));
     b.haloMat.color.set(bot.status === "stopped" || bot.status === "walked" ? "#ff4d6d" : bot.status === "off_duty" ? "#ffd34d" : "#ffffff");
@@ -443,6 +449,7 @@ function applyState(s) {
     .join("");
 
   renderAccount(s.account);
+  applyWeather(s);
   if (openWorkerId) renderWorker();
 }
 
@@ -1163,6 +1170,113 @@ function connect() {
 }
 connect();
 
+// ---------------------------------------------------------------- sky and market weather
+// Day and night follow the ET clock (the market's sessions); the weather follows volatility
+// (engine.weather(): storm on news or a 1.8x range spike, rain at 1.25x, fog when the tape is dead).
+// The background skyline grows with the account's profit, each district with its bot's best day.
+const SKY = [   // [ET hour, background, hemisphere sky, sun colour, light level]
+  [0, "#0d0838", "#5b4bd6", "#7d6cff", 0.55],
+  [4, "#0d0838", "#5b4bd6", "#7d6cff", 0.55],
+  [6, "#4a1f6e", "#ff9ec7", "#ffb3a1", 0.8],
+  [10, "#2a2a9c", "#a99bff", "#e2d8ff", 1.15],
+  [15, "#2a2a9c", "#a99bff", "#e2d8ff", 1.15],
+  [16.5, "#5a2a7a", "#ffb37a", "#ffcf8a", 1.0],
+  [18.5, "#22127a", "#8f7bff", "#c9b8ff", 0.9],
+  [21, "#0d0838", "#5b4bd6", "#7d6cff", 0.55],
+  [24, "#0d0838", "#5b4bd6", "#7d6cff", 0.55],
+];
+const WEATHER = {
+  clear: { icon: "☀️", text: "calm", fog: [90, 230], dim: 1 },
+  fog: { icon: "🌫️", text: "quiet tape", fog: [30, 140], dim: 0.85 },
+  rain: { icon: "🌧️", text: "volatile", fog: [70, 200], dim: 0.8 },
+  storm: { icon: "⛈️", text: "storm", fog: [55, 170], dim: 0.6 },
+};
+const sky = { bg: new THREE.Color("#22127a"), top: new THREE.Color("#8f7bff"), sun: new THREE.Color("#c9b8ff"), level: 1, hour: 20, kind: "clear", news: false,
+  skylineGrow: 1, skylineTo: 1, flash: 0, nextFlash: 0, rainOpacity: 0 };
+const _a = new THREE.Color(), _b = new THREE.Color();
+
+const RAIN_N = 1400;
+const rainPos = new Float32Array(RAIN_N * 6);
+for (let i = 0; i < RAIN_N; i++) {
+  const x = (Math.random() - 0.5) * 220, y = Math.random() * 120, z = (Math.random() - 0.5) * 220;
+  rainPos.set([x, y, z, x - 0.3, y - 2.2, z], i * 6);
+}
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3));
+const rainMat = new THREE.LineBasicMaterial({ color: "#a9c4ff", transparent: true, opacity: 0, depthWrite: false });
+const rain = new THREE.LineSegments(rainGeo, rainMat);
+rain.frustumCulled = false;
+rain.visible = false;
+scene.add(rain);
+
+const PREVIEW = new URLSearchParams(location.search);   // ?weather=storm&hour=7 previews a sky
+function applyWeather(s) {
+  const [hh, mm] = String(PREVIEW.get("hour") || s.clock || "20:00").split(":").map(Number);
+  sky.hour = (hh || 0) + (mm || 0) / 60;
+  const w = PREVIEW.get("weather") ? { kind: PREVIEW.get("weather") } : s.weather || {};
+  sky.kind = WEATHER[w.kind] ? w.kind : "clear";
+  sky.news = !!w.news;
+  const profit = (s.account && s.account.profit) || 0;
+  sky.skylineTo = Math.min(1.6, Math.max(0.85, 1 + (profit / 3000) * 0.2));
+  const chip = document.getElementById("weather-chip");
+  if (chip) {
+    const W = WEATHER[sky.kind];
+    chip.textContent = `${W.icon} ${innerWidth < 640 ? "" : W.text}`.trim();
+    chip.title = `Market weather: ${sky.news ? "news hold" : W.text}${w.vol_ratio ? ` · range ${w.vol_ratio}x normal` : ""}`;
+    chip.className = sky.kind;
+  }
+}
+
+function updateSky(dt, t) {
+  let i = 0;
+  while (i < SKY.length - 2 && SKY[i + 1][0] <= sky.hour) i++;
+  const [h0, bg0, top0, sun0, l0] = SKY[i], [h1, bg1, top1, sun1, l1] = SKY[i + 1];
+  const f = h1 > h0 ? Math.min(1, Math.max(0, (sky.hour - h0) / (h1 - h0))) : 0;
+  const W = WEATHER[sky.kind];
+  const k = Math.min(1, dt * 0.6);   // ease toward the target so changes drift in, never snap
+  sky.bg.lerp(_a.set(bg0).lerp(_b.set(bg1), f).multiplyScalar(W.dim), k);
+  sky.top.lerp(_a.set(top0).lerp(_b.set(top1), f), k);
+  sky.sun.lerp(_a.set(sun0).lerp(_b.set(sun1), f), k);
+  sky.level += ((l0 + (l1 - l0) * f) * W.dim - sky.level) * k;
+  scene.background.copy(sky.bg);
+  scene.fog.color.copy(sky.bg);
+  scene.fog.near += (W.fog[0] - scene.fog.near) * k;
+  scene.fog.far += (W.fog[1] - scene.fog.far) * k;
+
+  // storm: lightning every few seconds
+  if (sky.kind === "storm" && t > sky.nextFlash) {
+    sky.flash = 1;
+    sky.nextFlash = t + 2.5 + Math.random() * 6;
+  }
+  sky.flash = Math.max(0, sky.flash - dt * 3.5);
+  const strike = sky.flash > 0.6 || (sky.flash > 0.2 && sky.flash < 0.35) ? sky.flash : 0;   // double flicker
+  hemi.color.copy(sky.top);
+  hemi.intensity = 0.9 * sky.level + strike * 2.5;
+  sun.color.copy(sky.sun);
+  sun.intensity = 1.2 * sky.level;
+  bloom.strength = 0.7 + strike * 0.9;
+  if (strike) scene.background.lerp(_a.set("#c9d4ff"), strike * 0.35);
+
+  // rain falls in rain and storms
+  const wantRain = sky.kind === "storm" ? 0.8 : sky.kind === "rain" ? 0.5 : 0;
+  sky.rainOpacity += (wantRain - sky.rainOpacity) * Math.min(1, dt * 1.5);
+  rainMat.opacity = sky.rainOpacity;
+  rain.visible = sky.rainOpacity > 0.02;
+  if (rain.visible) {
+    const fall = dt * (sky.kind === "storm" ? 90 : 60);
+    for (let j = 0; j < RAIN_N; j++) {
+      const o = j * 6;
+      rainPos[o + 1] -= fall; rainPos[o + 4] -= fall;
+      if (rainPos[o + 4] < 0) { rainPos[o + 1] += 120; rainPos[o + 4] += 120; }
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+    rain.position.set(camera.position.x * 0.5, 0, camera.position.z * 0.5);
+  }
+
+  sky.skylineGrow += (sky.skylineTo - sky.skylineGrow) * Math.min(1, dt * 0.5);
+  skyline.scale.y = sky.skylineGrow;
+}
+
 // ---------------------------------------------------------------- render loop
 const clock = new THREE.Clock();
 function frame() {
@@ -1177,7 +1291,13 @@ function frame() {
     b.beamMat.opacity += (target - b.beamMat.opacity) * Math.min(1, dt * 4);
     b.beam.visible = b.beamMat.opacity > 0.01;
     b.halo.rotation.z += dt * (active ? 2.5 : 0.6);
-    b.halo.position.y = b.hero + 6 + Math.sin(t * 1.5 + b.pos.x) * 0.4;
+    b.grow += (b.growTo - b.grow) * Math.min(1, dt * 0.8);
+    b.towersG.scale.y = b.grow;
+    b.towersG.position.y = 1 - b.grow;   // towers start at y=1: keep their base on the platform
+    const top = b.hero * b.grow;
+    b.beam.position.y = top + 70;
+    b.label.position.y = b.labelY + top - b.hero;
+    b.halo.position.y = top + 6 + Math.sin(t * 1.5 + b.pos.x) * 0.4;
     b.haloMat.opacity = b.status === "disabled" ? 0.15 : active ? 1 : 0.6;
     // the bot out front: bounces while it's in a trade, slumps when sent home
     b.mascot.position.y = 1 + (active ? Math.abs(Math.sin(t * 5 + b.pos.x)) * 0.5 : Math.sin(t * 1.4 + b.pos.z) * 0.06);
@@ -1188,6 +1308,8 @@ function frame() {
       b.halo.scale.setScalar(1 + b.tvFlash * 0.8);
     }
   }
+
+  updateSky(dt, t);
 
   vaultPulse = Math.max(0, vaultPulse - dt * 1.5);
   domeMat.emissiveIntensity = 0.9 + vaultPulse * 2.5;
