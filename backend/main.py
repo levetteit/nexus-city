@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import TICK_SECONDS
@@ -28,6 +29,7 @@ router = None     # real-order router (live mode only), see execution.py
 notifier = None   # phone notifications (live mode only), see notify.py
 scorecard = None  # live vs backtest checks (live mode only), see scorecard.py
 reports = None    # end-of-day reports (live mode only), see report.py
+history = None    # saved 1m candles for future backtests (live mode only), see history.py
 clients: set[WebSocket] = set()
 
 
@@ -52,11 +54,14 @@ async def run_city() -> None:
 async def run_live() -> None:
     """Poll for new real candles and step the bots through each one."""
     global engine, router, notifier
-    global scorecard, reports
+    global scorecard, reports, history
     from . import execution, live, news, notify
     from .report import DayReports
     from .scorecard import Scorecard
     notifier = notify.Notifier(live.DATA_DIR)
+    from .history import History
+    history = History(live.DATA_DIR)
+    asyncio.create_task(asyncio.to_thread(history.save, True))   # keep the last 29 days before Yahoo drops them
     calendar = news.NewsCalendar(data_dir=live.DATA_DIR)
     await asyncio.to_thread(calendar.refresh, True)
     market = await asyncio.to_thread(live.LiveMarket)
@@ -93,6 +98,7 @@ async def run_live() -> None:
             if report:   # a trading day just ended: replay it, compare with paper trading, send the report
                 reports.save(report)
                 asyncio.create_task(check_day(finished, report))
+                asyncio.create_task(asyncio.to_thread(history.save))   # add the day that just ended
             events += new
         if router.last_error and router.last_error != last_order_error:   # a real order failed: tell you now
             notifier.send("⚠️ Real order failed", router.last_error, "error")
@@ -121,6 +127,8 @@ def state() -> dict:
         snap["feed"] = engine.market.feed
         if router:
             snap["execution"] = router.status(engine.market.delay_minutes)
+        if history:
+            snap["history"] = history.status()
         if scorecard:
             snap["scorecard"] = scorecard.status(engine.account)
         if notifier:
@@ -209,6 +217,20 @@ def toggle(bot_id: str, action: str) -> dict:
     if scorecard:
         scorecard.toggled()
     return engine.bots[bot_id].snapshot(engine.market)
+
+
+@app.get("/api/history")
+def history_status() -> dict:
+    if history is None:
+        raise HTTPException(503, "candle history is only saved in live mode")
+    return history.status()
+
+
+@app.get("/api/history/{symbol}.csv")
+def history_csv(symbol: str):
+    if history is None or symbol not in history.status()["symbols"]:
+        raise HTTPException(404, "no saved candles for that symbol")
+    return FileResponse(history.path(symbol), media_type="text/csv", filename=f"{symbol}_1m.csv")
 
 
 @app.get("/api/reports")

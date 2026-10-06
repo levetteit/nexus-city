@@ -197,3 +197,4 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
   .vault-tag { padding: 6px 10px; }
   .vault-tag .v { font-size: 14px; }
 }
+#account a { color: var(--gold); font-weight: 700; text-decoration: none; }

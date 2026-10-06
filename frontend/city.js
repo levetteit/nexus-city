@@ -491,6 +491,7 @@ function renderAccount(a) {
     <div class="row"><span>Best day</span><span>${fmt(a.best_day)}${a.consistency ? ` (max ${a.consistency * 100}%)` : ""} · day ${a.days}</span></div>
     ${state.mode === "live" ? `<button class="reports-btn" data-reports>📒 DAILY REPORTS</button>` : ""}
     ${scoreRows(state)}
+    ${historyRows(state)}
     ${newsRows(state)}
     ${alertRows(state)}
     ${execRows(state)}
@@ -513,6 +514,15 @@ function scoreRows(s) {
     <div class="row"><span>Profit factor</span><span>${p.profit_factor ?? "—"} · bt ${b.profit_factor}</span></div>
     ${c.clean_days ? `<div class="row"><span>Replay match</span><span>${c.clean_days_matched}/${c.clean_days} days · ${pct(c.trade_match_pct)} trades</span></div>` : ""}
     ${last}`;
+}
+
+function historyRows(s) {
+  const h = s.history;
+  if (!h) return "";
+  const syms = Object.keys(h.symbols);
+  const span = syms.length ? `${h.symbols[syms[0]].first} → ${(h.symbols[syms[0]].last || "").slice(0, 10)}` : "saving…";
+  return `<div class="row"><span><b>📼 Candle history</b></span><span>${h.days} days · ${span}</span></div>
+    ${syms.length ? `<div class="row"><span>Download</span><span>${syms.map((x) => `<a href="/api/history/${x}.csv" download>${x}</a>`).join(" · ")}</span></div>` : ""}`;
 }
 
 function newsRows(s) {
