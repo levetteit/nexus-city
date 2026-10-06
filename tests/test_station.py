@@ -1060,3 +1060,22 @@ def test_credits_counter(tmp_path, monkeypatch):
     s = credits.summary(u.store, t)
     assert s["state"] == "ok" and s["added"] == 70 and not credits.blocks_ai(u.store, t, now)
     assert u.overview()["credits"]["remaining"] == s["remaining"]
+
+
+def test_connect_buttons_reach_their_route(tmp_path, monkeypatch):
+    """/api/station/connect/<service> must not be swallowed by /api/station/{collection}/{rid}."""
+    import importlib
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv("STARNET_MODE", "sim")
+    monkeypatch.delenv("STARNET_PASSWORD", raising=False)
+    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ETSY_KEYSTRING", "key")
+    monkeypatch.setenv("ETSY_SHARED_SECRET", "secret")
+    monkeypatch.setenv("STARNET_PUBLIC_URL", "https://city.example.com")
+    import backend.main as main
+    importlib.reload(main)
+    with TestClient(main.app) as c:
+        r = c.get("/api/station/connect/etsy", follow_redirects=False)
+        assert r.status_code in (302, 307) and r.headers["location"].startswith("https://www.etsy.com/oauth/connect?")
+        assert "redirect_uri=https%3A%2F%2Fcity.example.com%2Fapi%2Fstation%2Fconnect%2Fetsy%2Fcallback" in r.headers["location"]
+        assert c.get("/api/station/connect/pinterest", follow_redirects=False).status_code == 400   # no app keys yet: says so

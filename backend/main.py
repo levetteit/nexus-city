@@ -735,6 +735,19 @@ def station_routine_runs() -> list:
     return [st.store.load_doc(n) for n in st.store.list_docs("routine-", 15)]
 
 
+# Registered before /api/station/{collection}/{rid}, which would otherwise answer it with a 404.
+@app.get("/api/station/connect/{service}")
+def station_connect(service: str):
+    """The owner presses Connect: off to Etsy or Pinterest to allow access, then back to the callback."""
+    from .station import connectors
+    if service not in ("etsy", "pinterest"):
+        raise HTTPException(404)
+    try:
+        return RedirectResponse(connectors.oauth_start(service))
+    except connectors.ConnectorError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @app.get("/api/station/{collection}/{rid}")
 def station_record(collection: str, rid: str) -> dict:
     st = _station()
@@ -891,18 +904,6 @@ def storefront_download(slug: str, session_id: str = ""):
     if not path:
         raise HTTPException(404)
     return FileResponse(path, media_type="application/pdf", filename=f"{p['slug']}.pdf")
-
-
-@app.get("/api/station/connect/{service}")
-def station_connect(service: str):
-    """The owner presses Connect: off to Etsy or Pinterest to allow access, then back to the callback."""
-    from .station import connectors
-    if service not in ("etsy", "pinterest"):
-        raise HTTPException(404)
-    try:
-        return RedirectResponse(connectors.oauth_start(service))
-    except connectors.ConnectorError as exc:
-        raise HTTPException(400, str(exc))
 
 
 @app.get("/api/station/connect/{service}/callback", response_class=HTMLResponse)
