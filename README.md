@@ -477,7 +477,9 @@ the same address or to anyone who opted out, and every contact comes with the pa
 | Stripe | `STRIPE_API_KEY` (a restricted key: Products, Prices, Payment Links write; Checkout Sessions read) | Agents create the checkout link for a venture on their own |
 | Stripe sales | `STRIPE_WEBHOOK_SECRET` from a webhook to `https://<your app>/api/station/stripe/webhook` (event `checkout.session.completed`) | Every paid checkout books itself into the treasury with Stripe's fee; the Auditor books any the webhook missed |
 | Email | `STARNET_SMTP_HOST`, `STARNET_SMTP_PORT`, `STARNET_SMTP_USER`, `STARNET_SMTP_PASSWORD`, `STARNET_MAIL_FROM`, `STARNET_MAIL_ADDRESS` | Outreach sends itself, with your postal address and an opt-out line (CAN-SPAM) |
-| Social | not built yet: tell Jarvis which accounts | Posts go out on their own instead of waiting in your queue |
+| Facebook Page | `STARNET_FB_PAGE_ID`, `STARNET_FB_PAGE_TOKEN` (a Page access token with `pages_manage_posts`) | Posts go out to your Page on their own |
+| LinkedIn | `STARNET_LINKEDIN_TOKEN` (scopes `openid profile w_member_social`; expires every 60 days) | Posts go out on your profile. When the token expires, posts fail with a note to renew it |
+| Instagram, TikTok | not yet: every post needs an image or a video (and TikTok's API needs their audit) | Their posts wait in your queue |
 | Fiverr, Etsy | none: they have no seller API, and bots break their terms | The crew prepares; you publish and reply there |
 
 Refunds and payouts aren't wired at all: they stay in your Stripe dashboard.

@@ -233,7 +233,8 @@ function renderMarketing() {
   const c = S.connectors;
   const row = (name, on, how) => `<div class="conn"><span>${esc(name)}</span><span class="${on === true ? "pos" : "muted"}">${on === true ? "connected" : esc(on || how)}</span></div>`;
   $("#conn").innerHTML = row("Stripe (checkout links)", c.stripe, "not connected") + row("Stripe sales → treasury", c.stripe_webhook, "no webhook yet") +
-    row("Email outreach", c.email, "not connected") + row("Social posting", c.social.length ? c.social.join(", ") : false, "none connected yet") +
+    row("Email outreach", c.email, "not connected") + row("Facebook Page", c.social.includes("facebook"), "not connected") +
+    row("LinkedIn", c.social.includes("linkedin"), "not connected") + row("Instagram", c.instagram) + row("TikTok", c.tiktok) +
     row("Fiverr", c.fiverr) + row("Etsy", c.etsy);
   $("#ob-manual").innerHTML = S.outbox.manual.map(actionRow).join("") || `<div class="empty">Nothing to post by hand.</div>`;
   $("#ob-wait").innerHTML = S.outbox.waiting_owner.map(actionRow).join("") || `<div class="empty">Nothing waiting.</div>`;

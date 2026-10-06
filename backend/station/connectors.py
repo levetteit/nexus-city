@@ -9,6 +9,8 @@
            STARNET_MAIL_FROM ("Name <you@yourdomain.com>"), STARNET_MAIL_ADDRESS (your postal address,
            required by CAN-SPAM in every commercial email)
            Outreach email, after QA, within the daily cap, never twice to the same address.
+  Facebook STARNET_FB_PAGE_ID, STARNET_FB_PAGE_TOKEN: posts to your Page
+  LinkedIn STARNET_LINKEDIN_TOKEN: posts to your profile (the token lasts 60 days)
 
 Fiverr and Etsy have no seller API for this. Driving their sites with a bot breaks their terms and gets
 accounts banned, so the crew prepares everything and you publish and reply there.
@@ -132,9 +134,85 @@ def send_email(to: str, subject: str, body: str) -> dict:
 
 
 # ---------------------------------------------------------------------------- Social
-# Each platform needs its own API app and token; none is connected yet. Until one is, approved posts
+# Facebook Page   STARNET_FB_PAGE_ID, STARNET_FB_PAGE_TOKEN (a Page access token with pages_manage_posts)
+# LinkedIn        STARNET_LINKEDIN_TOKEN (w_member_social; expires every 60 days), optional STARNET_LINKEDIN_PERSON
+# Instagram and TikTok need an image or a video with every post; until those are built, their posts
 # wait in the posting queue on the Command Board with a Copy button.
-SOCIAL: dict = {}
+def _http_json(method: str, url: str, headers: Optional[dict] = None, form: Optional[dict] = None,
+               body: Optional[dict] = None) -> dict:
+    data, hdrs = None, dict(headers or {})
+    if form is not None:
+        data = urllib.parse.urlencode(form).encode()
+    elif body is not None:
+        data = json.dumps(body).encode()
+        hdrs["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read()
+            out = json.loads(raw) if raw else {}
+            if not out and r.headers.get("x-restli-id"):
+                out = {"id": r.headers.get("x-restli-id")}
+            return out
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = exc.read().decode()[:200]
+        except Exception:
+            detail = ""
+        raise ConnectorError(f"HTTP {exc.code}: {detail or exc.reason}"[:240])
+    except urllib.error.URLError as exc:
+        raise ConnectorError(f"can't reach {url.split('/')[2]}: {exc.reason}"[:200])
+
+
+def _facebook_post(text: str, link: str) -> dict:
+    page, token = os.getenv("STARNET_FB_PAGE_ID"), os.getenv("STARNET_FB_PAGE_TOKEN")
+    version = os.getenv("STARNET_META_GRAPH_VERSION", "")   # empty: the app's default Graph API version
+    base = "https://graph.facebook.com/" + (f"{version}/" if version else "")
+    form = {"message": text, "access_token": token}
+    if link:
+        form["link"] = link
+    try:
+        res = _http_json("POST", f"{base}{page}/feed", form=form)
+    except ConnectorError as exc:
+        raise ConnectorError(f"Facebook: {exc}")
+    return {"platform": "facebook", "id": res.get("id")}
+
+
+def _linkedin_person() -> str:
+    person = os.getenv("STARNET_LINKEDIN_PERSON", "")
+    if not person:
+        me = _http_json("GET", "https://api.linkedin.com/v2/userinfo",
+                        headers={"Authorization": f"Bearer {os.getenv('STARNET_LINKEDIN_TOKEN')}"})
+        person = me.get("sub", "")
+        if not person:
+            raise ConnectorError("LinkedIn: couldn't read your member id (add the openid and profile scopes)")
+        os.environ["STARNET_LINKEDIN_PERSON"] = person   # cache for this run
+    return person if person.startswith("urn:li:") else f"urn:li:person:{person}"
+
+
+def _linkedin_post(text: str, link: str) -> dict:
+    token = os.getenv("STARNET_LINKEDIN_TOKEN")
+    try:
+        author = _linkedin_person()
+        share = {"shareCommentary": {"text": text}, "shareMediaCategory": "NONE"}
+        if link:
+            share.update({"shareMediaCategory": "ARTICLE", "media": [{"status": "READY", "originalUrl": link}]})
+        res = _http_json("POST", "https://api.linkedin.com/v2/ugcPosts",
+                         headers={"Authorization": f"Bearer {token}", "X-Restli-Protocol-Version": "2.0.0"},
+                         body={"author": author, "lifecycleState": "PUBLISHED",
+                               "specificContent": {"com.linkedin.ugc.ShareContent": share},
+                               "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"}})
+    except ConnectorError as exc:
+        hint = " (the token has probably expired: make a new one and update STARNET_LINKEDIN_TOKEN)" if "401" in str(exc) else ""
+        raise ConnectorError(f"LinkedIn: {exc}{hint}")
+    return {"platform": "linkedin", "id": res.get("id")}
+
+
+SOCIAL: dict = {
+    "facebook": {"configured": lambda: bool(os.getenv("STARNET_FB_PAGE_ID") and os.getenv("STARNET_FB_PAGE_TOKEN")),
+                 "post": _facebook_post},
+    "linkedin": {"configured": lambda: bool(os.getenv("STARNET_LINKEDIN_TOKEN")), "post": _linkedin_post},
+}
 
 
 def social_configured(platform: str) -> bool:
@@ -150,4 +228,5 @@ def post_social(platform: str, text: str, link: str = "") -> dict:
 def status() -> dict:
     return {"stripe": stripe_configured(), "stripe_webhook": bool(os.getenv("STRIPE_WEBHOOK_SECRET")),
             "email": email_configured(), "social": sorted(p for p in SOCIAL if social_configured(p)),
+            "instagram": "queue (needs an image per post: coming next)", "tiktok": "queue (needs a video; API needs TikTok's audit)",
             "fiverr": "manual (no seller API)", "etsy": "manual until funded"}

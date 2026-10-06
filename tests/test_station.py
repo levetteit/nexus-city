@@ -457,3 +457,38 @@ def test_api_outbound_webhook_and_links(tmp_path, monkeypatch):
         assert c.post("/api/station/optout", json={"email": "a@b.com"}).status_code == 200
         f = c.get("/api/station/finance").json()
         assert f["chain"]["intact"] and f["statement"]["units"]["station"]["income"] == 25
+
+
+def test_facebook_and_linkedin_connectors(monkeypatch):
+    from backend.station import connectors
+    calls = []
+
+    def fake(method, url, headers=None, form=None, body=None):
+        calls.append((method, url, headers, form, body))
+        if url.endswith("/userinfo"):
+            return {"sub": "abc123"}
+        if url.endswith("/ugcPosts") and headers["Authorization"] == "Bearer expired":
+            raise connectors.ConnectorError("HTTP 401: expired")
+        return {"id": "post_1"}
+    monkeypatch.setattr(connectors, "_http_json", fake)
+    for k in ("STARNET_FB_PAGE_ID", "STARNET_FB_PAGE_TOKEN", "STARNET_LINKEDIN_TOKEN", "STARNET_LINKEDIN_PERSON"):
+        monkeypatch.delenv(k, raising=False)
+    assert not connectors.social_configured("facebook") and not connectors.social_configured("linkedin")
+    with pytest.raises(connectors.ConnectorError):
+        connectors.post_social("facebook", "hi")
+    monkeypatch.setenv("STARNET_FB_PAGE_ID", "123")
+    monkeypatch.setenv("STARNET_FB_PAGE_TOKEN", "pagetok")
+    assert connectors.post_social("Facebook", "Resume tips", "https://buy.stripe.com/x") == {"platform": "facebook", "id": "post_1"}
+    method, url, _, form, _ = calls[-1]
+    assert url == "https://graph.facebook.com/123/feed" and form == {"message": "Resume tips", "access_token": "pagetok",
+                                                                    "link": "https://buy.stripe.com/x"}
+    monkeypatch.setenv("STARNET_LINKEDIN_TOKEN", "lt")
+    assert connectors.post_social("linkedin", "Resume tips", "https://buy.stripe.com/x")["id"] == "post_1"
+    body = calls[-1][4]
+    assert body["author"] == "urn:li:person:abc123" and calls[-2][1].endswith("/userinfo")
+    share = body["specificContent"]["com.linkedin.ugc.ShareContent"]
+    assert share["shareCommentary"]["text"] == "Resume tips" and share["media"][0]["originalUrl"] == "https://buy.stripe.com/x"
+    monkeypatch.setenv("STARNET_LINKEDIN_TOKEN", "expired")
+    with pytest.raises(connectors.ConnectorError, match="expired"):
+        connectors.post_social("linkedin", "x")
+    assert connectors.status()["social"] == ["facebook", "linkedin"]
