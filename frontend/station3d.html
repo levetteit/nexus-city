@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>StarNet Orbital Station</title>
+  <link rel="icon" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
+  <meta name="theme-color" content="#03050d" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  <style>
+    :root { --bg: #03050d; --glass: rgba(10, 18, 40, .78); --edge: rgba(120, 170, 255, .22); --text: #e8eeff; --muted: #8a97bd;
+      --cyan: #5ee7ff; --red: #ff3b5c; --gold: #ffc94d; --green: #3dffa2; --violet: #9d8bff; --mono: "JetBrains Mono", monospace; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 14px/1.4 Inter, system-ui, sans-serif; }
+    #app { position: fixed; inset: 0; }
+    #app canvas { display: block; }
+    .hidden { display: none !important; }
+    .label-layer { pointer-events: none; }
+    /* HUD */
+    #hud { position: fixed; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: calc(10px + env(safe-area-inset-top)) 14px 10px; background: linear-gradient(rgba(3,5,13,.9), rgba(3,5,13,0)); pointer-events: none; }
+    #hud > * { pointer-events: auto; }
+    .brand { font-weight: 800; letter-spacing: 2px; font-size: 13px; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+    .brand b { color: var(--cyan); }
+    .core-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); animation: pulse 2.4s infinite; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+    .chip { background: var(--glass); border: 1px solid var(--edge); border-radius: 999px; padding: 4px 10px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+    .chip b { font-family: var(--mono); font-weight: 500; }
+    .chip.alert { border-color: rgba(255,201,77,.6); color: var(--gold); }
+    .nav { display: flex; gap: 6px; }
+    .nav a, .nav button { background: var(--glass); border: 1px solid var(--edge); color: var(--text); border-radius: 10px; padding: 6px 10px;
+      font: 600 12px Inter, sans-serif; text-decoration: none; cursor: pointer; }
+    #ultron-line { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 5;
+      background: var(--glass); border: 1px solid var(--edge); border-radius: 12px; padding: 8px 14px; max-width: min(92vw, 640px);
+      font-size: 13px; display: flex; gap: 8px; align-items: center; }
+    #ultron-line .who { color: var(--red); font-weight: 800; letter-spacing: 1px; font-size: 11px; }
+    #ultron-line .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #toasts { position: fixed; right: 12px; top: calc(70px + env(safe-area-inset-top)); z-index: 6; display: flex; flex-direction: column; gap: 6px; max-width: 78vw; }
+    .toast { background: var(--glass); border: 1px solid var(--edge); border-left: 3px solid var(--cyan); border-radius: 10px; padding: 7px 10px;
+      font-size: 12px; animation: slide .3s ease; }
+    /* labels in the scene */
+    .mod-label { font: 700 11px Inter, sans-serif; letter-spacing: 1.4px; text-transform: uppercase; color: #fff; background: rgba(5,9,22,.72);
+      border: 1px solid var(--edge); border-radius: 8px; padding: 3px 8px; white-space: nowrap; text-align: center; }
+    .mod-label small { display: block; font-weight: 500; letter-spacing: .2px; text-transform: none; color: var(--muted); font-size: 10px; }
+    .mod-label .warn { color: var(--gold); }
+    .ag-label { font: 600 10px Inter, sans-serif; color: #fff; text-align: center; white-space: nowrap; text-shadow: 0 1px 3px #000; }
+    .ag-label .task { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; background: rgba(5,9,22,.78);
+      border: 1px solid var(--edge); border-radius: 8px; padding: 2px 6px; margin-bottom: 2px; font-weight: 500; color: var(--cyan); }
+    .ag-label .badge { color: var(--gold); }
+    .planet-label { font: 600 10px Inter, sans-serif; color: #fff; background: rgba(5,9,22,.6); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+    .ag-label.idle { display: none; }
+    body.far .mod-label small, body.far .ag-label, body.far .planet-label { display: none !important; }
+    body.alllabels .ag-label.idle { display: block; opacity: .75; }
+    body.nolabels .ag-label .task, body.nolabels .planet-label { display: none; }
+    @media (max-width: 600px) {
+      .brand { font-size: 11px; letter-spacing: 1.4px; }
+      .nav { margin-left: auto; }
+      .nav a, .nav button { padding: 5px 8px; font-size: 11px; }
+      .chips { order: 3; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+      .chip { font-size: 11px; padding: 3px 8px; }
+      .mod-label { font-size: 9px; letter-spacing: 1px; padding: 2px 6px; }
+      .mod-label small { font-size: 9px; }
+    }
+    /* panel */
+    #panel { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; max-height: 72vh; overflow: auto; background: rgba(8, 14, 32, .97);
+      border-top: 1px solid var(--edge); border-radius: 18px 18px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); animation: up .25s ease; }
+    @media (min-width: 820px) { #panel { left: auto; right: 16px; bottom: 16px; top: 80px; width: 400px; max-height: none; border-radius: 18px; border: 1px solid var(--edge); } }
+    #panel .x { position: absolute; top: 8px; right: 12px; background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; }
+    #panel h1 { font-size: 20px; margin: 2px 0 6px; }
+    #panel h2 { font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--cyan); margin: 16px 0 8px; }
+    .label { font-size: 11px; letter-spacing: 1.4px; color: var(--muted); font-weight: 700; }
+    .muted { color: var(--muted); } .small { font-size: 12px; }
+    .kv { display: grid; grid-template-columns: 120px 1fr; gap: 5px 10px; font-size: 13px; }
+    .kv div:nth-child(odd) { color: var(--muted); }
+    .row { border: 1px solid var(--edge); border-radius: 10px; padding: 9px 10px; margin-bottom: 6px; background: rgba(5,9,22,.6); font-size: 13px; }
+    .row .m { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--edge); color: var(--muted); }
+    .pill.green { color: var(--green); border-color: rgba(61,255,162,.4); } .pill.gold { color: var(--gold); border-color: rgba(255,201,77,.4); }
+    .pill.red { color: var(--red); border-color: rgba(255,59,92,.4); } .pill.cyan { color: var(--cyan); border-color: rgba(94,231,255,.4); }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; }
+    .badgechip { background: rgba(255,201,77,.1); border: 1px solid rgba(255,201,77,.35); color: var(--gold); border-radius: 999px; padding: 2px 9px; font-size: 12px; }
+    .btn { border: 1px solid var(--edge); background: rgba(255,255,255,.05); color: var(--text); border-radius: 10px; padding: 7px 11px; font: 600 13px Inter, sans-serif; cursor: pointer; text-decoration: none; display: inline-block; }
+    .btn.primary { background: var(--cyan); color: #04121a; border-color: var(--cyan); }
+    .btn.danger { color: var(--red); border-color: rgba(255,59,92,.4); }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .pos { color: var(--green); } .neg { color: var(--red); }
+    #loading { position: fixed; inset: 0; display: grid; place-items: center; z-index: 20; background: var(--bg); color: var(--muted); font-size: 13px; letter-spacing: 2px; }
+    @keyframes pulse { 50% { opacity: .5; } }
+    @keyframes slide { from { opacity: 0; transform: translateX(20px); } }
+    @keyframes up { from { transform: translateY(30px); opacity: 0; } }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+                   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="loading">DOCKING WITH THE STATION…</div>
+  <header id="hud">
+    <div class="brand"><span class="core-dot"></span>STARNET <b>STATION</b></div>
+    <div class="chips" id="chips"></div>
+    <div class="nav">
+      <button id="labels-btn" title="Show or hide what everyone is doing">Labels</button>
+      <button id="home-btn">Overview</button>
+      <a href="station.html">Board</a>
+      <a href="/">City</a>
+    </div>
+  </header>
+  <div id="ultron-line"><span class="who">ULTRON</span><span class="txt" id="ultron-txt">booting…</span></div>
+  <div id="toasts"></div>
+  <div id="panel" class="hidden"><button class="x" id="panel-x">✕</button><div id="panel-body"></div></div>
+  <script type="module" src="station3d.js"></script>
+</body>
+</html>
