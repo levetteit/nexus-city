@@ -964,6 +964,7 @@ def test_autonomous_venture_launches_sells_and_closes_on_its_own(tmp_path, monke
     assert pins[0][3] == prod["url"] and pins[0][4].startswith("https://city.example.com/media/")
     # the storefront: page, then the download only for a paid session of this product
     assert "Buy now" in digital.page_product(prod) and prod["title"] in digital.page_index(u.store)
+    assert "Privacy policy" in digital.page_privacy() and "/shop/privacy" in digital.page_product(prod)
     assert digital.verify_purchase(u.store, prod, "not-a-session") is None
     sess = digital.verify_purchase(u.store, {**prod, "payment_link": "plink_other"}, "cs_test_abcdefghijkl")
     assert sess is None                                                                  # another product's payment

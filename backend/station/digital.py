@@ -436,9 +436,25 @@ def _page(title: str, body: str) -> str:
     return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
             f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body><div class='wrap'><header><b>"
             f"<a href='/shop' style='color:inherit;text-decoration:none'>{html.escape(STORE_NAME.upper())}</a></b></header>{body}"
-            "<p class='small' style='margin-top:40px'>Digital downloads (PDF), for personal use. Nothing is shipped. Made by our studio "
+            "<p class='small' style='margin-top:40px'><a href='/shop/privacy'>Privacy policy</a> · Digital downloads (PDF), for personal use. Nothing is shipped. Made by our studio "
             "with the help of AI tools. Payments by Stripe; we don't store your card. If a file doesn't open or isn't as described, "
             f"reply to your Stripe receipt within 14 days for a refund.</p></div></body></html>")
+
+
+def page_privacy() -> str:
+    contact = os.getenv("STARNET_STORE_EMAIL", "").strip()
+    reach = (f"email <a href='mailto:{html.escape(contact)}'>{html.escape(contact)}</a>" if contact
+             else "reply to the receipt Stripe emails you after a purchase")
+    return _page(f"Privacy policy · {STORE_NAME}", f"""<h1>Privacy policy</h1><p class='small'>{html.escape(STORE_NAME)} · last updated October 6, 2026</p>
+<h3>What we collect</h3><p>Nothing directly. When you buy, Stripe processes your payment and receives your email address and card
+details under <a href='https://stripe.com/privacy'>Stripe's privacy policy</a>. We receive the purchase record from Stripe (what you
+bought, the amount, your email) so we can deliver your download and handle refunds. We never see or store your card number.</p>
+<h3>Cookies and tracking</h3><p>This store sets no advertising or tracking cookies.</p>
+<h3>Our own social and marketplace accounts</h3><p>We publish our products to our own Etsy shop and our own Pinterest account
+through their official APIs. Those connections act only on our own accounts: we don't read, collect or store anyone else's
+Pinterest or Etsy data.</p>
+<h3>How long we keep it</h3><p>Purchase records are kept as long as tax and accounting rules require.</p>
+<h3>Your choices</h3><p>To ask what we hold about you, or to have it deleted where the law allows, {reach}.</p>""")
 
 
 def page_index(store: Store) -> str:

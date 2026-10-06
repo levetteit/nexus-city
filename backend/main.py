@@ -832,6 +832,12 @@ def storefront() -> str:
     return digital.page_index(_station().store)
 
 
+@app.get("/shop/privacy", response_class=HTMLResponse)
+def storefront_privacy() -> str:
+    from .station import digital
+    return digital.page_privacy()
+
+
 @app.get("/shop/{slug}", response_class=HTMLResponse)
 def storefront_product(slug: str) -> str:
     from .station import digital
