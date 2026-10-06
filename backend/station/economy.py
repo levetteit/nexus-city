@@ -114,7 +114,9 @@ class Treasury:
         with self.store.lock:   # the webhook and the Auditor's reconciliation can race: book each sale once
             if self.has_ref(sid):
                 return None
-            sale = self.book("income", amount, "station", "stripe", f"Stripe sale {sid[-8:]}", venture=venture, ref=sid)
+            product = (session.get("metadata") or {}).get("starnet_product")
+            sale = self.book("income", amount, "station", "stripe", f"Stripe sale {sid[-8:]}" + (f" · {product}" if product else ""),
+                             venture=venture, ref=sid)
             self.book("expense", stripe_fee(amount), "station", "stripe", f"Stripe fee (est.) {sid[-8:]}", venture=venture,
                       ref=sid + ":fee")
         return sale

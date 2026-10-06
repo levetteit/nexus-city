@@ -16,7 +16,7 @@ from .store import Store
 
 WORK_KINDS = ("task.completed", "routine.completed", "action.qa_pass", "action.qa_fail", "action.revised",
               "venture.marketing_plan", "venture.content", "venture.outreach", "venture.planned", "warroom.session",
-              "finance.audit", "opportunity.created", "action.metrics", "shop.design", "shop.listed")
+              "finance.audit", "opportunity.created", "action.metrics", "shop.design", "shop.listed", "digital.made", "digital.published")
 
 MILESTONES = [  # (work count, title, pet unlocked)
     (1, "First delivery", None),
@@ -93,6 +93,8 @@ def station_milestones(store: Store, treasury: Treasury) -> list[dict]:
         ("First post published", first(("action.sent",))),
         ("First lead", first(("lead.created",))),
         ("First Etsy listing", first(("shop.listed",))),
+        ("First venture launched on its own", first(("venture.auto_launched",))),
+        ("First product on the storefront", first(("digital.published",))),
         ("First Etsy order", first(("shop.order",))),
         ("First sale", income[0]["at"] if income else None),
         ("$100 earned", hit100),

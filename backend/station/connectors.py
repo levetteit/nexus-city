@@ -17,8 +17,17 @@
            are created in Printify and published to the Etsy shop through Printify's own Etsy connection.
            Each new Etsy listing costs $0.20; STARNET_SHOP_LISTINGS_PER_DAY caps how many go up a day.
 
-Fiverr has no seller API, and Etsy's own API isn't needed: Printify publishes the listings. Driving a
-marketplace's site with a bot breaks its terms and gets accounts banned, so nothing here does that.
+  Etsy     ETSY_KEYSTRING, ETSY_SHARED_SECRET (a free app at etsy.com/developers, callback
+           <your app>/api/station/connect/etsy/callback), then Connect on the board (OAuth, once). Digital
+           downloads: the crew creates the listing, uploads the PDF and the cover, and activates it.
+  Pinterest PINTEREST_APP_ID, PINTEREST_APP_SECRET (developers.pinterest.com, callback
+           <your app>/api/station/connect/pinterest/callback), then Connect on the board. A Trial app only
+           makes sandbox pins nobody else sees (PINTEREST_SANDBOX=1); public pins need Pinterest's Standard
+           access.
+  Tokens from Connect live in data/station/tokens.json on the server, never in the API's answers.
+
+Fiverr has no seller API. Driving a marketplace's site with a bot breaks its terms and gets accounts
+banned, so nothing here does that.
 """
 from __future__ import annotations
 
@@ -78,12 +87,18 @@ def stripe_request(method: str, path: str, params: Optional[dict] = None) -> dic
         raise ConnectorError(f"Stripe {exc.code}: {msg or exc.reason}"[:200])
 
 
-def stripe_payment_link(name: str, description: str, price_usd: float, venture: str) -> dict:
-    meta = {"starnet_venture": venture}
+def stripe_payment_link(name: str, description: str, price_usd: float, venture: str, redirect: str = "",
+                        extra: Optional[dict] = None) -> dict:
+    """A product, a price and a payment link. redirect: where the buyer lands after paying ({CHECKOUT_SESSION_ID}
+    is filled in by Stripe). The link's metadata is copied onto every Checkout Session it creates."""
+    meta = {"starnet_venture": venture, **(extra or {})}
     product = stripe_request("POST", "/products", {"name": name[:250], "description": description[:500], "metadata": meta})
     price = stripe_request("POST", "/prices", {"product": product["id"], "currency": "usd",
                                                "unit_amount": int(round(price_usd * 100))})
-    link = stripe_request("POST", "/payment_links", {"line_items": [{"price": price["id"], "quantity": 1}], "metadata": meta})
+    params = {"line_items": [{"price": price["id"], "quantity": 1}], "metadata": meta}
+    if redirect:
+        params["after_completion"] = {"type": "redirect", "redirect": {"url": redirect}}
+    link = stripe_request("POST", "/payment_links", params)
     return {"url": link["url"], "payment_link": link["id"], "product": product["id"], "price": price["id"]}
 
 
@@ -402,10 +417,261 @@ def printify_orders(limit: int = 50) -> list[dict]:
     return _printify("GET", f"/shops/{printify_shop_id()}/orders.json?limit={limit}").get("data", [])
 
 
+# ---------------------------------------------------------------------------- OAuth tokens (Etsy, Pinterest)
+_tokens_path: list = []   # set by the server: data/station/tokens.json
+
+
+def set_data_dir(data_dir: str) -> None:
+    _tokens_path[:] = [os.path.join(data_dir, "station", "tokens.json")]
+
+
+def _tokens() -> dict:
+    try:
+        with open(_tokens_path[0]) as f:
+            return json.load(f)
+    except (IndexError, OSError, ValueError):
+        return {}
+
+
+def _save_token(name: str, tok: Optional[dict]) -> None:
+    if not _tokens_path:
+        raise ConnectorError("no data directory for tokens")
+    data = _tokens()
+    if tok is None:
+        data.pop(name, None)
+    else:
+        data[name] = tok
+    tmp = _tokens_path[0] + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, _tokens_path[0])
+
+
+def _http_form(url: str, form: dict, headers: Optional[dict] = None) -> dict:
+    return _http_json("POST", url, headers, form=form)
+
+
+def _multipart(fields: dict, files: dict) -> tuple[bytes, str]:
+    import secrets as _s
+    boundary = "----starnet" + _s.token_hex(12)
+    out = b""
+    for k, v in fields.items():
+        out += f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+    for k, (fname, data, ctype) in files.items():
+        out += (f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"; filename="{fname}"\r\n'
+                f"Content-Type: {ctype}\r\n\r\n").encode() + data + b"\r\n"
+    return out + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
+
+
+def _redirect_uri(service: str) -> str:
+    from .media import public_url
+    base = public_url("x").rsplit("/media/", 1)[0]
+    if not base:
+        raise ConnectorError("set STARNET_PUBLIC_URL (your app's address) first")
+    return f"{base}/api/station/connect/{service}/callback"
+
+
+def oauth_start(service: str) -> str:
+    """The URL that sends the owner to Etsy or Pinterest to allow access (PKCE / state kept server-side)."""
+    import base64
+    import secrets as _s
+    state, verifier = _s.token_urlsafe(24), _s.token_urlsafe(48)
+    _save_token(f"{service}_pending", {"state": state, "verifier": verifier, "at": time.time()})
+    if service == "etsy":
+        if not etsy_app():
+            raise ConnectorError("set ETSY_KEYSTRING and ETSY_SHARED_SECRET on the server first")
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+        return "https://www.etsy.com/oauth/connect?" + urllib.parse.urlencode({
+            "response_type": "code", "client_id": os.getenv("ETSY_KEYSTRING", "").strip(), "redirect_uri": _redirect_uri("etsy"),
+            "scope": "listings_r listings_w shops_r", "state": state, "code_challenge": challenge, "code_challenge_method": "S256"})
+    if service == "pinterest":
+        if not pinterest_app():
+            raise ConnectorError("set PINTEREST_APP_ID and PINTEREST_APP_SECRET on the server first")
+        return "https://www.pinterest.com/oauth/?" + urllib.parse.urlencode({
+            "client_id": os.getenv("PINTEREST_APP_ID", "").strip(), "redirect_uri": _redirect_uri("pinterest"),
+            "response_type": "code", "scope": "boards:read,boards:write,pins:read,pins:write", "state": state})
+    raise ConnectorError(f"unknown service {service}")
+
+
+def oauth_finish(service: str, code: str, state: str) -> dict:
+    pending = _tokens().get(f"{service}_pending") or {}
+    if not code or not pending or not hmac.compare_digest(str(pending.get("state", "")), str(state or "")) \
+            or time.time() - pending.get("at", 0) > 900:
+        raise ConnectorError("that link expired or didn't come from here: press Connect again")
+    if service == "etsy":
+        tok = _http_form("https://api.etsy.com/v3/public/oauth/token", {
+            "grant_type": "authorization_code", "client_id": os.getenv("ETSY_KEYSTRING", "").strip(),
+            "redirect_uri": _redirect_uri("etsy"), "code": code, "code_verifier": pending["verifier"]})
+        tok["expires_at"] = time.time() + int(tok.get("expires_in", 3600)) - 60
+        _save_token("etsy", tok)
+        me = _etsy("GET", "/application/users/me")
+        tok["shop_id"] = me.get("shop_id")
+        _save_token("etsy", tok)
+    else:
+        tok = _http_form(f"{_pinterest_base()}/oauth/token", {"grant_type": "authorization_code", "code": code,
+                                                             "redirect_uri": _redirect_uri("pinterest"), "continuous_refresh": "true"},
+                         {"Authorization": "Basic " + _pinterest_basic()})
+        tok["expires_at"] = time.time() + int(tok.get("expires_in", 2592000)) - 3600
+        _save_token("pinterest", tok)
+    _save_token(f"{service}_pending", None)
+    return {"connected": service}
+
+
+# ---------------------------------------------------------------------------- Etsy digital downloads
+ETSY_API = "https://api.etsy.com/v3"
+ETSY_TAXONOMY_PATHS = (("calendars & planners",), ("planners",), ("paper",))   # first match in the seller taxonomy
+
+
+def etsy_app() -> bool:
+    return bool(os.getenv("ETSY_KEYSTRING", "").strip() and os.getenv("ETSY_SHARED_SECRET", "").strip())
+
+
+def etsy_connected() -> bool:
+    return etsy_app() and bool((_tokens().get("etsy") or {}).get("refresh_token"))
+
+
+def _etsy_token() -> str:
+    tok = _tokens().get("etsy") or {}
+    if not tok.get("refresh_token"):
+        raise ConnectorError("Etsy isn't connected: press Connect Etsy on the board")
+    if time.time() >= tok.get("expires_at", 0):
+        new = _http_form(f"{ETSY_API}/public/oauth/token", {"grant_type": "refresh_token",
+                                                           "client_id": os.getenv("ETSY_KEYSTRING", "").strip(),
+                                                           "refresh_token": tok["refresh_token"]})
+        tok.update(new)   # Etsy hands back a new refresh token every time: keep it
+        tok["expires_at"] = time.time() + int(new.get("expires_in", 3600)) - 60
+        _save_token("etsy", tok)
+    return tok["access_token"]
+
+
+def _etsy(method: str, path: str, form: Optional[dict] = None, files: Optional[dict] = None, auth: bool = True) -> dict:
+    headers = {"x-api-key": f"{os.getenv('ETSY_KEYSTRING', '').strip()}:{os.getenv('ETSY_SHARED_SECRET', '').strip()}"}
+    if auth:
+        headers["Authorization"] = f"Bearer {_etsy_token()}"
+    if files:
+        body, ctype = _multipart(form or {}, files)
+        req = urllib.request.Request(ETSY_API + path, data=body, method=method, headers={**headers, "Content-Type": ctype})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            raise ConnectorError(f"Etsy {exc.code}: {exc.read().decode(errors='replace')[:200]}")
+    try:
+        return _http_json(method, ETSY_API + path, headers, form=form)
+    except ConnectorError as exc:
+        raise ConnectorError(f"Etsy: {exc}")
+
+
+def etsy_taxonomy_id() -> int:
+    if "etsy_tax" not in _printify_cache:
+        nodes = _etsy("GET", "/application/seller-taxonomy/nodes", auth=False).get("results", [])
+        flat = []
+        def walk(ns):
+            for n in ns:
+                flat.append(n)
+                walk(n.get("children") or [])
+        walk(nodes)
+        found = None
+        for (name,) in ETSY_TAXONOMY_PATHS:
+            found = next((n for n in flat if str(n.get("name", "")).lower() == name), None)
+            if found:
+                break
+        if not found:
+            raise ConnectorError("couldn't find a planners/paper category in Etsy's taxonomy")
+        _printify_cache["etsy_tax"] = int(found["id"])
+    return _printify_cache["etsy_tax"]
+
+
+def etsy_digital_listing(title: str, description: str, tags: list, price_usd: float, pdf: bytes, pdf_name: str,
+                         cover: bytes, cover_name: str) -> dict:
+    """Draft → cover image → PDF → active. Returns the listing id and URL."""
+    shop = (_tokens().get("etsy") or {}).get("shop_id")
+    if not shop:
+        raise ConnectorError("Etsy is connected but has no shop id: press Connect Etsy again")
+    lst = _etsy("POST", f"/application/shops/{shop}/listings", {
+        "quantity": 999, "title": title[:140], "description": description, "price": f"{price_usd:.2f}",
+        "who_made": "i_did", "when_made": "made_to_order", "is_supply": "false", "type": "download",
+        "taxonomy_id": etsy_taxonomy_id(), "tags": ",".join(tags[:13]), "should_auto_renew": "false"})
+    lid = lst["listing_id"]
+    _etsy("POST", f"/application/shops/{shop}/listings/{lid}/images", {"rank": 1, "alt_text": title[:500]},
+          {"image": (cover_name, cover, "image/jpeg")})
+    _etsy("POST", f"/application/shops/{shop}/listings/{lid}/files", {"name": pdf_name, "rank": 1},
+          {"file": (pdf_name, pdf, "application/pdf")})
+    _etsy("PATCH", f"/application/shops/{shop}/listings/{lid}", {"state": "active"})
+    return {"listing_id": lid, "url": lst.get("url") or f"https://www.etsy.com/listing/{lid}"}
+
+
+def etsy_deactivate(listing_id) -> None:
+    shop = (_tokens().get("etsy") or {}).get("shop_id")
+    _etsy("PATCH", f"/application/shops/{shop}/listings/{listing_id}", {"state": "inactive"})
+
+
+# ---------------------------------------------------------------------------- Pinterest
+def pinterest_app() -> bool:
+    return bool(os.getenv("PINTEREST_APP_ID", "").strip() and os.getenv("PINTEREST_APP_SECRET", "").strip())
+
+
+def pinterest_connected() -> bool:
+    return pinterest_app() and bool((_tokens().get("pinterest") or {}).get("access_token"))
+
+
+def _pinterest_base() -> str:
+    return "https://api-sandbox.pinterest.com/v5" if os.getenv("PINTEREST_SANDBOX", "") in ("1", "true") else "https://api.pinterest.com/v5"
+
+
+def _pinterest_basic() -> str:
+    import base64
+    return base64.b64encode(f"{os.getenv('PINTEREST_APP_ID', '').strip()}:{os.getenv('PINTEREST_APP_SECRET', '').strip()}".encode()).decode()
+
+
+def _pinterest(method: str, path: str, body: Optional[dict] = None) -> dict:
+    tok = _tokens().get("pinterest") or {}
+    if not tok.get("access_token"):
+        raise ConnectorError("Pinterest isn't connected: press Connect Pinterest on the board")
+    if time.time() >= tok.get("expires_at", 0) and tok.get("refresh_token"):
+        new = _http_form(f"{_pinterest_base()}/oauth/token", {"grant_type": "refresh_token", "refresh_token": tok["refresh_token"]},
+                         {"Authorization": "Basic " + _pinterest_basic()})
+        tok.update(new)   # continuous refresh: a new refresh token (60 days) every time
+        tok["expires_at"] = time.time() + int(new.get("expires_in", 2592000)) - 3600
+        _save_token("pinterest", tok)
+    try:
+        return _http_json(method, _pinterest_base() + path, {"Authorization": f"Bearer {tok['access_token']}"}, body=body)
+    except ConnectorError as exc:
+        raise ConnectorError(f"Pinterest: {exc}")
+
+
+def pinterest_board(name: str) -> str:
+    """The board for a venture: found by name, created if missing."""
+    key = f"pin_board:{name.lower()}"
+    if key not in _printify_cache:
+        boards = _pinterest("GET", "/boards?page_size=100").get("items", [])
+        b = next((x for x in boards if x.get("name", "").lower() == name.lower()), None) \
+            or _pinterest("POST", "/boards", {"name": name[:50], "privacy": "PUBLIC"})
+        _printify_cache[key] = b["id"]
+    return _printify_cache[key]
+
+
+def pinterest_pin(board: str, title: str, description: str, link: str, image_url: str, alt: str = "") -> dict:
+    return _pinterest("POST", "/pins", {"board_id": pinterest_board(board), "title": title[:100], "description": description[:800],
+                                        "link": link[:2048], "alt_text": (alt or title)[:500],
+                                        "media_source": {"source_type": "image_url", "url": image_url}})
+
+
+def rails() -> dict:
+    """The crew's own rails (research.RAILS): what it can sell and deliver through without the owner."""
+    from .media import public_url
+    return {"storefront": stripe_configured() and bool(public_url("x")), "etsy_digital": etsy_connected(),
+            "pinterest": pinterest_connected()}
+
+
 def status() -> dict:
     return {"stripe": stripe_configured(), "stripe_webhook": bool(os.getenv("STRIPE_WEBHOOK_SECRET")),
             "email": email_configured(), "social": sorted(p for p in SOCIAL if social_configured(p)),
             "tiktok": "queue (needs a video; API needs TikTok's audit)",
             "fiverr": "manual (no seller API)",
             "etsy": "live via Printify" if printify_configured() else "waiting for PRINTIFY_API_TOKEN",
-            "printify": printify_configured()}
+            "printify": printify_configured(), "rails": rails(),
+            "etsy_digital": "connected" if etsy_connected() else ("press Connect" if etsy_app() else "needs ETSY_KEYSTRING + ETSY_SHARED_SECRET"),
+            "pinterest": ("connected" + (" (sandbox: only you see the pins)" if "sandbox" in _pinterest_base() else ""))
+            if pinterest_connected() else ("press Connect" if pinterest_app() else "needs PINTEREST_APP_ID + PINTEREST_APP_SECRET")}

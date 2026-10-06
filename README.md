@@ -451,7 +451,30 @@ counted. Agents can never book revenue.
 Anything with a monthly cost (next on the list: Printify Premium, ~$29/month, up to 20% off product costs)
 waits until the pool can cover two months of it plus a month of bills; then ULTRON asks you to approve it.
 
-**The Etsy shop, run by the crew** (`backend/station/shop.py`, venture `V-ETSY`): print-on-demand through
+**Autonomous ventures: the crew hunts, launches, sells and delivers** (`backend/station/digital.py`). The
+research routines rank first what the crew can run end to end through the station's own rails, with $0 and
+no work from you: digital products it writes and designs itself (guides, checklists, planners, workbooks,
+template packs, printables), sold on the station storefront and as Etsy digital downloads, with Pinterest
+for traffic. Each opportunity says whether it's `autonomous` or `owner_assisted`, which rails it uses and
+what format the crew will make.
+- **Launch rule** (your call, Oct 6 2026): an autonomous idea scoring 60+ launches on its own, at most one
+  a day and at most 3 live experiments; the approval is recorded as approved by your standing rule, and
+  you get a notification. Kill it any time from its venture card. It **closes itself after 21 days with no
+  sale** and its products come off sale (`STARNET_AUTO_LAUNCH=0` turns the rule off;
+  `STARNET_AUTO_KILL_DAYS` changes the 21). Owner-assisted ideas still wait for your approval.
+- **Products:** the Product Designer writes one complete product a day per venture (up to 6 on the shelf),
+  rendered as a letter-size PDF plus a 2:3 cover; Compliance & QA checks every word; then it goes on sale:
+  a Stripe payment link that returns the buyer to a verified download, a page on the storefront
+  (`/shop/<slug>`, public), an Etsy digital listing when Etsy is connected, and a pin when Pinterest is.
+  `STARNET_DIGITAL_PER_DAY` (default 3) caps new products a day.
+- **Delivery:** `/shop/<slug>/thanks` asks Stripe whether the Checkout Session is paid and came from this
+  product's link before the download appears; the PDFs aren't served any other way. The sale books itself
+  into the treasury (the webhook books it too; each sale once). The storefront's name is
+  `STARNET_STORE_NAME` (default "StarNet Studio").
+- If research has never produced an opportunity (the first runs failed), it tries again every 3 hours
+  instead of waiting for the next day's slot.
+
+ (`backend/station/shop.py`, venture `V-ETSY`): print-on-demand through
 Printify, end to end without you.
 1. Every 2 days, when fewer than 4 products are in the pipeline, Market Research scans what's selling on
    Etsy now (best-seller badges, review counts, the shops selling it, their prices and the search words
@@ -528,6 +551,9 @@ the same address or to anyone who opted out, and every contact comes with the pa
 | Instagram | `STARNET_IG_USER_ID` (the Instagram professional account linked to the Page); the Page token must also have `instagram_basic` and `instagram_content_publish` | Padilla's posts go to Instagram too, each with its image card |
 | TikTok | not yet: every post needs a video, and TikTok's API needs their audit | Its posts wait in your queue |
 | Etsy (via Printify) | `PRINTIFY_API_TOKEN` (Printify → My profile → Connections → Generate token; scopes: shops, catalog, products, orders, uploads); optional `PRINTIFY_SHOP_ID`. Your Etsy shop must be connected in Printify (My stores → Add new store → Etsy) | The crew lists its products on Etsy and reads the orders. Printify charges your card for each order's production when the order comes in |
+| Storefront | Stripe (above) and `STARNET_PUBLIC_URL` (or Render's own `RENDER_EXTERNAL_URL`) | Autonomous ventures sell their PDFs at `/shop` with automatic delivery |
+| Etsy digital downloads | `ETSY_KEYSTRING`, `ETSY_SHARED_SECRET` from a free app at etsy.com/developers (callback `https://<your app>/api/station/connect/etsy/callback`), then **Connect** on the board's Marketing tab | Each product is also listed on your Etsy shop as a download ($0.20 per listing; auto-renew off) |
+| Pinterest | `PINTEREST_APP_ID`, `PINTEREST_APP_SECRET` from developers.pinterest.com (callback `https://<your app>/api/station/connect/pinterest/callback`), then **Connect**. Pinterest's Trial access only makes sandbox pins nobody else sees (set `PINTEREST_SANDBOX=1` to test); public pins need its Standard access (Pinterest asks for a short screen recording of the Connect flow and a pin being made) | Every new product gets a pin linking to its storefront page |
 | Fiverr | none: no seller API, and bots break its terms | The crew prepares; you publish and reply there |
 
 Refunds and payouts aren't wired at all: they stay in your Stripe dashboard.

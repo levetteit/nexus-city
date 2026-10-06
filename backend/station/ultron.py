@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
-from . import actions, connectors, crew, finance, marketing, recognition, research, results, shop, warroom
+from . import actions, connectors, crew, digital, finance, marketing, recognition, research, results, shop, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
 from .store import STAGES, Store, now_iso
@@ -41,17 +41,23 @@ def _is_connection(exc) -> bool:
 MAX_EXPERIMENTS = int(os.getenv("STARNET_STATION_EXPERIMENTS", "3"))      # live ventures besides the trading desk
 TASKS_PER_DAY = int(os.getenv("STARNET_STATION_TASKS_PER_DAY", "25"))     # agent drafting runs per ET day
 STALL_MINUTES = 30
+KICKOFF_RETRY = timedelta(hours=3)   # no opportunities on file: research again this soon instead of tomorrow
 AI_BACKOFF = timedelta(minutes=20)   # after a connection failure, wait this long instead of burning the day's slots
 ACTIVE_STAGES = ("approved", "build", "launch", "operate", "measure", "optimize", "scale")
 REPORT_AT = (8, 30)   # ET, daily
 AUDIT_AT = (7, 0)     # ET, daily
 
 APPROVAL_KINDS = ("launch_venture", "fund_goal", "venture_decision", "spend")
+# The owner's rule (Oct 6 2026): a $0 venture the crew can run end to end on its own rails launches without
+# waiting; the owner is told and can kill it. It closes itself after KILL_AFTER days with no sale.
+AUTO_LAUNCH = os.getenv("STARNET_AUTO_LAUNCH", "1") not in ("0", "false", "off")
+KILL_AFTER = timedelta(days=int(os.getenv("STARNET_AUTO_KILL_DAYS", "21")))
 
 
 class Ultron:
     def __init__(self, data_dir: str, client=None, notify: Optional[Callable[[str, str], None]] = None) -> None:
         self.store = Store(data_dir)
+        connectors.set_data_dir(data_dir)
         self.treasury = Treasury(self.store)
         self.brain = Brain(self.treasury, client)
         self.notify = notify or (lambda title, body: None)
@@ -61,6 +67,8 @@ class Ultron:
         self.last_error = ""
         self.cfg = self.store.load_doc("ultron.json") or {"mandate": research.MANDATE, "kicked_off": False,
                                                            "reported": "", "budget_warned": "", "reminded": {}}
+        if str(self.cfg.get("mandate", "")).startswith(research.OLD_MANDATE_START):
+            self.cfg["mandate"] = research.MANDATE   # the owner's Oct 6 update: autonomous ventures first
         self._seed()
 
     # ---------------------------------------------------------------- setup
@@ -161,6 +169,7 @@ class Ultron:
             self._recognized_at = now
             recognition.update(self.store)
             self.milestones = recognition.station_milestones(self.store, self.treasury)
+        self._review_autonomous(now)
         self._propose(now)
         if (now.hour, now.minute) >= REPORT_AT and self.cfg.get("reported") != now.date().isoformat():
             self.report(now, engine)
@@ -212,10 +221,15 @@ class Ultron:
             spec = next((x for x in research.ROUTINES if x["id"] == r["id"]), None)
             if spec and r.get("status") == "active" and research.due(spec, now, r.get("last_run")):
                 return {"kind": "routine", "routine": r["id"]}
+        if not self.store.all("opportunities") and (not self.cfg.get("kickoff_at")
+                                                     or now - datetime.fromisoformat(self.cfg["kickoff_at"]) >= KICKOFF_RETRY):
+            # nothing on file yet (first start, or every run so far failed): research now, not at tomorrow's slot
+            return {"kind": "routine", "routine": "R-001", "kickoff": True}
         if shop.research_due(s, self.cfg, now):
             return {"kind": "shop_research"}
-        if not self.cfg.get("kicked_off") and not self.store.all("opportunities"):
-            return {"kind": "routine", "routine": "R-001", "kickoff": True}   # first start: research now, not tomorrow
+        for v in digital.ventures(s):
+            if digital.due(s, v, now):
+                return {"kind": "product", "venture": v["id"]}
         if self._tasks_today(now) < TASKS_PER_DAY:
             queued = [t for t in self.store.find("tasks", status="queued", kind="agent") if crew.ready(self.store, t)]
             if queued:
@@ -242,6 +256,7 @@ class Ultron:
                          kind="agent.state")
                 if job.get("kickoff"):
                     self.cfg["kicked_off"] = True
+                    self.cfg["kickoff_at"] = now.isoformat()
                     self._save_cfg()
                 self._propose(now)
                 return doc
@@ -268,6 +283,10 @@ class Ultron:
                 self.cfg["shop_research_at"] = now.isoformat()
                 self._save_cfg()
                 return shop.research(s, self.brain, now)
+            if job["kind"] == "product":
+                v = s.get("ventures", job["venture"])
+                self.busy = f"Product Designer: next product for {v['name']}"
+                return digital.create(s, self.brain, v, now)
             if job["kind"] == "shop_orders":
                 self.busy = "Etsy Shop Manager: reading orders"
                 self.cfg["shop_orders_at"] = now.isoformat()
@@ -319,6 +338,8 @@ class Ultron:
                 if job["kind"] == "shop_research":
                     self.cfg.pop("shop_research_at", None)
                     self._save_cfg()
+                if job["kind"] == "product":
+                    s.update("ventures", job["venture"], {"product_at": None}, "A-001", "Claude unreachable: product will retry")
                 if job["kind"] in ("task",):
                     s.update("tasks", job["task"], {"status": "queued", "attempts": max(0, s.get("tasks", job["task"]).get("attempts", 1) - 1)},
                              "A-001", "Claude unreachable: back in the queue")
@@ -328,7 +349,8 @@ class Ultron:
             s.event("ultron.job_failed", "A-001", f"{job['kind']} failed: {self.last_error}", ref=job.get("task") or job.get("routine")
                     or job.get("venture"), severity="WARNING")
             if job["kind"] == "routine" and job.get("kickoff"):
-                self.cfg["kicked_off"] = True   # don't hammer a failing kickoff; the schedule takes over
+                self.cfg["kicked_off"] = True   # don't hammer a failing kickoff: try again in KICKOFF_RETRY
+                self.cfg["kickoff_at"] = now.isoformat()
                 self._save_cfg()
             if job["kind"] == "shop_research":   # try again in 6 hours, not in 2 days
                 self.cfg["shop_research_at"] = (now - shop.RESEARCH_EVERY + timedelta(hours=6)).isoformat()
@@ -390,7 +412,7 @@ class Ultron:
     def _requeue_connected(self) -> None:
         """A platform got connected: what was waiting in the owner's queue for it goes out on its own."""
         live = {"stripe.payment_link": connectors.stripe_configured(), "outreach.email": connectors.email_configured(),
-                "shop.listing": connectors.printify_configured()}
+                "shop.listing": connectors.printify_configured(), "digital.publish": connectors.rails()["storefront"]}
         for a in self.store.find("actions", status="manual"):
             plat = a["payload"].get("platform", "")
             ok = live.get(a["kind"]) if a["kind"] in live else (connectors.social_configured(plat)
@@ -425,11 +447,52 @@ class Ultron:
                 and o.get("startup_cost_usd", 1) == 0 and o.get("recommendation") in ("build_now", "investigate")]
         if not pool:
             return
-        o = max(pool, key=lambda o: (o.get("recommendation") == "build_now", o.get("score", 0), -o.get("days_to_first_dollar", 99)))
+        rank = lambda o: (o.get("recommendation") == "build_now", o.get("score", 0), -o.get("days_to_first_dollar", 99))
+        auto = [o for o in pool if self._can_run_alone(o)]
+        if AUTO_LAUNCH and auto and self.cfg.get("auto_launched_day") != now.date().isoformat():
+            self._auto_launch(max(auto, key=rank), now)
+            return
+        o = max(pool, key=rank)
         self.request("launch_venture", "A-001", f"Launch: {o['title']}",
                      f"Score {o['score']}/100, $0 to start, first dollar in about {o['days_to_first_dollar']} days. {o['summary']}",
                      cost=0, reversible=True, risk="; ".join(o.get("risks", [])[:3]), venture=None,
                      payload={"opportunity": o["id"], "owner_actions": o.get("owner_actions", [])})
+
+    def _can_run_alone(self, o: dict) -> bool:
+        """The crew can make, sell and deliver it through rails that are live right now, with no owner work."""
+        live = connectors.rails()
+        return (o.get("execution") == "autonomous" and o.get("startup_cost_usd", 1) == 0 and o.get("product_format") not in (None, "none")
+                and live["storefront"] and o.get("score", 0) >= 60)
+
+    def _auto_launch(self, o: dict, now: datetime) -> dict:
+        """The owner's standing rule stands in for the approval; the record says so."""
+        a = self.store.create("approvals", {"kind": "launch_venture", "requesting_agent": "A-001", "venture": None,
+                                            "action": f"Launch: {o['title']}", "reason": f"Score {o['score']}/100, $0, runs on the crew's own rails. {o['summary']}",
+                                            "risk": "; ".join(o.get("risks", [])[:3]), "cost": 0, "reversible": True,
+                                            "requested_at": now_iso(), "decided_at": now_iso(), "status": "approved",
+                                            "owner_response": "auto: the owner's standing rule for autonomous $0 ventures",
+                                            "payload": {"opportunity": o["id"], "auto": True}},
+                                  "A-001", f"auto-approved by the owner's rule: {o['title']}")
+        self.cfg["auto_launched_day"] = now.date().isoformat()
+        self._save_cfg()
+        v = self._launch(o["id"], a["id"], autonomous=True)
+        self.store.event("venture.auto_launched", "A-001", f"launched on its own: {o['title']} (kill it any time; it closes itself "
+                         f"after {KILL_AFTER.days} days with no sale)", ref=v["id"], severity="ACTION NEEDED")
+        self.notify("🛰️ Launched on its own", f"{o['title']}: the crew makes, sells and delivers it. Kill it any time.")
+        return v
+
+    def _review_autonomous(self, now: datetime) -> None:
+        """Close autonomous ventures with no sale after KILL_AFTER; take closed ventures' products off sale."""
+        s = self.store
+        for v in s.all("ventures"):
+            if v.get("autonomous") and v["stage"] in ACTIVE_STAGES and v.get("launched_at"):
+                age = now - datetime.fromisoformat(v["launched_at"])
+                if age >= KILL_AFTER and self.treasury.pnl("venture", v["id"])["income"] <= 0:
+                    v = s.update("ventures", v["id"], {"stage": "killed", "next_action": None}, "A-001",
+                                 f"no sale in {KILL_AFTER.days} days: closed by the owner's rule", kind="venture.stage")
+                    self.notify("🛰️ Venture closed", f"{v['name']}: no sale in {KILL_AFTER.days} days")
+            if v["stage"] in ("killed", "paused") and any(p["venture"] == v["id"] and p.get("active") for p in s.all("products")):
+                digital.retire(s, v["id"])
 
     def _approval_for(self, kind: str, goal: Optional[str], pending_only: bool = False) -> Optional[dict]:
         for a in self.store.all("approvals"):
@@ -494,15 +557,21 @@ class Ultron:
                               "owner", f"owner promoted {o['title']}")
         return {"approval": a, "venture": self._launch(opportunity_id, a["id"])}
 
-    def _launch(self, opportunity_id: str, approval_id: str) -> dict:
+    def _launch(self, opportunity_id: str, approval_id: str, autonomous: Optional[bool] = None) -> dict:
         s = self.store
         o = s.get("opportunities", opportunity_id)
+        if autonomous is None:   # an owner-approved launch of an idea the crew can run alone runs alone too
+            autonomous = self._can_run_alone(o)
+        extra = {"autonomous": True, "agent_run": True, "planned": True, "stage": "launch", "rails": o.get("rails") or ["storefront"],
+                 "product_format": o.get("product_format"), "next_action": "Product Designer: the first product",
+                 "agents": ["A-DSGN", "A-011", "A-SHOP", "A-006"]} if autonomous else {}
         v = s.create("ventures", {"name": o["title"], "category": o["category"], "platform": o.get("platform"), "stage": "approved",
                                   "unit": "station", "owner": "owner", "opportunity": o["id"], "opportunity_score": o.get("score"),
                                   "approval": approval_id, "agents": [], "startup_cost": o.get("startup_cost_usd", 0),
                                   "success_criteria": o.get("success_criteria"), "kill_criteria": o.get("kill_criteria"),
                                   "next_action": "Validation Agent is planning the first week", "planned": False,
-                                  "launched_at": now_iso()}, "A-001", f"approved by the owner: {o['title']}")
+                                  "launched_at": now_iso(), **extra}, "A-001",
+                     ("launched on the owner's rule: " if autonomous else "approved by the owner: ") + o["title"])
         s.update("opportunities", o["id"], {"status": "promoted", "venture": v["id"]}, "A-001", f"promoted to {v['id']}",
                  kind="opportunity.promoted")
         m = s.get("missions", "M-001")
@@ -536,6 +605,10 @@ class Ultron:
         """0-100: money, progress and time since the last progress."""
         if v["id"] == "V-001":
             return 70
+        if v.get("autonomous"):   # judged on sales, then on products on the shelf
+            live = sum(1 for p in self.store.all("products") if p["venture"] == v["id"] and p.get("active"))
+            inc = self.treasury.pnl("venture", v["id"])["income"]
+            return max(10, min(100, 35 + 5 * min(6, live) + (35 if inc > 0 else 0) - (25 if v["stage"] in ("paused", "killed") else 0)))
         if v["id"] == shop.VENTURE:   # judged on orders, then on listings going up
             sm = shop.summary(self.store, 14)
             return max(20, min(100, 40 + 12 * sm["orders_14d"] + 2 * min(10, len(sm["live"]))))
@@ -585,7 +658,7 @@ class Ultron:
                        "rejected": s.find("actions", status="rejected")[-10:], "failed": s.find("actions", status="failed")[-10:]},
             "lessons": s.load_doc("lessons.json") or [],
             "leads": sorted(s.all("leads"), key=lambda l: l["created_at"], reverse=True)[:40],
-            "shop": shop.summary(s),
+            "shop": shop.summary(s), "storefront": digital.summary(s, self.treasury),
             "milestones": self.milestones or recognition.station_milestones(s, self.treasury), "research_focus": self.cfg.get("research_focus", ""),
             "warroom": s.load_doc(s.list_docs("warroom-", 1)[0]) if s.list_docs("warroom-", 1) else None,
             "audit": s.load_doc(s.list_docs("audit-", 1)[0]) if s.list_docs("audit-", 1) else None,

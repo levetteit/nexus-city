@@ -100,6 +100,10 @@ def inputs(store: Store, treasury: Treasury, health: Callable[[dict], int], sinc
                          "qa_rejections": [a["qa"]["issues"] for a in acts if a["status"] == "rejected"][-5:],
                          "results_30d": results.summary(store, v["id"], 30),
                          "shop_30d": shop_summary(v["id"], store),
+                         "products": [{"title": p["title"], "price": p["price_usd"], "active": p.get("active"), "etsy": bool(p.get("etsy")),
+                                       "listed": p["created_at"][:10], "sales": sum(1 for e in treasury.entries if e["kind"] == "income"
+                                                                                    and p["slug"] in (e.get("note") or ""))}
+                                      for p in store.all("products") if p["venture"] == v["id"]] or None,
                          "success_criteria": v.get("success_criteria"), "kill_criteria": v.get("kill_criteria")})
     ev = [e for e in store.events(1500, INPUT_KINDS) if not since or e["at"] > since]
     return {"ventures": ventures, "treasury": treasury.summary(), "new_results": [f"{e['at'][:16]} {e['summary']}" for e in ev[:80]],

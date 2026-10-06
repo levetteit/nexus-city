@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import html
 import hmac
 import json
 import os
@@ -16,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import TICK_SECONDS
@@ -277,7 +278,8 @@ class PasswordGate:
 
     async def __call__(self, scope, receive, send):
         if (not self.token or scope["type"] not in ("http", "websocket") or scope["path"] in OPEN_PATHS
-                or scope["path"].startswith("/media/")):   # post images: Instagram fetches them itself
+                or scope["path"].startswith("/media/")   # post images: Instagram fetches them itself
+                or scope["path"] == "/shop" or scope["path"].startswith("/shop/")):   # the storefront is for the public
             return await self.app(scope, receive, send)
         ok, set_cookie = self._authorized(dict(scope["headers"]))
         if not ok:
@@ -821,6 +823,84 @@ async def station_stripe_webhook(request: Request) -> dict:
         if sale:
             _station_notify("💵 Stripe sale", f"${sale['amount']:,.2f}" + (f" · {sale['venture']}" if sale.get("venture") else ""))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- the storefront (public) and Connect (Etsy, Pinterest)
+@app.get("/shop", response_class=HTMLResponse)
+def storefront() -> str:
+    from .station import digital
+    return digital.page_index(_station().store)
+
+
+@app.get("/shop/privacy", response_class=HTMLResponse)
+def storefront_privacy() -> str:
+    from .station import digital
+    return digital.page_privacy()
+
+
+@app.get("/shop/{slug}", response_class=HTMLResponse)
+def storefront_product(slug: str) -> str:
+    from .station import digital
+    p = digital.find(_station().store, slug)
+    if not p:
+        raise HTTPException(404)
+    return digital.page_product(p)
+
+
+@app.get("/shop/{slug}/thanks", response_class=HTMLResponse)
+def storefront_thanks(slug: str, session_id: str = "") -> str:
+    """Stripe sends the buyer here. The download appears only for a paid session of this product's link."""
+    from .station import digital
+    st = _station()
+    p = digital.find(st.store, slug)
+    if not p:
+        raise HTTPException(404)
+    sess = digital.verify_purchase(st.store, p, session_id)
+    if sess and not sess.get("cached"):
+        sale = st.treasury.book_stripe_sale(sess)   # the webhook books it too; each sale is booked once
+        if sale:
+            _station_notify("💵 Storefront sale", f"{p['title']} · ${sale['amount']:,.2f}")
+    return digital.page_thanks(p, session_id, bool(sess))
+
+
+@app.get("/shop/{slug}/download")
+def storefront_download(slug: str, session_id: str = ""):
+    from .station import digital
+    st = _station()
+    p = digital.find(st.store, slug)
+    if not p or not digital.verify_purchase(st.store, p, session_id):
+        raise HTTPException(403, "this download needs a completed purchase")
+    path = digital.pdf_path(os.getenv("STARNET_DATA_DIR", "data"), p["pdf"])
+    if not path:
+        raise HTTPException(404)
+    return FileResponse(path, media_type="application/pdf", filename=f"{p['slug']}.pdf")
+
+
+@app.get("/api/station/connect/{service}")
+def station_connect(service: str):
+    """The owner presses Connect: off to Etsy or Pinterest to allow access, then back to the callback."""
+    from .station import connectors
+    if service not in ("etsy", "pinterest"):
+        raise HTTPException(404)
+    try:
+        return RedirectResponse(connectors.oauth_start(service))
+    except connectors.ConnectorError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/station/connect/{service}/callback", response_class=HTMLResponse)
+def station_connect_callback(service: str, code: str = "", state: str = "", error: str = "") -> str:
+    from .station import connectors
+    if service not in ("etsy", "pinterest"):
+        raise HTTPException(404)
+    if error:
+        return f"<p>{service.title()} wasn't connected: {html.escape(error)}. <a href='/station.html#/marketing'>Back</a></p>"
+    try:
+        connectors.oauth_finish(service, code, state)
+    except connectors.ConnectorError as exc:
+        return f"<p>{service.title()} wasn't connected: {html.escape(str(exc))}. <a href='/station.html#/marketing'>Back</a></p>"
+    _station().store.event("connector.connected", "owner", f"{service.title()} connected")
+    return RedirectResponse(f"/station.html#/marketing")
 
 
 @app.post("/api/station/actions/{rid}/{what}")
