@@ -290,6 +290,35 @@ days, not bigger days.
 
     python -m backend.backtest data/*_1m.csv --payouts
 
+### Your Lucid accounts (`backend/accounts.py`)
+
+Open **👥 My Lucid accounts** in the account panel and add each account you buy:
+a name, its phase, and the balance, MLL and payout progress from your Lucid
+dashboard. Every bot trade is applied to every account, so each card shows:
+
+- the balance and today's P&L
+- the room above its MLL
+- evaluation progress, or the payout cycle and the suggested payout
+
+The top of the panel totals what's **ready to pay out right now** across all
+accounts. You get pushes when an account passes, fails, has a payout ready, or
+has to stop while the bots keep trading.
+
+**Routing with one TradersPost strategy per account (recommended).** Give each
+account its own TradersPost strategy and paste that strategy's webhook into
+**Add webhook**. The router then manages every account separately:
+
+- An account only joins a new trade if it may trade (not stopped for the day,
+  not at its evaluation target) and has room in its contract budget.
+- An account close to its MLL stays at 3 contracts while the others add to 6.
+- Trims resize each account to its own size, and exits go to every account in
+  the trade.
+
+Accounts without their own webhook copy everything sent to
+`STARNET_TRADERSPOST_WEBHOOKS`. For those the app can only tell you to pause the
+subscription. Webhook URLs stay in `data/accounts.json` on the server and are
+never sent to the app.
+
 ### Add a worker
 
 ```python

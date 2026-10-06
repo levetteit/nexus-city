@@ -34,6 +34,14 @@ MAX_DATA_DELAY_MIN = 2.5
 QUARTERS = {3: "H", 6: "M", 9: "U", 12: "Z"}
 
 
+def _targets(pos: dict) -> dict[str, int]:
+    """Webhook -> contracts for an open position (older saved state had no per-webhook sizes)."""
+    t = pos.get("targets")
+    if isinstance(t, list):
+        t = pos["targets"] = {u: pos["qty"] for u in t}
+    return t if t is not None else {}
+
+
 def third_friday(year: int, month: int) -> date:
     d = date(year, month, 15)
     return d + timedelta(days=(4 - d.weekday()) % 7)
@@ -57,7 +65,9 @@ class TradersPostRouter:
         self.webhooks = webhooks if webhooks is not None else [u.strip() for u in env.split(",") if u.strip()]
         self.state_path = os.path.join(data_dir, "execution.json")
         self.armed = False
-        self.open: dict[str, dict] = {}      # symbol -> {"side", "qty", "contract"} we have on for real
+        self.open: dict[str, dict] = {}      # symbol -> {"side", "qty", "contract", "targets"} we have on for real
+        self.account_urls = lambda: []       # per-account webhooks (accounts.py sets this)
+        self.url_names = lambda: {}          # webhook -> account name, for the order log (never the URL itself)
         self.last_error = ""
         self.sent = 0
         self.blocked = 0
@@ -67,7 +77,10 @@ class TradersPostRouter:
     # ---------------------------------------------------------------- state
     @property
     def configured(self) -> bool:
-        return bool(self.webhooks)
+        return bool(self.webhooks or self.account_urls())
+
+    def all_urls(self) -> list[str]:
+        return list(dict.fromkeys(self.webhooks + self.account_urls()))
 
     def _load(self) -> None:
         if os.path.exists(self.state_path):
@@ -98,12 +111,15 @@ class TradersPostRouter:
         self.queue = asyncio.Queue()
         asyncio.create_task(self._worker())
         for symbol, pos in list(self.open.items()):
-            self._enqueue(symbol, {"action": "exit", "cancel": True}, "restart: bots start flat", pos["contract"])
+            self._enqueue(symbol, {"action": "exit", "cancel": True}, "restart: bots start flat", pos["contract"],
+                          list(_targets(pos)) or self.all_urls())
             del self.open[symbol]
         self._save()
 
-    def handle(self, engine, events: list[dict], delay_min: float) -> None:
-        """Turn the bots' trade events into real orders."""
+    def handle(self, engine, events: list[dict], delay_min: float, book=None) -> None:
+        """Turn the bots' trade events into real orders. The shared webhooks follow the bots exactly;
+        per-account webhooks follow `book` (accounts.py): which accounts join a trade, take an add,
+        and how many contracts each holds."""
         if not (self.armed and self.queue):
             return
         for ev in events:
@@ -120,45 +136,66 @@ class TradersPostRouter:
                     continue
                 side = "buy" if ev["contract"].endswith("LONG") else "sell"
                 contract = front_month(symbol)
-                self.open[symbol] = {"side": side, "qty": ev["qty"], "contract": contract}
+                urls = list(dict.fromkeys(self.webhooks + (book.entry_targets(ev["bot"]) if book else self.account_urls())))
+                targets = {u: ev["qty"] for u in urls}
+                if not targets:
+                    self.blocked += 1
+                    self._log(symbol, {"action": "skip-open"}, "no account may take new trades now", 0)
+                    continue
+                self.open[symbol] = {"side": side, "qty": ev["qty"], "contract": contract, "targets": targets}
                 self._enqueue(symbol, {"action": side, "quantity": ev["qty"], "orderType": "market",
-                                       "signalPrice": round(engine.market.underlyings[symbol].price, 2)}, ev["bot"], contract)
+                                       "signalPrice": round(engine.market.underlyings[symbol].price, 2)}, ev["bot"], contract, list(targets))
             elif ev["type"] == "trade_add" and symbol in self.open:
                 if delay_min > MAX_DATA_DELAY_MIN:
                     self.blocked += 1
                     continue
-                self.open[symbol]["qty"] += ev["qty"]
-                self._enqueue(symbol, {"action": "add", "quantity": ev["qty"], "orderType": "market"}, ev["bot"],
-                              self.open[symbol]["contract"])
+                pos = self.open[symbol]
+                pos["qty"] += ev["qty"]
+                targets = _targets(pos)
+                allowed = set(self.webhooks) | set(book.add_targets(ev["bot"]) if book else targets)
+                urls = [u for u in targets if u in allowed]
+                for u in urls:
+                    targets[u] += ev["qty"]
+                if urls:
+                    self._enqueue(symbol, {"action": "add", "quantity": ev["qty"], "orderType": "market"}, ev["bot"],
+                                  pos["contract"], urls)
             elif ev["type"] == "trade_trim" and symbol in self.open:
                 # resize = "end at this many contracts": TradersPost only sends the difference,
                 # so a repeat or a missed fill can't over-trim. Never blocked: it only reduces risk.
-                left = self.open[symbol]["qty"] = max(1, self.open[symbol]["qty"] - ev["qty"])
-                self._enqueue(symbol, {"action": "resize", "quantity": left, "orderType": "market", "cancel": False},
-                              ev["bot"], self.open[symbol]["contract"])
+                pos = self.open[symbol]
+                pos["qty"] = left = max(1, pos["qty"] - ev["qty"])
+                own = book.target_qty(ev["bot"]) if book else {}
+                targets = _targets(pos)
+                for u, q in targets.items():
+                    want = own.get(u, left) if u not in self.webhooks else left
+                    if want < q:
+                        targets[u] = want
+                        self._enqueue(symbol, {"action": "resize", "quantity": want, "orderType": "market", "cancel": False},
+                                      ev["bot"], pos["contract"], [u])
             elif ev["type"] == "trade_close" and symbol in self.open:
                 pos = self.open.pop(symbol)
-                self._enqueue(symbol, {"action": "exit", "cancel": True}, ev["bot"], pos["contract"])
+                self._enqueue(symbol, {"action": "exit", "cancel": True}, ev["bot"], pos["contract"], list(_targets(pos)) or None)
         self._save()
 
     def flatten_all(self, symbols: list[str]) -> None:
         for symbol in set(symbols) | set(self.open):
             self._enqueue(symbol, {"action": "exit", "cancel": True}, "flatten all",
-                          self.open.get(symbol, {}).get("contract"))
+                          self.open.get(symbol, {}).get("contract"), self.all_urls())
         self.open.clear()
         self.armed = False
         self._save()
 
-    def _enqueue(self, symbol: str, msg: dict, reason: str, contract: Optional[str] = None) -> None:
+    def _enqueue(self, symbol: str, msg: dict, reason: str, contract: Optional[str] = None,
+                 targets: Optional[list[str]] = None) -> None:
         payload = {"ticker": contract or front_month(symbol), **msg, "time": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         if self.queue is not None:
-            self.queue.put_nowait((symbol, payload, reason))
+            self.queue.put_nowait((symbol, payload, reason, targets if targets is not None else self.all_urls()))
 
     async def _worker(self) -> None:
         """Send orders one at a time, in order, so an exit can never overtake its entry."""
         while True:
-            symbol, payload, reason = await self.queue.get()
-            for url in self.webhooks:
+            symbol, payload, reason, targets = await self.queue.get()
+            for url in targets:
                 status, body = 0, ""
                 for attempt in range(3):
                     try:
@@ -171,7 +208,9 @@ class TradersPostRouter:
                 ok = 200 <= status < 300
                 self.sent += ok
                 self.last_error = "" if ok else f"{payload['action']} {payload['ticker']}: HTTP {status} {body[:120]}"
-                self._log(symbol, payload, reason, status, body)
+                name = self.url_names().get(url) or (f"shared webhook {self.webhooks.index(url) + 1}"
+                                                     if url in self.webhooks else "webhook")
+                self._log(symbol, payload, f"{reason} → {name}", status, body)
 
     @staticmethod
     def _post(url: str, payload: dict) -> tuple[int, str]:

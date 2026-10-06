@@ -109,6 +109,9 @@ class Notifier:
             return (f"{icon} {who} closed {money(whole)}{tag}", f"{ev['reason']} · today {money(day)}", "trade")
         if ev["type"] == "news_hold":
             return (f"📰 {ev['title']} at {ev['at']} ET", f"bots paused for news · no new trades until {ev['until']}", "news")
+        if ev["type"] == "acct_event":
+            icon = {"passed": "🏆", "failed": "💀", "payout": "💸", "halt": "⏸️"}.get(ev["what"], "👥")
+            return (f"{icon} {ev['name']}", ev["text"], "account")
         if ev["type"] == "account_passed":
             return ("🏆 Evaluation PASSED → funded", "The bots switch to the funded rules. Pass the real account at Lucid too, then sync it in the app.", "account")
         if ev["type"] == "payout_ready":
