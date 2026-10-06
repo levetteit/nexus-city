@@ -26,7 +26,34 @@ CORE = [
      "kind": "ai", "specialty": "Checks an approved opportunity and turns it into a venture plan and tasks"},
     {"id": "A-004", "name": "Finance Agent", "role": "Finance/Unit Economics", "department": "finance", "kind": "logic",
      "specialty": "Keeps the treasury: payouts, costs, AI budget, runway, funding goals"},
+    # Marketing & Outreach: new customers, and every piece of work turned into content that drives traffic
+    {"id": "A-005", "name": "Marketing Lead", "role": "Marketing", "department": "marketing", "kind": "ai",
+     "specialty": "Channel plan per venture: who the customer is, where they are, what to say, how often"},
+    {"id": "A-006", "name": "Content Creator", "role": "Content Strategist", "department": "marketing", "kind": "ai",
+     "specialty": "Turns the crew's work into social posts that send traffic to the ventures"},
+    {"id": "A-007", "name": "Outreach Agent", "role": "Outreach", "department": "marketing", "kind": "ai",
+     "specialty": "Finds businesses that publicly invite inquiries and drafts honest, personal outreach"},
+    # Finance: the ecosystem's economy
+    {"id": "A-008", "name": "Accountant", "role": "Accountant", "department": "finance", "kind": "logic",
+     "specialty": "Books, monthly statements per unit and venture, tax set-aside estimate"},
+    {"id": "A-009", "name": "Auditor", "role": "Auditor", "department": "finance", "kind": "logic",
+     "specialty": "Tamper-evident ledger check, Stripe reconciliation, cost per result for every agent"},
+    # Legal: documents, contracts and the QA gate in front of everything that leaves the station
+    {"id": "A-010", "name": "Legal Counsel", "role": "Legal Counsel", "department": "legal", "kind": "ai",
+     "specialty": "Terms, privacy notices, disclosures and client agreements (drafts for the owner to review)"},
+    {"id": "A-011", "name": "Compliance & QA", "role": "Compliance/Policy", "department": "legal", "kind": "ai",
+     "specialty": "Checks every post, message and listing against the law and platform rules before it goes out"},
+    # War Room: what works, what doesn't, what we do instead
+    {"id": "A-012", "name": "War Room Strategist", "role": "War Room", "department": "warroom", "kind": "ai",
+     "specialty": "Reads every result, kills what doesn't work, doubles down on what does, writes the lessons"},
 ]
+
+# Roles a venture plan may ask for that a standing team member already covers (never staff a duplicate)
+ALIASES = {"marketing": "A-005", "marketing lead": "A-005", "content strategist": "A-006", "content creator": "A-006",
+           "social media": "A-006", "outreach": "A-007", "sales": "A-007", "compliance/policy": "A-011",
+           "compliance": "A-011", "qa": "A-011", "legal": "A-010", "legal counsel": "A-010",
+           "finance/unit economics": "A-004", "finance": "A-004", "accountant": "A-008", "analytics": "A-009",
+           "auditor": "A-009", "market research": "A-002", "opportunity validation": "A-003"}
 
 DEPARTMENT = {"Etsy Strategist": "marketplace", "Store Operations": "marketplace", "Fiverr Opportunity": "marketplace",
               "Service Delivery": "marketplace", "Listing/SEO": "marketplace", "Product Creation": "creative",
@@ -63,8 +90,13 @@ PLAN_SCHEMA = {
         "kpis": {"type": "array", "items": {"type": "string"}},
         "success_criteria": {"type": "string"},
         "kill_criteria": {"type": "string"},
+        "sell_via": {"type": "string", "enum": ["stripe_link", "marketplace", "both"],
+                     "description": "stripe_link: customers pay us directly through a Stripe payment link; marketplace: they buy on Fiverr/Etsy/etc."},
+        "price_usd": {"type": "number", "description": "Launch price of the main offer in USD (0 if not fixed)."},
+        "product_name": {"type": "string", "description": "Short product name for the checkout page."},
     },
-    "required": ["verdict", "why", "offer", "objective", "tasks", "kpis", "success_criteria", "kill_criteria"],
+    "required": ["verdict", "why", "offer", "objective", "tasks", "kpis", "success_criteria", "kill_criteria", "sell_via",
+                 "price_usd", "product_name"],
     "additionalProperties": False,
 }
 
@@ -85,6 +117,15 @@ AGENT_RULES = ("You work on the StarNet Space Station under ULTRON. You produce 
                "contact anyone: the owner does all of that. Never claim or imply that anything was published, sent, "
                "sold or verified. Follow platform rules and IP law; disclose AI use where the platform requires it. "
                "No fake reviews, testimonials, credentials or results.")
+
+
+def lessons_text(store: Store, role: str = "", venture: Optional[str] = None) -> str:
+    """The War Room's standing lessons that apply to this agent: how the station gets better with every input."""
+    lessons = store.load_doc("lessons.json") or []
+    keep = [l for l in lessons if l.get("applies_to", "all") in ("all", role, venture)]
+    if not keep:
+        return ""
+    return "\n\nWAR ROOM LESSONS (what our own results showed; follow them):\n" + "\n".join(f"- {l['lesson']}" for l in keep[:15])
 
 
 def seed(store: Store) -> None:
@@ -114,6 +155,8 @@ def sync_bots(store: Store, engine) -> None:
 def staff(store: Store, role: str, venture: str, by: str = "A-001") -> str:
     """The agent for a role: reuse whoever already has it, otherwise add one specialist."""
     role = role.strip() or "Generalist"
+    if role.lower() in ALIASES and store.get("agents", ALIASES[role.lower()]):
+        return ALIASES[role.lower()]
     for a in store.all("agents"):
         if a.get("role", "").lower() == role.lower() and a.get("kind") == "ai":
             if a.get("status") == "BENCHED":
@@ -128,11 +171,14 @@ def staff(store: Store, role: str, venture: str, by: str = "A-001") -> str:
 
 def plan_venture(store: Store, brain: Brain, venture: dict, opp: dict) -> dict:
     """The Validation Agent's check, then the venture's first tasks with their dependencies."""
-    plan = brain.structured("A-003", AGENT_RULES + " You are the Opportunity Validation Agent.", (
+    plan = brain.structured("A-003", AGENT_RULES + " You are the Opportunity Validation Agent." + lessons_text(store, "Opportunity Validation"), (
         "The owner approved this opportunity. Validate it and plan the first week as tasks. Agent tasks are drafting "
         "work an AI can finish from text alone; owner tasks are everything external (accounts, publishing, sending, "
         "payments, client calls). Order them so the owner can start today and the first sale can happen as early as "
-        "possible. Keep it to 6-12 tasks.\n\nOPPORTUNITY:\n" + json.dumps(opp, indent=1, default=str)),
+        "possible. If customers will pay through our own Stripe payment link, include a Legal Counsel task for the "
+        "customer terms and refund policy before launch. Include a Marketing task for the channel plan. Agents can't "
+        "operate Fiverr, Etsy or similar marketplace accounts: publishing and messaging there are owner tasks. "
+        "Keep it to 6-12 tasks.\n\nOPPORTUNITY:\n" + json.dumps(opp, indent=1, default=str)),
         PLAN_SCHEMA, venture=venture["id"])
     refs = {}
     for t in sorted(plan["tasks"], key=lambda t: (t["day"], t["priority"])):
@@ -149,6 +195,7 @@ def plan_venture(store: Store, brain: Brain, venture: dict, opp: dict) -> dict:
         "success_criteria": plan["success_criteria"], "kill_criteria": plan["kill_criteria"],
         "validation": {"verdict": plan["verdict"], "why": plan["why"]},
         "agents": sorted({store.get("tasks", i)["assigned_agent"] for i in refs.values()} - {"OWNER"}),
+        "sell_via": plan["sell_via"], "price_usd": plan["price_usd"], "product_name": plan["product_name"],
         "stage": "build" if plan["verdict"] != "no_go" else "paused",
         "next_action": "Owner tasks are waiting" if plan["verdict"] != "no_go" else "Validation said no-go: review"},
         "A-003", f"validation: {plan['verdict']}: {plan['why'][:160]}", kind="venture.planned")
@@ -169,7 +216,8 @@ def run_task(store: Store, brain: Brain, task: dict) -> dict:
                  agent["id"], f"started {task['title']}", kind="agent.state")
     store.update("tasks", task["id"], {"status": "running", "attempts": task.get("attempts", 0) + 1}, agent["id"], "started")
     try:
-        out = brain.structured(agent["id"], AGENT_RULES + f" You are the {agent['role']} agent.", (
+        out = brain.structured(agent["id"], AGENT_RULES + f" You are the {agent['role']} agent."
+                               + lessons_text(store, agent["role"], venture.get("id")), (
             f"VENTURE: {venture.get('name')}\nOFFER: {venture.get('offer')}\nOBJECTIVE: {venture.get('objective')}\n\n"
             f"YOUR TASK: {task['title']}\n{task['instructions']}\nEXPECTED OUTPUT: {task['expected_output']}\n"
             f"SUCCESS CRITERIA: {task['success_criteria']}\n\nINPUTS FROM EARLIER TASKS:\n"

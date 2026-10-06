@@ -12,10 +12,10 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-COLLECTIONS = ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines")
+COLLECTIONS = ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions")
 SINGULAR = {"opportunities": "opportunity"}
 PREFIX = {"ventures": "V", "agents": "A", "tasks": "T", "approvals": "AP", "opportunities": "OP",
-          "missions": "M", "routines": "R"}
+          "missions": "M", "routines": "R", "actions": "X"}
 
 # Venture lifecycle (the export's canonical order, plus the two end states)
 STAGES = ("research", "validate", "approved", "build", "launch", "operate", "measure", "optimize", "scale",
@@ -64,6 +64,8 @@ class Store:
     def create(self, name: str, record: dict, by: str, why: str = "") -> dict:
         with self.lock:
             n = self.counters.get(name, 0) + 1
+            while not record.get("id") and f"{PREFIX[name]}-{n:03d}" in self.data[name]:
+                n += 1   # a seeded record already took this number
             self.counters[name] = n
             rid = record.get("id") or f"{PREFIX[name]}-{n:03d}"
             rec = {**record, "id": rid, "created_at": now_iso(), "updated_at": now_iso()}

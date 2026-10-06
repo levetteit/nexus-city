@@ -38,6 +38,7 @@ function show(tab) {
   document.querySelectorAll(".tab").forEach((s) => s.classList.toggle("on", s.id === tab));
   history.replaceState(null, "", `#/${tab}`);
   if (tab === "log") loadReports();
+  if (tab === "treasury") loadFinance();
 }
 
 // ------------------------------------------------------------------ data
@@ -52,7 +53,9 @@ function render() {
   c.classList.toggle("busy", S.coordinating !== "Watching the portfolio");
   const waiting = S.approvals.length + S.owner_tasks.length;
   $("#n-approvals").textContent = waiting || "";
+  $("#n-outbox").textContent = (S.outbox.manual.length + S.outbox.waiting_owner.length) || "";
   renderCommand(); renderApprovals(); renderVentures(); renderIntel(); renderTreasury(); renderCrew(); renderEvents();
+  renderOutbound(); renderMarketing(); renderWarRoom(); renderLegal();
 }
 
 function stat(k, v, s = "", cls = "") {
@@ -203,6 +206,91 @@ async function loadReports() {
   } catch (e) { $("#reports").textContent = e.message; }
 }
 
+// ------------------------------------------------------------------ outbound, marketing, war room, legal, finance
+const KIND = { "social.post": "Post", "outreach.email": "Email", "stripe.payment_link": "Checkout" };
+function actionRow(a) {
+  const p = a.payload || {};
+  const label = a.kind === "social.post" ? `${p.platform}: ${p.text}` : a.kind === "outreach.email" ? `${p.company}: ${p.subject}`
+    : `${p.name} · ${money(p.price_usd)}`;
+  return `<div class="item ${["manual", "waiting_owner"].includes(a.status) ? "wait" : ""}" data-open="actions:${a.id}">
+    <div class="t"><span>${esc(label).slice(0, 110)}</span><span class="pill ${a.status === "sent" ? "green" : a.status === "rejected" ? "red" : "gold"}">${esc(KIND[a.kind] || a.kind)}</span></div>
+    <div class="m">${esc(a.id)} · ${esc(a.venture || "")} · ${esc(a.status.replace("_", " "))}${a.manual_reason ? " · " + esc(a.manual_reason) : ""}</div></div>`;
+}
+
+function renderOutbound() {
+  const box = $(".outbound");
+  box.classList.toggle("off", !S.outbound);
+  $("#ob-text").textContent = S.outbound ? `on · ${S.outbox.in_qa} in QA · ${S.outbox.sent.length} sent recently` : "STOPPED: nothing leaves the station";
+  $("#ob-toggle").textContent = S.outbound ? "Stop all outbound" : "Turn outbound on";
+  $("#ob-toggle").className = S.outbound ? "btn danger" : "btn primary";
+}
+$("#ob-toggle").addEventListener("click", () => {
+  if (S.outbound && !confirm("Stop every outgoing post, email and Stripe change now?")) return;
+  act(() => api("/api/station/outbound", { on: !S.outbound }), S.outbound ? "Outbound stopped." : "Outbound on.");
+});
+
+function renderMarketing() {
+  const c = S.connectors;
+  const row = (name, on, how) => `<div class="conn"><span>${esc(name)}</span><span class="${on === true ? "pos" : "muted"}">${on === true ? "connected" : esc(on || how)}</span></div>`;
+  $("#conn").innerHTML = row("Stripe (checkout links)", c.stripe, "not connected") + row("Stripe sales → treasury", c.stripe_webhook, "no webhook yet") +
+    row("Email outreach", c.email, "not connected") + row("Social posting", c.social.length ? c.social.join(", ") : false, "none connected yet") +
+    row("Fiverr", c.fiverr) + row("Etsy", c.etsy);
+  $("#ob-manual").innerHTML = S.outbox.manual.map(actionRow).join("") || `<div class="empty">Nothing to post by hand.</div>`;
+  $("#ob-wait").innerHTML = S.outbox.waiting_owner.map(actionRow).join("") || `<div class="empty">Nothing waiting.</div>`;
+  $("#ob-sent").innerHTML = S.outbox.sent.map(actionRow).join("") || `<div class="empty">Nothing sent yet.</div>`;
+  $("#ob-rejected").innerHTML = S.outbox.rejected.map(actionRow).join("") || `<div class="empty">QA hasn't stopped anything.</div>`;
+}
+$("#optout").addEventListener("submit", (e) => {
+  e.preventDefault();
+  act(() => api("/api/station/optout", { email: e.target.email.value }), "They'll never be contacted.").then(() => e.target.reset());
+});
+
+function renderWarRoom() {
+  const w = S.warroom;
+  $("#wr-latest").innerHTML = w ? `<p class="muted small">${esc(ago(w.at))}</p><p>${esc(w.summary)}</p>` +
+    w.verdicts.map((v) => `<div class="item" data-open="ventures:${esc(v.venture)}"><div class="t"><span>${esc(v.venture)}</span>
+      <span class="pill ${["kill", "pause", "pivot"].includes(v.verdict) ? "red" : v.verdict === "double_down" ? "green" : "cyan"}">${esc(v.verdict.replace("_", " "))}</span></div>
+      <div class="m">${esc(v.why)}</div></div>`).join("") + (S.research_focus ? `<p class="muted small">Research focus: ${esc(S.research_focus)}</p>` : "")
+    : `<div class="empty">No session yet. It meets Sundays 17:00 ET, or as soon as 8 new results come in.</div>`;
+  $("#wr-stop").innerHTML = w ? list(w.stop_doing) : "—";
+  $("#wr-start").innerHTML = w ? list(w.start_doing) : "—";
+  $("#wr-lessons").innerHTML = S.lessons.length ? S.lessons.map((l) => `<div class="ev"><div class="when">${esc(l.applies_to)}</div>
+    <div>${esc(l.lesson)} <span class="muted small">${esc(l.evidence)}</span></div></div>`).join("") : `<div class="empty">No lessons yet: they come from results.</div>`;
+  const sel = $("#feedback select[name=ref]"), cur = sel.value;
+  sel.innerHTML = `<option value="">About the station</option>` + S.ventures.map((v) => `<option value="${v.id}">${esc(v.id)} ${esc(v.name).slice(0, 30)}</option>`).join("");
+  sel.value = cur;
+}
+$("#wr-now").addEventListener("click", () => act(() => api("/api/station/warroom", {}), "War Room convening."));
+$("#feedback").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  act(() => api("/api/station/feedback", f), "The War Room will read it.").then(() => e.target.reset());
+});
+
+function renderLegal() {
+  const qa = S.events.filter((e) => e.kind.startsWith("action.qa_"));
+  $("#qa-stats").innerHTML = stat("In QA now", S.outbox.in_qa) + stat("Stopped by QA", S.outbox.rejected.length) +
+    stat("Passed & sent", S.outbox.sent.length) + stat("Outbound", S.outbound ? "ON" : "OFF", "", S.outbound ? "pos" : "neg");
+  api("/api/station/agents/A-010").then((a) => {
+    $("#legal-docs").innerHTML = (a.task_list || []).map(taskRow).join("") || `<div class="empty">No documents yet. Legal Counsel drafts terms and refund policies when a venture sells through its own checkout.</div>`;
+  }).catch(() => {});
+  $("#qa-log").innerHTML = qa.map(evRow).join("") || `<div class="empty">No QA calls yet.</div>`;
+}
+
+async function loadFinance() {
+  try {
+    const f = await api("/api/station/finance");
+    const st = f.statement;
+    $("#f-statement").innerHTML = `<div class="kv">${Object.entries(st.units).map(([u, x]) => `<div>${esc(u)}</div><div>in ${money(x.income)} · out ${money(x.expenses + x.ai)} · <b class="${x.net < 0 ? "neg" : "pos"}">${money(x.net)}</b></div>`).join("")}
+      <div>Net (${esc(st.month)})</div><div><b>${money(st.net)}</b></div><div>Tax set-aside</div><div>${money(st.tax_set_aside)} <span class="muted small">(${Math.round(st.tax_rate * 100)}%, an estimate)</span></div></div>`;
+    const a = f.audit;
+    $("#f-audit").innerHTML = `<div class="kv"><div>Ledger chain</div><div class="${f.chain.intact ? "pos" : "neg"}">${f.chain.intact ? "intact" : "BROKEN"} · ${f.chain.entries} entries</div>
+      <div>Last audit</div><div>${a ? esc(ago(a.at)) : "not yet (07:00 ET daily)"}</div></div>` +
+      (a && a.findings.length ? a.findings.map((x) => `<div class="item"><div class="t"><span>${esc(x.finding)}</span><span class="pill red">${esc(x.severity)}</span></div></div>`).join("")
+        : `<div class="empty">${a ? "Clean." : ""}</div>`);
+  } catch (e) { $("#f-statement").textContent = e.message; }
+}
+
 // ------------------------------------------------------------------ detail sheet
 function sheet(html) { $("#sheet-body").innerHTML = html; $("#sheet").classList.remove("hidden"); }
 $("#sheet-x").addEventListener("click", () => $("#sheet").classList.add("hidden"));
@@ -230,6 +318,10 @@ async function openRecord(col, id) {
       <div>Income / costs</div><div>${money(r.pnl.income)} / ${money(r.pnl.costs)}</div><div>Success</div><div>${esc(r.success_criteria || "—")}</div>
       <div>Kill</div><div>${esc(r.kill_criteria || "—")}</div><div>Validation</div><div>${esc(r.validation ? r.validation.verdict + ": " + r.validation.why : "—")}</div></div>
       <h2>Tasks</h2>${(r.task_list || []).map(taskRow).join("") || `<div class="empty">No tasks yet.</div>`}
+      <h2>Where customers buy</h2>${Object.entries(r.links || {}).map(([k, u]) => `<div><span class="muted">${esc(k)}</span> <a href="${esc(u)}" target="_blank" rel="noopener" style="color:var(--cyan)">${esc(u)}</a></div>`).join("") || `<div class="empty">No link yet: marketing starts once there is one.</div>`}
+      <div class="row" style="margin-top:8px"><input id="link-name" placeholder="fiverr" style="max-width:110px" /><input id="link-url" placeholder="https://…" />
+        <button class="btn" data-link="${r.id}">Save link</button></div>
+      ${r.marketing_plan && r.marketing_plan.channels ? `<h2>Channel plan</h2><p class="muted small">${esc(r.marketing_plan.audience || "")}</p>${list(r.marketing_plan.channels.map((c) => `${c.platform}: ${c.why}`))}` : ""}
       ${r.id !== "V-001" ? `<h2>Move it</h2><div class="actions">${["launch", "operate", "scale", "paused", "killed"].map((s) => `<button class="btn ${s === "killed" ? "danger" : ""}" data-stage="${r.id}:${s}">${s}</button>`).join("")}</div>` : ""}`);
   } else if (col === "tasks") {
     const deps = await Promise.all((r.depends_on || []).map((d) => api(`/api/station/tasks/${d}`).catch(() => null)));
@@ -251,13 +343,26 @@ async function openRecord(col, id) {
       <div class="kv"><div>Role</div><div>${esc(r.role)}</div><div>Department</div><div>${esc(r.department)}</div><div>Specialty</div><div>${esc(r.specialty)}</div>
       <div>Current task</div><div>${esc(r.current_task || "—")}</div><div>Delivered</div><div>${r.tasks_done || 0} tasks</div>
       <div>Cost to run</div><div>${money(r.pnl.ai_costs)} AI</div></div><h2>Work</h2>${(r.task_list || []).map(taskRow).join("") || `<div class="empty">No tasks.</div>`}`);
+  } else if (col === "actions") {
+    const p = r.payload || {};
+    const text = r.kind === "social.post" ? p.text + (p.link ? "\n\n" + p.link : "") : r.kind === "outreach.email" ? `To: ${p.to_email}\nSubject: ${p.subject}\n\n${p.body}` : JSON.stringify(p, null, 1);
+    sheet(`<div class="label">${esc((KIND[r.kind] || r.kind).toUpperCase())} ${esc(r.id)} · ${esc(r.status.replace("_", " "))}</div><h1>${esc(r.why)}</h1>
+      ${r.kind === "outreach.email" ? `<div class="kv"><div>Company</div><div>${esc(p.company)}</div><div>Why them</div><div>${esc(p.why_them)}</div>
+        <div>Found at</div><div><a href="${esc(p.source_url)}" target="_blank" rel="noopener" style="color:var(--cyan)">${esc(p.source_url)}</a></div></div>` : ""}
+      <pre class="deliver">${esc(text)}</pre><button class="btn" data-copy="${esc(r.id)}">Copy</button>
+      ${r.qa ? `<h2>QA: ${esc(r.qa.verdict)}</h2>${list(r.qa.issues)}` : ""}
+      <div class="actions">${["manual", "waiting_owner", "ready"].includes(r.status) ? `<button class="btn primary" data-act="${r.id}:done">I posted / sent it</button>` : ""}
+        ${r.status === "waiting_owner" ? `<button class="btn" data-act="${r.id}:send">OK, send it</button>` : ""}
+        ${r.status === "sent" ? `<input id="act-note" placeholder="How did it go? (e.g. 2 replies, 1 sale)" /><button class="btn" data-act="${r.id}:result">Save result</button>` : ""}
+        ${!["sent", "cancelled", "rejected"].includes(r.status) ? `<button class="btn danger" data-act="${r.id}:cancel">Cancel</button>` : ""}</div>`);
+    sheet.copy = { [r.id]: text };
   } else if (col === "approvals") {
     show("approvals");
   }
 }
 
 document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-open],[data-decide],[data-promote],[data-dismiss],[data-run],[data-done],[data-stage],[data-copy]");
+  const el = e.target.closest("[data-open],[data-decide],[data-promote],[data-dismiss],[data-run],[data-done],[data-stage],[data-copy],[data-act],[data-link]");
   if (!el) return;
   const d = el.dataset;
   if (d.decide) {
@@ -275,6 +380,13 @@ document.addEventListener("click", (e) => {
     if (stage === "killed" && !confirm("Kill this venture?")) return;
     return act(() => api(`/api/station/ventures/${id}/stage`, { stage }), `Moved to ${stage}.`).then(() => openRecord("ventures", id));
   }
+  if (d.act) {
+    const [id, what] = d.act.split(":");
+    if (what === "cancel" && !confirm("Cancel it?")) return;
+    return act(() => api(`/api/station/actions/${id}/${what}`, { note: ($("#act-note") || {}).value || "" }),
+      { done: "Marked sent.", send: "Sending.", cancel: "Cancelled.", result: "Result saved: the War Room will use it." }[what]).then(() => $("#sheet").classList.add("hidden"));
+  }
+  if (d.link) return act(() => api(`/api/station/ventures/${d.link}/link`, { name: $("#link-name").value, url: $("#link-url").value }), "Link saved.").then(() => openRecord("ventures", d.link));
   if (d.copy) return navigator.clipboard.writeText((sheet.copy || {})[d.copy] || "").then(() => toast("Copied"), () => toast("Copy failed"));
   if (d.open) { const [col, id] = d.open.split(":"); openRecord(col, id); }
 });

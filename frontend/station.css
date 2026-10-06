@@ -140,3 +140,8 @@ ul.tight { margin: 4px 0 8px; padding-left: 18px; }
 @keyframes pulse { 50% { opacity: .55; } }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+
+.outbound { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.outbound.off { border-color: rgba(255,59,92,.6); box-shadow: 0 0 0 1px rgba(255,59,92,.25) inset; }
+textarea { resize: vertical; }
+.conn { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(120,170,255,.08); }

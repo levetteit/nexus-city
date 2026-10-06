@@ -249,7 +249,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Starnet trading city", lifespan=lifespan)
 
 PASSWORD = os.getenv("STARNET_PASSWORD")   # set this whenever the city is reachable from the internet
-OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed")   # health checks, and webhooks (they have their own secret)
+OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook")   # health checks, and webhooks (they have their own secret)
 
 
 class PasswordGate:
@@ -731,7 +731,7 @@ def station_routine_runs() -> list:
 @app.get("/api/station/{collection}/{rid}")
 def station_record(collection: str, rid: str) -> dict:
     st = _station()
-    if collection not in ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines"):
+    if collection not in ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions"):
         raise HTTPException(404)
     rec = st.store.get(collection, rid)
     if not rec:
@@ -801,6 +801,120 @@ async def station_money(request: Request) -> dict:
                                  str(b.get("note", ""))[:300], b.get("venture") or None)
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, str(exc))
+
+
+@app.post("/api/station/stripe/webhook")
+async def station_stripe_webhook(request: Request) -> dict:
+    """Stripe → paid checkouts book themselves into the treasury. Verified by the webhook's signing secret."""
+    from .station import connectors
+    body = await request.body()
+    try:
+        event = connectors.stripe_verify(body, request.headers.get("stripe-signature", ""))
+    except connectors.ConnectorError as exc:
+        raise HTTPException(400, str(exc))
+    if event.get("type") in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+        sale = _station().treasury.book_stripe_sale(event["data"]["object"])
+        if sale:
+            _station_notify("💵 Stripe sale", f"${sale['amount']:,.2f}" + (f" · {sale['venture']}" if sale.get("venture") else ""))
+    return {"ok": True}
+
+
+@app.post("/api/station/actions/{rid}/{what}")
+async def station_action(rid: str, what: str, request: Request) -> dict:
+    """Your outbox: `done` (you posted/sent it by hand), `send` (OK an owner-policy item), `cancel`, `result` (how it went)."""
+    from .station import actions
+    st = _station()
+    a = st.store.get("actions", rid)
+    if not a:
+        raise HTTPException(404)
+    try:
+        note = str((await request.json()).get("note", ""))[:500]
+    except Exception:
+        note = ""
+    try:
+        if what == "done":
+            return actions.owner_done(st.store, rid, note)
+        if what == "send":
+            if a["status"] != "waiting_owner":
+                raise ValueError(f"it's {a['status']}")
+            return st.store.update("actions", rid, {"owner_ok": True, "status": "ready"}, "owner", "owner OK'd sending it", kind="action.owner_ok")
+        if what == "cancel":
+            if a["status"] == "sent":
+                raise ValueError("already sent")
+            return st.store.update("actions", rid, {"status": "cancelled"}, "owner", f"owner cancelled it {note}".strip(), kind="action.cancelled")
+        if what == "result":
+            st.store.event("action.result", "owner", f"{a['kind']} result: {note}", ref=a.get("venture"))
+            return st.store.update("actions", rid, {"result": {**(a.get("result") or {}), "note": note}}, "owner", "result recorded")
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(409, str(exc))
+    raise HTTPException(404)
+
+
+@app.post("/api/station/outbound")
+async def station_outbound(request: Request) -> dict:
+    """The Station's E-STOP: `{"on": false}` stops every outgoing post, email and Stripe change at once."""
+    st = _station()
+    on = bool((await request.json()).get("on"))
+    st.cfg["outbound"] = on
+    st._save_cfg()
+    st.store.event("station.outbound", "owner", "outbound ON: QA-passed work goes out" if on else "OUTBOUND STOPPED by the owner",
+                   severity="INFO" if on else "WARNING")
+    return {"outbound": on}
+
+
+@app.post("/api/station/warroom")
+def station_warroom() -> dict:
+    """Convene the War Room now instead of waiting for Sunday or enough new results."""
+    st = _station()
+    if not st.brain.enabled:
+        raise HTTPException(503, "add ANTHROPIC_API_KEY to run the War Room")
+    st.cfg["warroom_now"] = True
+    st._save_cfg()
+    return {"queued": True}
+
+
+@app.get("/api/station/finance")
+def station_finance(month: str | None = None) -> dict:
+    from .station import connectors, finance
+    st = _station()
+    audits = st.store.list_docs("audit-", 1)
+    return {"statement": finance.statement(st.treasury, month), "audit": st.store.load_doc(audits[0]) if audits else None,
+            "chain": st.treasury.verify_chain(), "connectors": connectors.status()}
+
+
+@app.post("/api/station/feedback")
+async def station_feedback(request: Request) -> dict:
+    """Tell the station what you think about anything (`{"ref": "V-002", "note": "nobody clicks these"}`). The War Room reads it."""
+    b = await request.json()
+    note = str(b.get("note", "")).strip()[:1000]
+    if not note:
+        raise HTTPException(400, "note is empty")
+    return _station().store.event("owner.feedback", "owner", note, ref=str(b.get("ref") or "")[:40] or None)
+
+
+@app.post("/api/station/ventures/{rid}/link")
+async def station_venture_link(rid: str, request: Request) -> dict:
+    """Where customers buy (`{"name": "fiverr", "url": "https://www.fiverr.com/..."}`). Content starts once a venture has one."""
+    st = _station()
+    v = st.store.get("ventures", rid)
+    b = await request.json()
+    name, url = str(b.get("name", "")).strip().lower()[:30], str(b.get("url", "")).strip()[:500]
+    if not v:
+        raise HTTPException(404)
+    if not name or not url.startswith("https://"):
+        raise HTTPException(400, "give a name and an https:// link")
+    return st.store.update("ventures", rid, {"links": {**(v.get("links") or {}), name: url}}, "owner", f"{name} link: {url}", kind="venture.link")
+
+
+@app.post("/api/station/optout")
+async def station_optout(request: Request) -> dict:
+    """Someone asked not to be contacted: never again, by any agent."""
+    from .station import actions
+    email = str((await request.json()).get("email", ""))
+    if "@" not in email:
+        raise HTTPException(400, "not an email address")
+    actions.opt_out(_station().store, email)
+    return {"ok": True}
 
 
 @app.post("/api/station/routines/{rid}/run")

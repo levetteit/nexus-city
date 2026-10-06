@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
-from . import crew, research
+from . import actions, connectors, crew, finance, marketing, research, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
 from .store import STAGES, Store, now_iso
@@ -30,6 +30,7 @@ TASKS_PER_DAY = int(os.getenv("STARNET_STATION_TASKS_PER_DAY", "25"))     # agen
 STALL_MINUTES = 30
 ACTIVE_STAGES = ("approved", "build", "launch", "operate", "measure", "optimize", "scale")
 REPORT_AT = (8, 30)   # ET, daily
+AUDIT_AT = (7, 0)     # ET, daily
 
 APPROVAL_KINDS = ("launch_venture", "fund_goal", "venture_decision", "spend")
 
@@ -87,18 +88,46 @@ class Ultron:
                 self.treasury.sync_payouts(engine.account)
         self._watch_tasks(now)
         self._watch_money(now)
+        self._requeue_connected()
         self._propose(now)
         if (now.hour, now.minute) >= REPORT_AT and self.cfg.get("reported") != now.date().isoformat():
             self.report(now, engine)
         return None if self.busy else self.next_job(now)
 
     def next_job(self, now: datetime) -> Optional[dict]:
+        s = self.store
+        # jobs without a model call first: sending what QA passed, the daily audit
+        if self.cfg.get("outbound", True):
+            ready = [a for a in s.find("actions", status="ready") if a["kind"] not in self.cfg.get("capped", {}).get(now.date().isoformat(), [])]
+            if ready:
+                return {"kind": "dispatch", "action": min(ready, key=lambda a: a["created_at"])["id"]}
+        if (now.hour, now.minute) >= AUDIT_AT and self.cfg.get("audited") != now.date().isoformat():
+            return {"kind": "audit"}
         if not self.brain.enabled or not self.treasury.ai_allowed():
             return None
-        for v in self.store.all("ventures"):
+        for v in s.all("ventures"):
             if v["stage"] == "approved" and v.get("opportunity") and not v.get("planned"):
                 return {"kind": "plan", "venture": v["id"]}
-        for r in self.store.all("routines"):
+        for a in s.find("actions", status="qa"):
+            return {"kind": "qa", "action": a["id"]}
+        for a in s.find("actions", status="revise"):
+            return {"kind": "revise", "action": a["id"]}
+        if self.cfg.get("warroom_now") or warroom.due(s, self.cfg, now):
+            return {"kind": "warroom"}
+        selling = [v for v in s.all("ventures") if v["id"] != "V-001" and v["stage"] in ACTIVE_STAGES and v.get("planned")
+                   and v["stage"] != "approved"]
+        for v in selling:
+            if not v.get("marketing_plan"):
+                return {"kind": "marketing_plan", "venture": v["id"]}
+        for v in selling:
+            if v.get("links") and v.get("content_day") != now.date().isoformat():
+                return {"kind": "content", "venture": v["id"]}
+        for v in selling:
+            mp = (v.get("marketing_plan") or {}).get("outreach") or {}
+            last = v.get("outreach_day")
+            if mp.get("use") and (not last or (now.date() - datetime.fromisoformat(last).date()).days >= 2):
+                return {"kind": "outreach", "venture": v["id"]}
+        for r in s.all("routines"):
             spec = next((x for x in research.ROUTINES if x["id"] == r["id"]), None)
             if spec and r.get("status") == "active" and research.due(spec, now, r.get("last_run")):
                 return {"kind": "routine", "routine": r["id"]}
@@ -121,7 +150,8 @@ class Ultron:
                 spec = next(x for x in research.ROUTINES if x["id"] == r["id"])
                 self.busy = f"Research Station: {r['name']}"
                 s.update("agents", "A-002", {"status": "WORKING", "current_task": r["name"]}, "A-002", f"running {r['name']}", kind="agent.state")
-                doc = research.run_routine(spec, s, self.brain, now, self.cfg.get("mandate", research.MANDATE))
+                doc = research.run_routine(spec, s, self.brain, now, self.cfg.get("mandate", research.MANDATE),
+                                           self.cfg.get("research_focus", ""))
                 s.update("routines", r["id"], {"last_run": now.isoformat(), "runs": r.get("runs", 0) + 1, "last_summary": doc["summary"],
                                                "last_pick": doc["first_pick"]}, "A-002", f"{r['name']} filed {len(doc['filed'])} opportunities",
                          kind="routine.completed")
@@ -136,7 +166,45 @@ class Ultron:
                 v = s.get("ventures", job["venture"])
                 self.busy = f"Validating {v['name']}"
                 s.update("ventures", v["id"], {"planned": True}, "A-001", "handed to the Validation Agent")
-                return crew.plan_venture(s, self.brain, v, s.get("opportunities", v["opportunity"]))
+                plan = crew.plan_venture(s, self.brain, v, s.get("opportunities", v["opportunity"]))
+                if plan["verdict"] != "no_go" and plan["sell_via"] in ("stripe_link", "both") and plan["price_usd"] > 0:
+                    actions.create(s, "stripe.payment_link", "A-005", v["id"], {"name": plan["product_name"], "description": plan["offer"],
+                                                                                "price_usd": plan["price_usd"]}, f"checkout for {v['name']}")
+                return plan
+            if job["kind"] == "dispatch":
+                a = s.get("actions", job["action"])
+                self.busy = f"Sending {a['kind']}"
+                out = actions.dispatch(s, a, self.cfg.get("outbound", True))
+                if out["status"] == "ready":   # held by today's cap: don't spin on it until tomorrow
+                    self.cfg.setdefault("capped", {})
+                    self.cfg["capped"] = {now.date().isoformat(): sorted(set(self.cfg["capped"].get(now.date().isoformat(), [])) | {a["kind"]})}
+                    self._save_cfg()
+                return out
+            if job["kind"] == "audit":
+                self.busy = "Auditor: daily audit"
+                self.cfg["audited"] = now.date().isoformat()
+                self._save_cfg()
+                return finance.audit(s, self.treasury)
+            if job["kind"] in ("qa", "revise"):
+                a = s.get("actions", job["action"])
+                self.busy = f"Compliance & QA: {a['why'][:60]}" if job["kind"] == "qa" else f"Revising {a['kind']}"
+                return (actions.qa if job["kind"] == "qa" else actions.revise)(s, self.brain, a)
+            if job["kind"] == "warroom":
+                self.busy = "War Room in session"
+                self.cfg["warroom_now"] = False
+                doc = warroom.convene(s, self.brain, self.treasury, self.health, self.cfg, self.request, now)
+                self._save_cfg()
+                self.notify("🛰️ War Room", doc["summary"][:200])
+                return doc
+            if job["kind"] in ("marketing_plan", "content", "outreach"):
+                v = s.get("ventures", job["venture"])
+                self.busy = {"marketing_plan": "Marketing Lead: channel plan", "content": "Content Creator: today's posts",
+                             "outreach": "Outreach Agent: finding customers"}[job["kind"]] + f" ({v['name']})"
+                if job["kind"] == "marketing_plan":
+                    return marketing.plan(s, self.brain, v)
+                if job["kind"] == "content":
+                    return marketing.content(s, self.brain, v, now)
+                return marketing.outreach(s, self.brain, v, now)
             if job["kind"] == "task":
                 t = s.get("tasks", job["task"])
                 self.busy = f"{t['title']} ({t['venture']})"
@@ -152,6 +220,16 @@ class Ultron:
                 s.update("routines", job["routine"], {"last_run": now.isoformat(), "last_error": self.last_error}, "A-001", "run failed")
             if job["kind"] == "plan":
                 s.update("ventures", job["venture"], {"planned": False}, "A-001", "planning failed; will retry")
+            if job["kind"] in ("content", "outreach"):
+                s.update("ventures", job["venture"], {f"{job['kind']}_day": now.date().isoformat()}, "A-001", "skipped today after a failure")
+            if job["kind"] == "marketing_plan":
+                s.update("ventures", job["venture"], {"marketing_plan": {"channels": [], "angles": [], "outreach": {"use": False}}},
+                         "A-001", "channel plan failed; using an empty plan until the War Room revisits it")
+            if job["kind"] in ("qa", "revise"):
+                s.update("actions", job["action"], {"status": "failed", "result": {"error": self.last_error}}, "A-001", "QA could not run")
+            if job["kind"] == "warroom":
+                self.cfg["warroom_at"] = now.isoformat()   # try again tomorrow, not every 15 seconds
+                self._save_cfg()
         finally:
             self.busy = None
         return None
@@ -190,6 +268,14 @@ class Ultron:
                 s.update("agents", a["id"], {"status": "WAITING"}, "A-001", "back from the lounge: work queued", kind="agent.state")
         if s.get("agents", "A-002")["status"] == "COMPLETED" and not (self.busy or "").startswith("Research"):
             s.update("agents", "A-002", {"status": "ON BREAK"}, "A-001", "routines done for now: Crew Lounge", kind="agent.state")
+
+    def _requeue_connected(self) -> None:
+        """A platform got connected: what was waiting in the owner's queue for it goes out on its own."""
+        live = {"stripe.payment_link": connectors.stripe_configured(), "outreach.email": connectors.email_configured()}
+        for a in self.store.find("actions", status="manual"):
+            ok = live.get(a["kind"]) if a["kind"] in live else connectors.social_configured(a["payload"].get("platform", ""))
+            if ok:
+                self.store.update("actions", a["id"], {"status": "ready"}, "A-001", "connector is live now: sending it", kind="action.requeued")
 
     def _watch_money(self, now: datetime) -> None:
         month = now.strftime("%Y-%m")
@@ -364,6 +450,14 @@ class Ultron:
             "queue": queue[:40], "opportunities": opps[:25],
             "routines": sorted(s.all("routines"), key=lambda r: r["id"]),
             "treasury": self.treasury.summary(paper),
+            "outbound": self.cfg.get("outbound", True), "connectors": connectors.status(),
+            "outbox": {"manual": s.find("actions", status="manual"), "waiting_owner": s.find("actions", status="waiting_owner"),
+                       "in_qa": len(s.find("actions", status="qa")) + len(s.find("actions", status="revise")),
+                       "sent": sorted(s.find("actions", status="sent"), key=lambda a: a.get("sent_at", ""), reverse=True)[:15],
+                       "rejected": s.find("actions", status="rejected")[-10:], "failed": s.find("actions", status="failed")[-10:]},
+            "lessons": s.load_doc("lessons.json") or [], "research_focus": self.cfg.get("research_focus", ""),
+            "warroom": s.load_doc(s.list_docs("warroom-", 1)[0]) if s.list_docs("warroom-", 1) else None,
+            "audit": s.load_doc(s.list_docs("audit-", 1)[0]) if s.list_docs("audit-", 1) else None,
             "alerts": [e for e in s.events(60) if e["severity"] in ("WARNING", "CRITICAL", "ACTION NEEDED", "WAITING FOR OWNER")][:12],
             "events": s.events(40),
         }

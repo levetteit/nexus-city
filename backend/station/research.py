@@ -118,13 +118,15 @@ def key(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
 
 
-def run_routine(routine: dict, store: Store, brain: Brain, now: datetime, mandate: str = MANDATE) -> dict:
+def run_routine(routine: dict, store: Store, brain: Brain, now: datetime, mandate: str = MANDATE, focus: str = "") -> dict:
     """Research, then file the results as opportunity records. Blocking: run in a thread."""
     agent = "A-002"   # Market Research Agent
     existing = [o for o in store.all("opportunities") if o.get("status") != "dismissed"]
     known = sorted(existing, key=lambda o: -o.get("score", 0))[:40]
     known_lines = "\n".join(f"- {o['title']} (score {o.get('score')}, {o.get('recommendation')})" for o in known) or "(none yet)"
-    system = SYSTEM.replace(MANDATE, mandate)
+    from .crew import lessons_text
+    system = SYSTEM.replace(MANDATE, mandate) + lessons_text(store, "Market Research") + (
+        f"\n\nWAR ROOM RESEARCH FOCUS: {focus}" if focus else "")
     notes, sources = brain.research(agent, system, (
         f"Today is {now.strftime('%A %Y-%m-%d')}. Routine: {routine['name']}.\nFocus: {routine['focus']}\n\n"
         "Search for current evidence (marketplace listings and best-sellers, buyer requests, pricing, fee "

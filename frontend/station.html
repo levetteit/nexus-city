@@ -23,7 +23,10 @@
     <button data-tab="approvals">Approvals <i id="n-approvals"></i></button>
     <button data-tab="ventures">Ventures</button>
     <button data-tab="intel">Research</button>
-    <button data-tab="treasury">Treasury</button>
+    <button data-tab="marketing">Marketing <i id="n-outbox"></i></button>
+    <button data-tab="warroom">War Room</button>
+    <button data-tab="treasury">Finance</button>
+    <button data-tab="legal">Legal</button>
     <button data-tab="crew">Crew</button>
     <button data-tab="log">Log</button>
   </nav>
@@ -40,6 +43,8 @@
           <div id="mission-flags" class="flags"></div>
         </div>
       </div>
+      <div class="glass outbound"><div><b>Outbound</b> <span class="muted small" id="ob-text"></span></div>
+        <button class="btn" id="ob-toggle"></button></div>
       <div class="stats" id="stats"></div>
       <div class="grid2">
         <div class="glass"><h2>Waiting for owner</h2><div id="cmd-waiting"></div></div>
@@ -68,6 +73,41 @@
       <div id="opps"></div>
     </section>
 
+    <!-- Marketing & Media -->
+    <section id="marketing" class="tab">
+      <div class="glass"><h2>Connections</h2><div id="conn"></div></div>
+      <h2>Your posting queue <span class="muted small">QA passed · no connector yet, so you post these</span></h2><div id="ob-manual"></div>
+      <h2>Waiting for your OK</h2><div id="ob-wait"></div>
+      <div class="grid2">
+        <div class="glass"><h2>Sent</h2><div id="ob-sent"></div></div>
+        <div class="glass"><h2>Stopped by QA</h2><div id="ob-rejected"></div></div>
+      </div>
+      <div class="glass"><h2>Opt-outs</h2>
+        <form id="optout" class="row"><input name="email" placeholder="someone@business.com asked us to stop" /><button class="btn">Never contact</button></form></div>
+    </section>
+
+    <!-- War Room -->
+    <section id="warroom" class="tab">
+      <div class="glass"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Latest session</h2>
+        <button class="btn primary" id="wr-now">Convene now</button></div><div id="wr-latest"></div></div>
+      <div class="grid2">
+        <div class="glass"><h2>Stop doing</h2><div id="wr-stop"></div></div>
+        <div class="glass"><h2>Start doing</h2><div id="wr-start"></div></div>
+      </div>
+      <div class="glass"><h2>Standing lessons <span class="muted small">fed into every agent's instructions</span></h2><div id="wr-lessons"></div></div>
+      <div class="glass"><h2>Tell the War Room</h2>
+        <form id="feedback" class="form"><select name="ref"><option value="">About the station</option></select>
+          <textarea name="note" rows="3" placeholder="What worked, what didn't, what a customer said…" required></textarea>
+          <button class="btn primary">Send</button></form></div>
+    </section>
+
+    <!-- Legal -->
+    <section id="legal" class="tab">
+      <div class="stats" id="qa-stats"></div>
+      <div class="glass"><h2>Documents from Legal Counsel <span class="muted small">drafts for your review, not legal advice</span></h2><div id="legal-docs"></div></div>
+      <div class="glass"><h2>Recent QA calls</h2><div id="qa-log"></div></div>
+    </section>
+
     <!-- Analytics / Finance -->
     <section id="treasury" class="tab">
       <div class="stats" id="t-stats"></div>
@@ -92,6 +132,10 @@
           </form>
         </div>
         <div class="glass"><h2>Monthly bills</h2><div id="t-bills"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="glass"><h2>Accountant: this month</h2><div id="f-statement"></div></div>
+        <div class="glass"><h2>Auditor</h2><div id="f-audit"></div></div>
       </div>
       <div class="glass"><h2>Ledger</h2><div id="t-ledger"></div></div>
     </section>

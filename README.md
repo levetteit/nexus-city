@@ -451,8 +451,40 @@ months of them plus a month of bills; then ULTRON asks you to approve funding th
    Lounge. Every change is written to an append-only audit log (`data/station/events.jsonl`). At 08:30 ET
    ULTRON writes a daily report for Jarvis and pushes a summary to your phone.
 
-What the station can't do: spend or move money, act on any outside account, publish, contact anyone, or
-touch the trading bots' orders and risk.
+**The teams:**
+
+| Team | Members | What they do |
+|---|---|---|
+| Command | ULTRON | Runs the loop, approvals, daily report to Jarvis |
+| Research | Market Research, Opportunity Validation | The five routines; turns approved ventures into plans |
+| Marketing & Outreach | Marketing Lead, Content Creator, Outreach Agent | A channel plan per venture; daily posts made from the crew's real work, linking to where customers buy; personal emails to businesses that publicly invite inquiries |
+| Finance | Finance Agent (treasurer), Accountant, Auditor | The pool and budgets; monthly statements with a tax set-aside estimate; a daily audit (07:00 ET) of the tamper-evident ledger, Stripe reconciliation and every agent's cost against what it delivered. Plain code: no model writes the numbers |
+| Legal | Legal Counsel, Compliance & QA | Terms, refund policies and client agreements (drafts for you to review, not legal advice); the QA gate in front of everything that leaves |
+| War Room | War Room Strategist, ULTRON in the chair | Reads every result and decides: double down, keep, modify, pivot/pause (done on the spot) or kill (your approval). Writes the lessons every agent follows and steers what research hunts next. Meets Sundays 17:00 ET, as soon as 8 new results come in, or when you press "Convene now" |
+
+Specialists (Service Delivery, Listing/SEO, ...) are still added only when a venture needs that role.
+
+**What leaves the station** (`backend/station/actions.py`): every post, email and Stripe change is an
+action. It must pass Compliance & QA (one revision allowed, then it's stopped and the War Room sees why),
+stay under its daily cap, and the outbound switch must be on. Then it's sent by its connector, or, if that
+platform isn't connected, it waits in your posting queue with a Copy button. Outreach never goes twice to
+the same address or to anyone who opted out, and every contact comes with the page where they publish it.
+
+**Connections** (set them in Render → Environment; the station never sees the keys anywhere else):
+
+| Connection | Settings | What it unlocks |
+|---|---|---|
+| Stripe | `STRIPE_API_KEY` (a restricted key: Products, Prices, Payment Links write; Checkout Sessions read) | Agents create the checkout link for a venture on their own |
+| Stripe sales | `STRIPE_WEBHOOK_SECRET` from a webhook to `https://<your app>/api/station/stripe/webhook` (event `checkout.session.completed`) | Every paid checkout books itself into the treasury with Stripe's fee; the Auditor books any the webhook missed |
+| Email | `STARNET_SMTP_HOST`, `STARNET_SMTP_PORT`, `STARNET_SMTP_USER`, `STARNET_SMTP_PASSWORD`, `STARNET_MAIL_FROM`, `STARNET_MAIL_ADDRESS` | Outreach sends itself, with your postal address and an opt-out line (CAN-SPAM) |
+| Social | not built yet: tell Jarvis which accounts | Posts go out on their own instead of waiting in your queue |
+| Fiverr, Etsy | none: they have no seller API, and bots break their terms | The crew prepares; you publish and reply there |
+
+Refunds and payouts aren't wired at all: they stay in your Stripe dashboard.
+
+What the station can't do: move money out, refund, sign anything, run a marketplace account, or touch the
+trading bots' orders and risk. The **Stop all outbound** button on the Command tab stops every outgoing post,
+email and Stripe change at once.
 
 **Setup:** it runs with the city, in both modes. Research and agent drafting need `ANTHROPIC_API_KEY` (the
 same key as the trading desk). Without it, records, approvals and the treasury still work.
@@ -464,9 +496,13 @@ same key as the trading desk). Without it, records, approvals and the treasury s
 | `STARNET_STATION_TASKS_PER_DAY` | `25` | Agent drafting runs per day |
 | `STARNET_PAYOUT_SPLIT` | `0.9` | Your share of a Lucid payout |
 | `STARNET_STATION_MODEL` | `claude-opus-5-5` | |
+| `STARNET_POSTS_PER_DAY` / `STARNET_OUTREACH_PER_DAY` | `6` / `15` | Daily caps on what goes out |
+| `STARNET_POLICY_SOCIAL` / `_OUTREACH` / `_STRIPE` | `auto` | `owner` makes that kind wait for your OK even after QA |
+| `STARNET_TAX_RATE` | `0.25` | The Accountant's tax set-aside estimate |
 
-A research routine is roughly $0.30-$1.00 of Claude usage and a drafting task roughly $0.05-$0.30, so
-the default cap covers the full routine schedule plus a few ventures' worth of drafting.
+A research routine is roughly $0.30-$1.00 of Claude usage; a drafting task, a QA check or a day's posts
+roughly $0.05-$0.30; an outreach batch or a War Room session roughly $0.30-$0.80. With marketing running
+daily, one active venture uses most of the default $50 cap: raise it once ventures are earning.
 
 ## Candle history (`backend/history.py`)
 

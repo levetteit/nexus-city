@@ -14,6 +14,7 @@ Nothing here moves money. A funding goal that the pool can cover becomes an appr
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -48,6 +49,11 @@ def usage_cost(usage) -> float:
                  + searches * PRICES["search"], 4)
 
 
+def entry_hash(e: dict) -> str:
+    body = {k: v for k, v in e.items() if k != "hash"}
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+
+
 class Treasury:
     def __init__(self, store: Store) -> None:
         self.store = store
@@ -64,13 +70,13 @@ class Treasury:
 
     # ---------------------------------------------------------------- booking
     def book(self, kind: str, amount: float, unit: str, source: str, note: str, venture: Optional[str] = None,
-             agent: Optional[str] = None) -> dict:
+             agent: Optional[str] = None, ref: Optional[str] = None) -> dict:
         if kind not in ("income", "expense", "ai_usage", "lucid_payout"):
             raise ValueError("kind must be income, expense, ai_usage or lucid_payout")
         if unit not in ("city", "station"):
             raise ValueError("unit must be city or station")
-        if kind in ("income", "expense") and source != "owner":
-            raise ValueError("only the owner can record income or expenses")
+        if kind in ("income", "expense") and source not in ("owner", "stripe"):
+            raise ValueError("only the owner (or a verified Stripe payment) can record income or expenses")
         amount = round(float(amount), 4)
         if amount <= 0:
             raise ValueError("amount must be positive")
@@ -79,13 +85,54 @@ class Treasury:
             e["venture"] = venture
         if agent:
             e["agent"] = agent
+        if ref:
+            e["ref"] = ref
         with self.store.lock, open(self.path, "a") as f:
+            e["prev"] = self.entries[-1].get("hash", "") if self.entries else ""
+            e["hash"] = entry_hash(e)
             f.write(json.dumps(e) + "\n")
             self.entries.append(e)
         if kind != "ai_usage":   # AI usage is logged per call in the ledger; the event log would drown in it
             self.store.event(f"money.{kind}", source, f"{'+' if kind in ('income', 'lucid_payout') else '-'}${amount:,.2f} {unit}: {note[:120]}",
                              ref=venture, severity="OPPORTUNITY" if kind != "expense" else "INFO")
         return e
+
+    def has_ref(self, ref: str) -> bool:
+        return any(e.get("ref") == ref for e in self.entries)
+
+    def book_stripe_sale(self, session: dict) -> Optional[dict]:
+        """A paid Stripe checkout, once: the sale, and Stripe's estimated fee as an expense."""
+        from .connectors import stripe_fee
+        sid = session.get("id", "")
+        amount = (session.get("amount_total") or 0) / 100
+        if not sid or session.get("payment_status") != "paid" or amount <= 0:
+            return None
+        venture = ((session.get("metadata") or {}).get("starnet_venture")
+                   or ((session.get("payment_link") and self.venture_for_link(session["payment_link"])) or None))
+        with self.store.lock:   # the webhook and the Auditor's reconciliation can race: book each sale once
+            if self.has_ref(sid):
+                return None
+            sale = self.book("income", amount, "station", "stripe", f"Stripe sale {sid[-8:]}", venture=venture, ref=sid)
+            self.book("expense", stripe_fee(amount), "station", "stripe", f"Stripe fee (est.) {sid[-8:]}", venture=venture,
+                      ref=sid + ":fee")
+        return sale
+
+    def venture_for_link(self, link_id: str) -> Optional[str]:
+        for a in self.store.find("actions", kind="stripe.payment_link"):
+            if (a.get("result") or {}).get("payment_link") == link_id:
+                return a.get("venture")
+        return None
+
+    def verify_chain(self) -> dict:
+        """The Auditor's check: every entry still hashes to what was written, in order."""
+        prev, bad = "", []
+        for i, e in enumerate(self.entries):
+            if "hash" not in e:   # written before the chain existed
+                continue
+            if e.get("prev", "") != prev or entry_hash(e) != e["hash"]:
+                bad.append(i)
+            prev = e["hash"]
+        return {"entries": len(self.entries), "intact": not bad, "broken_at": bad[:10]}
 
     def charge_ai(self, usage, agent: str, venture: Optional[str], note: str) -> float:
         cost = usage_cost(usage)
