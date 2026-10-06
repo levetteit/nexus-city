@@ -106,15 +106,17 @@ class TradersPostRouter:
                 "sent": self.sent, "blocked": self.blocked, "last_error": self.last_error}
 
     # ---------------------------------------------------------------- orders
-    def start(self) -> None:
-        """Begin sending; close anything left open by a previous run."""
+    def start(self) -> list[str]:
+        """Begin sending; close anything left open by a previous run. Returns the symbols it closed."""
         self.queue = asyncio.Queue()
         asyncio.create_task(self._worker())
+        closed = list(self.open)
         for symbol, pos in list(self.open.items()):
             self._enqueue(symbol, {"action": "exit", "cancel": True}, "restart: bots start flat", pos["contract"],
                           list(_targets(pos)) or self.all_urls())
             del self.open[symbol]
         self._save()
+        return closed
 
     def handle(self, engine, events: list[dict], delay_min: float, book=None) -> None:
         """Turn the bots' trade events into real orders. The shared webhooks follow the bots exactly;
