@@ -66,10 +66,21 @@ and about luck. Never invent trades, prices or news."""
 
 
 def _client():
-    if not os.getenv("ANTHROPIC_API_KEY"):
+    key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()   # a pasted key often carries a space or line break
+    if not key:
         return None
     import anthropic
-    return anthropic.Anthropic()
+    return anthropic.Anthropic(api_key=key)
+
+
+def connection_problem(exc) -> str:
+    """Why a Claude call couldn't connect, in words that never include the key or other header values."""
+    cause = type(exc.__cause__).__name__ if exc.__cause__ else ""
+    if cause == "LocalProtocolError":
+        return "can't reach the Claude API: ANTHROPIC_API_KEY contains a space or line break (re-paste it on Render)"
+    if cause in ("ConnectTimeout", "ReadTimeout", "TimeoutException"):
+        return "can't reach the Claude API: timed out"
+    return f"can't reach the Claude API ({cause or 'network'})"
 
 
 EVENING_SCHEMA = {
@@ -201,8 +212,8 @@ class TradingDesk:
         except anthropic.APIStatusError as exc:
             self.last_error = f"Claude API {exc.status_code}: {exc.message}"[:200]
             raise
-        except anthropic.APIConnectionError:
-            self.last_error = "can't reach the Claude API"
+        except anthropic.APIConnectionError as exc:
+            self.last_error = connection_problem(exc)
             raise
 
     def _research(self, question: str) -> tuple[str, list[dict]]:

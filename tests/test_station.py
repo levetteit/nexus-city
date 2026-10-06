@@ -188,7 +188,8 @@ def test_research_to_venture_to_tasks(ultron):
 def test_content_only_once_a_venture_has_a_link(ultron):
     u, fake = ultron
     v = u.store.create("ventures", {"name": "Gig", "stage": "operate", "planned": True, "offer": "Resumes",
-                                    "marketing_plan": {"channels": [{"platform": "linkedin"}], "angles": [], "outreach": {"use": False}}}, "test")
+                                    "marketing_plan": {"audience": "nurses", "channels": [{"platform": "linkedin"}], "angles": [],
+                                                       "outreach": {"use": False}}}, "test")
     u.cfg["audited"] = MON_0900.date().isoformat()
     u.cfg["kicked_off"] = True
     for r in u.store.all("routines"):
@@ -669,3 +670,46 @@ def test_jarvis_brief_is_read_only_and_token_gated(tmp_path, monkeypatch):
         assert c.get("/api/station", headers={"Authorization": "Bearer " + "j" * 40}).status_code == 401      # token opens nothing else
         monkeypatch.setenv("STARNET_JARVIS_TOKEN", "short")
         assert c.get("/api/jarvis/brief", headers={"Authorization": "Bearer short"}).status_code == 401       # weak tokens refused
+
+
+def test_a_bad_key_or_network_doesnt_burn_the_day(tmp_path, monkeypatch):
+    import anthropic
+    import httpx2 as httpx
+    from backend.station import brain
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "  sk-ant-api03-secretvalue\n")
+    c = brain._client()
+    assert c.api_key == "sk-ant-api03-secretvalue"                       # a pasted space/line break is trimmed
+    # the error the SDK raises for a key with a line break: reported without the key
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    err = anthropic.APIConnectionError(request=req)
+    try:
+        raise err from httpx.LocalProtocolError("Illegal header value b'sk-ant-api03-secretvalue\\n'")
+    except anthropic.APIConnectionError as e:
+        msg = brain.connection_problem(e)
+    assert "space or line break" in msg and "secret" not in msg
+    # a connection failure keeps the routine's slot and retries after the backoff
+    fake = FakeClaude([opp("x")])
+    u = Ultron(str(tmp_path), client=fake)
+    u.store.update("ventures", "V-PPS", {"stage": "paused"}, "test")
+    u.cfg["audited"] = MON_0900.date().isoformat()
+
+    def down(**kw):
+        try:
+            raise anthropic.APIConnectionError(request=req) from httpx.ConnectTimeout("timed out")
+        except anthropic.APIConnectionError:
+            raise
+    fake.beta.messages.create = down
+    job = u.next_job(MON_0900)
+    assert job["kind"] == "routine"
+    u.run_job(job, now=MON_0900)
+    assert u.store.get("routines", job["routine"])["last_run"] is None        # the slot isn't used up
+    assert u.next_job(MON_0900.replace(minute=10)) is None                    # backing off
+    assert "timed out" in u.last_error
+    fake.beta.messages.create = fake.create
+    assert u.next_job(MON_0900.replace(minute=25)) == job                     # and then it tries again
+    # an empty channel plan left by an old failure is redone
+    u.store.update("ventures", "V-PPS", {"stage": "operate", "marketing_plan": {"channels": [], "angles": [], "outreach": {"use": False}}}, "t")
+    u.cfg["kicked_off"] = True
+    for r in u.store.all("routines"):
+        u.store.update("routines", r["id"], {"last_run": MON_0900.isoformat()}, "test")
+    assert u.next_job(MON_0900.replace(minute=30)) == {"kind": "marketing_plan", "venture": "V-PPS"}
