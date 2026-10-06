@@ -35,6 +35,7 @@ history = None    # saved 1m candles for future backtests (live mode only), see 
 desk = None       # the bots' evening meeting / morning briefing on Claude (live mode only), see desk.py
 book = None       # your Lucid accounts, each tracked through the trades (live mode only), see accounts.py
 watchdog = None   # pushes when the feed or data stops (live mode only), see watchdog.py
+signals = None    # the bots' PROCs for you to check against your indicator (live mode only), see signals.py
 clients: set[WebSocket] = set()
 
 
@@ -59,7 +60,7 @@ async def run_city() -> None:
 async def run_live() -> None:
     """Poll for new real candles and step the bots through each one."""
     global engine, router, notifier
-    global scorecard, reports, history, desk, book, watchdog
+    global scorecard, reports, history, desk, book, watchdog, signals
     from . import execution, live, news, notify
     from .report import DayReports
     from .scorecard import Scorecard
@@ -89,6 +90,9 @@ async def run_live() -> None:
     scorecard.start_day(engine, partial=True)   # we may have come up mid-day
     reports = DayReports(live.DATA_DIR)
     reports.start_day(engine, partial=True)
+    from .signals import SignalLog
+    signals = SignalLog(live.DATA_DIR)
+    signals.start_day(engine)
     from .desk import TradingDesk
     desk = TradingDesk(live.DATA_DIR)
     if desk.enabled:
@@ -118,6 +122,7 @@ async def run_live() -> None:
             router.handle(engine, new, market.delay_minutes, book)   # real orders, if armed
             notifier.handle(engine, new + alerts, real=router.armed)   # buzz your phone
             new += alerts
+            signals.observe(engine, new)
             report = reports.observe(engine, new)
             finished = scorecard.observe(engine, new)
             if report:   # a trading day just ended: replay it, compare with paper trading, send the report
@@ -338,6 +343,42 @@ async def desk_act(request: Request) -> dict:
         raise HTTPException(503, "the trading desk only runs in live mode")
     desk.set_act(bool((await request.json()).get("act")))
     return desk.status()
+
+
+def _signals():
+    if signals is None:
+        raise HTTPException(503, "the signal check only runs in live mode")
+    return signals
+
+
+@app.get("/api/signals")
+def signals_days() -> dict:
+    s = _signals()
+    return {"days": s.days(), "stats": s.stats()}
+
+
+@app.get("/api/signals/{day}")
+def signals_day(day: str) -> dict:
+    doc = _signals().get(day)
+    if doc is None:
+        raise HTTPException(404, "no signals for that day")
+    return doc
+
+
+@app.post("/api/signals/{day}/{action}")
+async def signals_action(day: str, action: str, request: Request) -> dict:
+    """vote: {id, vote: yes|no|"", note} · missed: {clock "HH:MM", tf, side, note}"""
+    b = await request.json()
+    try:
+        if action == "vote":
+            return _signals().vote(day, str(b["id"]), str(b.get("vote", "")), str(b.get("note", "")))
+        if action == "missed":
+            return _signals().add_missed(day, str(b["clock"]), int(b["tf"]), str(b["side"]), str(b.get("note", "")))
+    except KeyError as exc:
+        raise HTTPException(404, str(exc))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    raise HTTPException(404)
 
 
 @app.get("/api/history")

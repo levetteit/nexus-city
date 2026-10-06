@@ -169,6 +169,20 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #accounts button.go { background: rgba(67, 240, 160, .18); }
 #accounts .add { width: 100%; padding: 10px; font-size: 9px; }
 
+/* ---------- signal check ---------- */
+#signals { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(600px, calc(100vw - 24px)); max-height: 84vh; overflow: auto; z-index: 9; font-size: 12.5px; }
+#signals .row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; }
+#signals .sig { background: rgba(255, 255, 255, .04); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+#signals .sig canvas { width: 100%; height: 170px; display: block; border-radius: 6px; background: #070b14; margin: 6px 0; }
+#signals .sig small { color: var(--muted); display: block; }
+#signals button { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: rgba(124, 92, 255, .15); color: var(--text);
+  font-family: var(--pixel); font-size: 8px; cursor: pointer; }
+#signals button.on.yes { background: rgba(67, 240, 160, .35); } #signals button.on.no { background: rgba(255, 84, 112, .4); }
+#signals .day { padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, .07); cursor: pointer; }
+#signals table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 6px 0; }
+#signals td, #signals th { padding: 3px; text-align: center; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+#signals .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
 /* ---------- trading desk ---------- */
 #desk { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(600px, calc(100vw - 24px)); max-height: 82vh; overflow: auto; z-index: 9; font-size: 12.5px; line-height: 1.45; }
 #desk .row { display: flex; justify-content: space-between; gap: 10px; margin: 4px 0; }
