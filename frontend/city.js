@@ -361,6 +361,10 @@ function applyState(s) {
   state = s;
   const waiting = s.station ? s.station.approvals + s.station.owner_tasks : 0;
   document.getElementById("station-badge").textContent = waiting || "";
+  const cr = (s.station && s.station.credits) || {};
+  const chip = document.getElementById("credits-chip");
+  chip.textContent = cr.state === "empty" ? "⛽ empty" : cr.remaining == null ? "⛽ ?" : `⛽ $${cr.remaining.toFixed(2)}`;
+  chip.className = cr.state || "";
   if (buildings.size === 0) s.bots.forEach((b, i) => makeBuilding(b, i, s.bots.length));
   const top = s.bots.reduce((a, b) => (b.realized > a.realized ? b : a), s.bots[0]);
 

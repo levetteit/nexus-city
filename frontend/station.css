@@ -145,3 +145,8 @@ ul.tight { margin: 4px 0 8px; padding-left: 18px; }
 .outbound.off { border-color: rgba(255,59,92,.6); box-shadow: 0 0 0 1px rgba(255,59,92,.25) inset; }
 textarea { resize: vertical; }
 .conn { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(120,170,255,.08); }
+
+.credits .big { font: 800 28px Inter, sans-serif; }
+.credits .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.credits input { max-width: 120px; }
+.credits.empty .big { color: var(--red); } .credits.low .big { color: var(--gold); } .credits.ok .big { color: var(--green); }

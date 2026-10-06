@@ -1007,3 +1007,47 @@ def test_research_restarts_when_every_run_failed(tmp_path):
     for r in u.store.all("routines"):
         u.store.update("routines", r["id"], {"last_run": MON_0900.replace(hour=12).isoformat()}, "test")
     assert u.next_job(MON_0900.replace(hour=12, minute=1)) == {"kind": "routine", "routine": "R-001", "kickoff": True}
+
+
+def test_credits_counter(tmp_path, monkeypatch):
+    from datetime import timedelta
+    from backend.station import connectors, credits
+    notes = []
+    u = Ultron(str(tmp_path), client=FakeClaude([opp("x")]), notify=lambda t, b: notes.append(t))
+    t = u.treasury
+    assert credits.summary(u.store, t)["state"] == "unknown"                    # nothing recorded yet
+    with pytest.raises(ValueError):
+        credits.add(u.store, -5)
+    credits.add(u.store, 20, "first top-up")
+    usage = NS(input_tokens=1_000_000, output_tokens=100_000, cache_read_input_tokens=0, cache_creation_input_tokens=0,
+               server_tool_use=None)                                            # $4 + $2 = $6
+    t.charge_ai(usage, "A-002", None, "research")
+    t.charge_ai(usage, "DESK", "V-001", "trading desk", unit="city")            # the desk's calls come off too...
+    s = credits.summary(u.store, t)
+    assert s["state"] == "ok" and s["added"] == 20 and s["used"] == 12 and s["remaining"] == 8
+    assert t.ai_spent() == 6                                                    # ...but not off the station's own cap
+    t.charge_ai(usage, "A-002", None, "research")
+    assert credits.summary(u.store, t)["state"] == "low"
+    u.tick(now=MON_0900)
+    u.tick(now=MON_0900)
+    assert notes.count("🛰️ Claude credits low") == 1                          # warned once per top-up
+    # Anthropic's own cost report wins when it's higher (usage outside the station)
+    monkeypatch.setenv("ANTHROPIC_ADMIN_KEY", "sk-ant-admin01-test")
+    assert credits.reconcile_due(u.store, datetime.now(ET))
+    monkeypatch.setattr(connectors, "_http_json", lambda m, url, h=None, **k: (
+        {"data": [{"results": [{"amount": "1500.00", "currency": "USD"}]}], "has_more": False}
+        if "cost_report" in url and h["x-api-key"].startswith("sk-ant-admin") else {}))
+    credits.reconcile(u.store)
+    s = credits.summary(u.store, t)
+    assert s["reported"] == 15.0 and s["used"] == 18.0 and s["remaining"] == 2.0
+    assert not credits.reconcile_due(u.store, datetime.now(ET))
+    # Anthropic says empty: Claude jobs wait, then one tries again; a top-up clears it
+    now = datetime.now(ET) + timedelta(seconds=5)                                   # after the last successful call
+    credits.mark_empty(u.store, now)
+    assert credits.summary(u.store, t)["state"] == "empty"
+    assert credits.blocks_ai(u.store, t, now + timedelta(minutes=5))
+    assert not credits.blocks_ai(u.store, t, now + timedelta(minutes=21))
+    credits.add(u.store, 50)
+    s = credits.summary(u.store, t)
+    assert s["state"] == "ok" and s["added"] == 70 and not credits.blocks_ai(u.store, t, now)
+    assert u.overview()["credits"]["remaining"] == s["remaining"]

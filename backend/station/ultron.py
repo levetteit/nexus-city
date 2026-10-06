@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
-from . import actions, connectors, crew, digital, finance, marketing, recognition, research, results, shop, warroom
+from . import actions, connectors, credits, crew, digital, finance, marketing, recognition, research, results, shop, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
 from .store import STAGES, Store, now_iso
@@ -64,6 +64,7 @@ class Ultron:
         self.busy: Optional[str] = None      # what ULTRON is coordinating right now
         self._recognized_at: Optional[datetime] = None
         self.milestones: list[dict] = []
+        self.credits: Optional[dict] = None
         self.last_error = ""
         self.cfg = self.store.load_doc("ultron.json") or {"mandate": research.MANDATE, "kicked_off": False,
                                                            "reported": "", "budget_warned": "", "reminded": {}}
@@ -170,6 +171,8 @@ class Ultron:
             recognition.update(self.store)
             self.milestones = recognition.station_milestones(self.store, self.treasury)
         self._review_autonomous(now)
+        credits.watch(self.store, self.treasury, self.notify)
+        self.credits = credits.summary(self.store, self.treasury)   # the city's top bar reads this, no file reads per frame
         self._propose(now)
         if (now.hour, now.minute) >= REPORT_AT and self.cfg.get("reported") != now.date().isoformat():
             self.report(now, engine)
@@ -189,7 +192,9 @@ class Ultron:
             return {"kind": "metrics"}
         if shop.orders_due(self.cfg, now):
             return {"kind": "shop_orders"}
-        if not self.brain.enabled or not self.treasury.ai_allowed():
+        if credits.reconcile_due(s, now):
+            return {"kind": "credits_reconcile"}
+        if not self.brain.enabled or not self.treasury.ai_allowed() or credits.blocks_ai(s, self.treasury, now):
             return None
         if self.cfg.get("ai_backoff_until") and now < datetime.fromisoformat(self.cfg["ai_backoff_until"]):
             return None
@@ -287,6 +292,9 @@ class Ultron:
                 v = s.get("ventures", job["venture"])
                 self.busy = f"Product Designer: next product for {v['name']}"
                 return digital.create(s, self.brain, v, now)
+            if job["kind"] == "credits_reconcile":
+                self.busy = "Auditor: Anthropic cost report"
+                return credits.reconcile(s)
             if job["kind"] == "shop_orders":
                 self.busy = "Etsy Shop Manager: reading orders"
                 self.cfg["shop_orders_at"] = now.isoformat()
@@ -328,6 +336,8 @@ class Ultron:
                 return crew.run_task(s, self.brain, t)
         except Exception as exc:
             self.last_error = (self.brain.last_error or str(exc))[:200] if _is_connection(exc) else str(exc)[:200]
+            if "credit balance" in str(exc).lower():
+                credits.mark_empty(s, now)
             if _is_connection(exc):
                 # the network or the key, not the job: keep the job and its slot, try again in a few minutes
                 self.cfg["ai_backoff_until"] = (now + AI_BACKOFF).isoformat()
@@ -659,6 +669,7 @@ class Ultron:
             "lessons": s.load_doc("lessons.json") or [],
             "leads": sorted(s.all("leads"), key=lambda l: l["created_at"], reverse=True)[:40],
             "shop": shop.summary(s), "storefront": digital.summary(s, self.treasury),
+            "credits": credits.summary(s, self.treasury),
             "milestones": self.milestones or recognition.station_milestones(s, self.treasury), "research_focus": self.cfg.get("research_focus", ""),
             "warroom": s.load_doc(s.list_docs("warroom-", 1)[0]) if s.list_docs("warroom-", 1) else None,
             "audit": s.load_doc(s.list_docs("audit-", 1)[0]) if s.list_docs("audit-", 1) else None,

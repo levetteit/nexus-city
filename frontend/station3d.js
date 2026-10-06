@@ -560,7 +560,10 @@ async function load() {
   syncProps();
   const waiting = S.approvals.length + S.owner_tasks.length + S.outbox.manual.length;
   const leads7 = (S.leads || []).filter((l) => Date.now() - new Date(l.created_at) < 7 * 864e5).length;
-  $("#chips").innerHTML = `<span class="chip" data-go="finance">Pool <b>${money(S.treasury.pool)}</b></span>`
+  const cr = S.credits || {};
+  const crText = cr.state === "empty" ? "empty" : cr.remaining == null ? "?" : money(cr.remaining);
+  $("#chips").innerHTML = `<span class="chip ${["empty", "low"].includes(cr.state) ? "alert" : ""}" data-go="finance" title="Claude credits left">Credits <b>${crText}</b></span>`
+    + `<span class="chip" data-go="finance">Pool <b>${money(S.treasury.pool)}</b></span>`
     + `<span class="chip" data-go="revenue">Leads 7d <b>${leads7}</b></span>`
     + `<span class="chip ${waiting ? "alert" : ""}" data-go="approvals">Waiting <b>${waiting}</b></span>`
     + `<span class="chip" data-go="finance">AI <b>${money(S.treasury.ai.spent_month)}</b>/${money(S.treasury.ai.budget)}</span>`;

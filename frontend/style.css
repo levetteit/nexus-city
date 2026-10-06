@@ -29,6 +29,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #station-link { pointer-events: auto; text-decoration: none; font-size: 18px; position: relative; filter: drop-shadow(0 0 6px rgba(94, 231, 255, .7)); }
 #station-link i { position: absolute; top: -6px; right: -10px; font: 700 10px Inter, sans-serif; background: var(--red); color: #fff; border-radius: 999px; padding: 1px 5px; }
 #station-link i:empty { display: none; }
+#credits-chip { pointer-events: auto; text-decoration: none; font: 700 11px Inter, sans-serif; color: #e8eeff; background: rgba(10,18,40,.7);
+  border: 1px solid rgba(120,170,255,.25); border-radius: 999px; padding: 3px 8px; white-space: nowrap; margin-left: 12px; }
+#credits-chip:empty { display: none; }
+#credits-chip.empty { color: #ff3b5c; border-color: rgba(255,59,92,.5); } #credits-chip.low { color: #ffc94d; border-color: rgba(255,201,77,.5); }
 #clock { font-family: var(--pixel); font-size: 12px; color: #c9bfff; white-space: nowrap; }
 #clock .live { color: #ff5470; text-shadow: 0 0 8px rgba(255, 84, 112, .8); font-weight: 400; }
 #clock small { font-family: Inter, sans-serif; font-size: 10px; color: var(--muted); }
