@@ -46,7 +46,7 @@ import weakref
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..market import Bar, Market
+from ..market import Bar, Market, aggregate
 from .base import DONE_FOR_DAY, Bot, Entry
 
 TIMEFRAMES = (1, 2, 3, 4, 5, 6)
@@ -323,6 +323,11 @@ DEFAULTS = {
     "trim_min_tf": 1,           # only zones of this timeframe or higher count as trim levels
     "trim_min_pts": 0.0,        # ...and only once they're at least this many points from the entry
     "trim_max": None,           # most trims per trade (None = no limit)
+    # Context filters (experiments, all off by default; see README "Context filters"):
+    "rsi_filter": None,         # {"tf": 5, "period": 14, "ob": 70, "os": 30, "mode": "exhaustion"|"momentum"}
+    "day_open_bias": None,      # ICT true day open (00:00 ET): "discount" = longs below it, shorts above; "trend" = the reverse
+    "range_bias": None,         # previous trading day's range: "discount" = longs in its lower half, shorts upper; "trend" = reverse
+    "min_range_pts": 0.0,       # chop filter: average 1m high-low over the last 30 minutes must be at least this
 }
 
 # One engine per (market, symbol, settings), shared by every bot that needs it
@@ -357,6 +362,9 @@ class ProcBot(Bot):
         self.trim_last: Optional[float] = None
         self._session = ""
         self.last_signal = ""
+        self._day_open: Optional[float] = None       # 00:00 ET open
+        self._day_hi = self._day_lo = None             # this trading day so far (from 18:00 ET)
+        self._prev_range: Optional[tuple[float, float]] = None
         self.reset_day()
 
     def reset_day(self) -> None:
@@ -370,6 +378,7 @@ class ProcBot(Bot):
 
     def observe(self, bar: Bar, market: Market) -> None:
         mod = int(market.clock_min) % (24 * 60)
+        self._track_day(bar, mod)
         self.engine = shared_engine(market, self.cfg.underlying, self.p)
         tfs = self.p["pointer_tfs"]
         self._events = [(k, p) for k, p in self.engine.update(bar, mod) if p.tf in tfs]
@@ -403,8 +412,54 @@ class ProcBot(Bot):
                 return side == p.side
         return False
 
+    def _track_day(self, bar: Bar, mod: int) -> None:
+        if mod == 18 * 60 and self._day_hi is not None:   # the futures day opens at 18:00 ET
+            self._prev_range, self._day_hi, self._day_lo = (self._day_lo, self._day_hi), None, None
+        self._day_hi = bar.high if self._day_hi is None else max(self._day_hi, bar.high)
+        self._day_lo = bar.low if self._day_lo is None else min(self._day_lo, bar.low)
+        if mod == 0:
+            self._day_open = bar.open
+
+    def _rsi(self, market: Market, tf: int, period: int) -> Optional[float]:
+        closes = [b.close for b in aggregate(market.underlyings[self.cfg.underlying].bars[-(period * 4 * tf):], tf)]
+        if len(closes) < period + 1:
+            return None
+        gains = losses = 0.0
+        for a, b in zip(closes[-period - 1:-1], closes[-period:]):
+            gains += max(0.0, b - a)
+            losses += max(0.0, a - b)
+        return 100.0 if losses == 0 else 100 - 100 / (1 + gains / losses)
+
+    def _context_ok(self, p: Proc, market: Market) -> bool:
+        """Optional context filters. Each one is off unless its setting is given."""
+        price = market.underlyings[self.cfg.underlying].price
+        long = p.side == "long"
+        rf = self.p["rsi_filter"]
+        if rf:
+            r = self._rsi(market, rf.get("tf", 5), rf.get("period", 14))
+            if r is not None:
+                if rf.get("mode", "exhaustion") == "momentum":
+                    if (long and r < 50) or (not long and r > 50):
+                        return False
+                elif (long and r >= rf.get("ob", 70)) or (not long and r <= rf.get("os", 30)):
+                    return False
+        for key, level in (("day_open_bias", self._day_open),
+                           ("range_bias", sum(self._prev_range) / 2 if self._prev_range else None)):
+            mode = self.p[key]
+            if mode and level is not None:
+                below = price < level
+                if mode == "discount" and below != long:
+                    return False
+                if mode == "trend" and below == long:
+                    return False
+        if self.p["min_range_pts"]:
+            recent = market.underlyings[self.cfg.underlying].bars[-30:]
+            if recent and sum(b.high - b.low for b in recent) / len(recent) < self.p["min_range_pts"]:
+                return False
+        return True
+
     def _usable(self, p: Proc, market: Market) -> bool:
-        if not self._bias_ok(p):
+        if not self._bias_ok(p) or not self._context_ok(p, market):
             return False
         kz = self.p["killzones"]
         if kz:

@@ -222,6 +222,36 @@ Removing 5m entries still made less overall ($11,362). Other ways of using the 5
 
 So the current setup stays.
 
+### Context filters: RSI, ICT day open, premium/discount, chop (tested Oct 6 2026)
+
+Optional entry filters in `bots/proc.py`, all **off by default**. Each one only removes PROCs; it never adds trades:
+
+| Setting | What it does |
+| --- | --- |
+| `rsi_filter` | `{"tf": 5, "period": 14, "ob": 70, "os": 30}`: no longs when RSI is overbought, no shorts when oversold. `"mode": "momentum"`: longs only with RSI above 50, shorts below |
+| `day_open_bias` | ICT true day open (00:00 ET): `"discount"` = longs below it, shorts above; `"trend"` = the reverse |
+| `range_bias` | Premium/discount of the previous trading day's range: `"discount"` = longs in its lower half, shorts in the upper; `"trend"` = the reverse |
+| `min_range_pts` | Chop filter: the average 1-minute high-low over the last 30 minutes must be at least this many points |
+
+Walk-forward on Yahoo's 1-minute data, Sep 8 – Oct 6: each filter judged on the first 15 days, then checked on the last 7.
+
+| Setting | First 15 days | Last 7 days |
+| --- | --- | --- |
+| **Current (no filter)** | **+$5,621** | **+$5,044** |
+| RSI 5m exhaustion 70/30 | +$5,261 | +$4,611 |
+| RSI 5m exhaustion 80/20 | +$6,601 | +$2,601 |
+| RSI 5m momentum | +$4,650 | −$1,433 |
+| RSI 15m momentum | +$2,390 | +$518 |
+| ICT day open, discount | −$912 | +$3,796 |
+| ICT day open, trend | +$2,287 | −$1,384 |
+| Previous-day range, discount | +$3,546 | +$3,526 |
+| Previous-day range, trend | +$2,542 | −$1,360 |
+| Chop filter 6 / 9 / 12 pts | +$5,541 / +$3,775 / +$1,482 | +$3,808 / +$3,028 / +$5,495 |
+
+None beat the current setup on both halves, so all stay off. The PROC already is an ICT-style structure entry
+(fair value gaps, inversions, killzones, SMT-like MES confirmation); the filters mostly removed good trades.
+Volume can't be tested yet: Yahoo's data has none and the TradingView feed sends OHLC only.
+
 ### Daily goal
 
 | | Default | What happens |

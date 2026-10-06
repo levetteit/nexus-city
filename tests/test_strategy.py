@@ -53,3 +53,15 @@ def test_simulated_city_runs():
     for _ in range(2_000):
         engine.tick()
     assert engine.snapshot()["bots"]
+
+
+@pytest.mark.parametrize("params", [
+    {"rsi_filter": {"tf": 5, "ob": 70, "os": 30}}, {"rsi_filter": {"tf": 5, "mode": "momentum"}},
+    {"day_open_bias": "discount"}, {"day_open_bias": "trend"}, {"range_bias": "discount"}, {"min_range_pts": 9},
+])
+def test_context_filters_run_on_real_candles(real_data, params):
+    """Each optional filter runs on real candles and changes which PROCs are taken. Off by default, so
+    the current settings are unchanged. (Skipping one PROC can lead to more trades later in the day,
+    because the daily goal isn't reached as early.)"""
+    base, filtered = run(real_data), run(real_data, params=params)
+    assert filtered["days"] == base["days"] and filtered["trades"] > 0
