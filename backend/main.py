@@ -12,7 +12,7 @@ import json
 import os
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -249,7 +249,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Starnet trading city", lifespan=lifespan)
 
 PASSWORD = os.getenv("STARNET_PASSWORD")   # set this whenever the city is reachable from the internet
-OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook")   # health checks, and webhooks (they have their own secret)
+OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook", "/api/jarvis/brief")   # health checks, and webhooks (they have their own secret)
 
 
 class PasswordGate:
@@ -732,7 +732,7 @@ def station_routine_runs() -> list:
 @app.get("/api/station/{collection}/{rid}")
 def station_record(collection: str, rid: str) -> dict:
     st = _station()
-    if collection not in ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions"):
+    if collection not in ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions", "leads"):
         raise HTTPException(404)
     rec = st.store.get(collection, rid)
     if not rec:
@@ -741,6 +741,9 @@ def station_record(collection: str, rid: str) -> dict:
         rec["pnl"] = st.treasury.pnl("venture", rid)
         rec["health"] = st.health(rec)
         rec["task_list"] = st.store.find("tasks", venture=rid)
+        if rid != "V-001":
+            from .station import results
+            rec["results"] = results.summary(st.store, rid, 30)
     if collection == "agents":
         rec["pnl"] = st.treasury.pnl("agent", rid)
         rec["task_list"] = st.store.find("tasks", assigned_agent=rid)
@@ -912,6 +915,58 @@ async def station_venture_outreach(rid: str, request: Request) -> dict:
     on = bool((await request.json()).get("on"))
     return st.store.update("ventures", rid, {"outreach_allowed": on}, "owner", f"outreach {'allowed' if on else 'off'} for {rid}",
                            kind="venture.outreach_allowed")
+
+
+@app.get("/api/jarvis/brief")
+def jarvis_brief(request: Request) -> dict:
+    """Read-only briefing for Jarvis's morning check-in. Its own token (STARNET_JARVIS_TOKEN), sent as a Bearer header;
+    it can read ULTRON's report and the board's summary, and nothing else. Off (404) until the token is set."""
+    token = os.getenv("STARNET_JARVIS_TOKEN", "")
+    given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(404)
+    if len(token) < 24 or not hmac.compare_digest(given.encode(), token.encode()):
+        raise HTTPException(401)
+    st = _station()
+    o = st.overview(engine)
+    reports = st.reports(1)
+    return {"report": reports[0] if reports else None, "now": o["now"], "coordinating": o["coordinating"],
+            "mission": o["mission"], "treasury": {k: o["treasury"][k] for k in ("pool", "runway_months", "city", "station", "ai", "goals")},
+            "ventures": [{k: v.get(k) for k in ("id", "name", "stage", "health", "pnl", "tasks", "results", "next_action")} for v in o["ventures"]],
+            "waiting_for_owner": [a["action"] for a in o["approvals"]] + [t["title"] for t in o["owner_tasks"]]
+                                 + [f"post by hand: {a['payload'].get('platform')}" for a in o["outbox"]["manual"]],
+            "outbound": o["outbound"], "connectors": o["connectors"], "alerts": [e["summary"] for e in o["alerts"]],
+            "warroom": {k: (o["warroom"] or {}).get(k) for k in ("at", "summary", "stop_doing", "start_doing")},
+            "leads_7d": sum(1 for l in o["leads"] if l["created_at"] >= (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()),
+            "error": o["error"]}
+
+
+@app.post("/api/station/ventures/{rid}/leads")
+async def station_add_lead(rid: str, request: Request) -> dict:
+    """Log a lead: `{"source": "dm"|"whatsapp"|"call"|"comment"|"referral"|"other", "note": "...", "action": "X-012"}`."""
+    from .station import results
+    b = await request.json()
+    try:
+        return results.add_lead(_station().store, rid, str(b.get("source", "")), str(b.get("note", ""))[:300], b.get("action") or None)
+    except KeyError:
+        raise HTTPException(404)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/station/leads/{rid}")
+async def station_set_lead(rid: str, request: Request) -> dict:
+    """Move a lead along: `{"status": "quoted"|"won"|"lost", "amount": 350}`. Won books the amount as real income."""
+    from .station import results
+    st = _station()
+    b = await request.json()
+    try:
+        amount = float(b["amount"]) if b.get("amount") not in (None, "") else None
+        return results.set_lead(st.store, rid, str(b.get("status", "")), amount, str(b.get("note", ""))[:300], record_income=st.record)
+    except KeyError:
+        raise HTTPException(404)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.post("/api/station/ventures/{rid}/link")

@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
-from . import actions, connectors, crew, finance, marketing, research, warroom
+from . import actions, connectors, crew, finance, marketing, research, results, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
 from .store import STAGES, Store, now_iso
@@ -125,6 +125,9 @@ class Ultron:
                 return {"kind": "dispatch", "action": min(ready, key=lambda a: a["created_at"])["id"]}
         if (now.hour, now.minute) >= AUDIT_AT and self.cfg.get("audited") != now.date().isoformat():
             return {"kind": "audit"}
+        last = self.cfg.get("metrics_at")
+        if (not last or now - datetime.fromisoformat(last) >= results.METRICS_EVERY) and results.posts_to_check(s, now):
+            return {"kind": "metrics"}
         if not self.brain.enabled or not self.treasury.ai_allowed():
             return None
         for v in s.all("ventures"):
@@ -202,6 +205,11 @@ class Ultron:
                     self.cfg["capped"] = {now.date().isoformat(): sorted(set(self.cfg["capped"].get(now.date().isoformat(), [])) | {a["kind"]})}
                     self._save_cfg()
                 return out
+            if job["kind"] == "metrics":
+                self.busy = "Auditor: reading post engagement"
+                self.cfg["metrics_at"] = now.isoformat()
+                self._save_cfg()
+                return results.refresh_metrics(s, now)
             if job["kind"] == "audit":
                 self.busy = "Auditor: daily audit"
                 self.cfg["audited"] = now.date().isoformat()
@@ -439,6 +447,9 @@ class Ultron:
         """0-100: money, progress and time since the last progress."""
         if v["id"] == "V-001":
             return 70
+        if v.get("owner_business"):   # judged on what it brings in: leads and sales in the last 14 days
+            r = results.summary(self.store, v["id"], 14)
+            return max(20, min(100, 40 + 8 * r["leads"] + 10 * r["by_status"].get("won", 0) + (10 if r["posts_sent"] else 0)))
         tasks = self.store.find("tasks", venture=v["id"])
         done = sum(1 for t in tasks if t["status"] == "done")
         pnl = self.treasury.pnl("venture", v["id"])
@@ -453,6 +464,7 @@ class Ultron:
         for v in sorted(s.all("ventures"), key=lambda v: v["id"]):
             tasks = s.find("tasks", venture=v["id"])
             ventures.append({**v, "pnl": self.treasury.pnl("venture", v["id"]), "health": self.health(v),
+                             "results": results.summary(s, v["id"], 30) if v["id"] != "V-001" else None,
                              "tasks": {st: sum(1 for t in tasks if t["status"] == st) for st in
                                        ("queued", "running", "done", "failed", "waiting_owner")}})
         tasks = s.all("tasks")
@@ -479,7 +491,8 @@ class Ultron:
                        "in_qa": len(s.find("actions", status="qa")) + len(s.find("actions", status="revise")),
                        "sent": sorted(s.find("actions", status="sent"), key=lambda a: a.get("sent_at", ""), reverse=True)[:15],
                        "rejected": s.find("actions", status="rejected")[-10:], "failed": s.find("actions", status="failed")[-10:]},
-            "lessons": s.load_doc("lessons.json") or [], "research_focus": self.cfg.get("research_focus", ""),
+            "lessons": s.load_doc("lessons.json") or [],
+            "leads": sorted(s.all("leads"), key=lambda l: l["created_at"], reverse=True)[:40], "research_focus": self.cfg.get("research_focus", ""),
             "warroom": s.load_doc(s.list_docs("warroom-", 1)[0]) if s.list_docs("warroom-", 1) else None,
             "audit": s.load_doc(s.list_docs("audit-", 1)[0]) if s.list_docs("audit-", 1) else None,
             "alerts": [e for e in s.events(60) if e["severity"] in ("WARNING", "CRITICAL", "ACTION NEEDED", "WAITING FOR OWNER")][:12],

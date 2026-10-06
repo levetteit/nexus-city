@@ -260,6 +260,22 @@ def facebook_recent_posts(limit: int = 12) -> list[dict]:
             for x in res.get("data", []) if x.get("message")]
 
 
+def facebook_post_metrics(post_id: str) -> dict:
+    """Reactions, comments and shares on one of the Page's posts (pages_read_engagement)."""
+    q = urllib.parse.urlencode({"fields": "reactions.summary(total_count),comments.summary(total_count),shares",
+                                "access_token": os.getenv("STARNET_FB_PAGE_TOKEN", "")})
+    r = _http_json("GET", f"{_graph_base()}{post_id}?{q}")
+    total = lambda k: ((r.get(k) or {}).get("summary") or {}).get("total_count", 0)
+    return {"reactions": total("reactions"), "comments": total("comments"), "shares": (r.get("shares") or {}).get("count", 0)}
+
+
+def instagram_media_metrics(media_id: str) -> dict:
+    """Likes and comments on one Instagram post (instagram_basic)."""
+    q = urllib.parse.urlencode({"fields": "like_count,comments_count", "access_token": os.getenv("STARNET_FB_PAGE_TOKEN", "")})
+    r = _http_json("GET", f"{_graph_base()}{media_id}?{q}")
+    return {"likes": r.get("like_count", 0), "comments": r.get("comments_count", 0)}
+
+
 SOCIAL: dict = {
     "facebook": {"configured": lambda: bool(os.getenv("STARNET_FB_PAGE_ID") and os.getenv("STARNET_FB_PAGE_TOKEN")),
                  "post": _facebook_post},

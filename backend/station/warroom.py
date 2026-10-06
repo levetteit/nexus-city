@@ -17,12 +17,13 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
+from . import results
 from .brain import Brain
 from .crew import AGENT_RULES, staff
 from .economy import Treasury
 from .store import Store, now_iso
 
-INPUT_KINDS = ("money.", "action.sent", "action.qa_fail", "action.result", "task.completed", "owner.feedback",
+INPUT_KINDS = ("money.", "lead.", "action.sent", "action.qa_fail", "action.result", "task.completed", "owner.feedback",
                "venture.stage", "routine.completed", "task.escalated")
 TRIGGER_INPUTS = 8          # this many new results, and at least a day since the last session
 WEEKLY = (6, 17)            # Sunday 17:00 ET
@@ -53,7 +54,9 @@ SCHEMA = {
 }
 
 SYSTEM = (AGENT_RULES + " You are the War Room Strategist of the StarNet Space Station, with ULTRON in the chair. Your job "
-          "is to look at what actually happened and be ruthless about it: what makes money or clearly moves toward it gets "
+          "is to look at what actually happened and be ruthless about it. Leads and sales beat likes: a post angle that "
+          "brings DMs and WhatsApp messages is worth more than one that only gets reactions, and results_30d shows which "
+          "posts brought leads. Then: what makes money or clearly moves toward it gets "
           "more; what doesn't, after a fair test, gets changed or cut, and we try something else. Judge on evidence "
           "(sales, replies, clicks, QA rejections, time spent, AI cost), not on hope. A venture younger than 5 days with no "
           "data yet is 'keep' unless something is clearly broken. Every lesson must cite evidence from the data given. "
@@ -85,6 +88,7 @@ def inputs(store: Store, treasury: Treasury, health: Callable[[dict], int], sinc
                          "tasks": {s: sum(1 for t in tasks if t["status"] == s) for s in ("done", "queued", "waiting_owner", "failed")},
                          "outbound": stats, "results": [a["result"] for a in acts if a.get("result") and a["result"].get("note")][-10:],
                          "qa_rejections": [a["qa"]["issues"] for a in acts if a["status"] == "rejected"][-5:],
+                         "results_30d": results.summary(store, v["id"], 30),
                          "success_criteria": v.get("success_criteria"), "kill_criteria": v.get("kill_criteria")})
     ev = [e for e in store.events(1500, INPUT_KINDS) if not since or e["at"] > since]
     return {"ventures": ventures, "treasury": treasury.summary(), "new_results": [f"{e['at'][:16]} {e['summary']}" for e in ev[:80]],

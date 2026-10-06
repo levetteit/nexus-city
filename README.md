@@ -498,9 +498,20 @@ password, because Instagram downloads the image itself; on Render the public add
 
 **Outreach is off for every venture** until you press **Allow outreach** on that venture's card.
 
+**Results** (`backend/station/results.py`): every 6 hours the Auditor reads each recent post's reactions,
+comments and shares (Facebook) and likes and comments (Instagram). On a venture's card you log each lead in
+one tap (DM, WhatsApp, call, comment, referral), optionally tied to the post that brought it, then mark it
+quoted, won (the amount is booked as real income) or lost. The War Room ranks posts by the leads they bring,
+then by engagement, and turns that into lessons and new tasks.
+
 What the station can't do: move money out, refund, sign anything, run a marketplace account, or touch the
 trading bots' orders and risk. The **Stop all outbound** button on the Command tab stops every outgoing post,
 email and Stripe change at once.
+
+**Jarvis's morning check-in:** set `STARNET_JARVIS_TOKEN` (a long random string, at least 24 characters)
+on Render and the same value in the Claude cloud environment. A scheduled session reads
+`GET /api/jarvis/brief` (Bearer token; read-only: ULTRON's latest report, money, ventures, what's waiting
+for you) every weekday at 8:45 ET and briefs you. Without the token the address doesn't exist (404).
 
 **Setup:** it runs with the city, in both modes. Research and agent drafting need `ANTHROPIC_API_KEY` (the
 same key as the trading desk). Without it, records, approvals and the treasury still work.
