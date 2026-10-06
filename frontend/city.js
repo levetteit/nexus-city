@@ -444,13 +444,23 @@ function alertRows(s) {
 }
 
 // real orders on your Lucid accounts (live mode only)
+function feedLast(s) {
+  const f = s.feed_last;
+  if (!f) return `<div class="row"><span>TradingView webhooks</span><span>none received yet</span></div>`;
+  const when = new Date(f.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return f.ok
+    ? `<div class="row"><span>TradingView webhooks</span><span class="pos">last ${when} · ${esc(f.ticker)} ✓</span></div>`
+    : `<div class="halt">TradingView webhook at ${when} rejected: ${esc(f.reason)}</div>`;
+}
+
 function execRows(s) {
   if (s?.mode !== "live") return "";
   const x = s.execution, live = s.feed === "tradingview";
   // MNQ trades and MES confirms: both need the real-time feed, or the late MES candles are lost
   const missing = live ? ["MNQ", "MES"].filter((x) => !(s.feed_symbols || []).includes(x)) : [];
   const data = `<div class="row"><span>Price data</span><span class="${live && !missing.length ? "pos" : missing.length ? "neg" : ""}">${live ? `TradingView · real-time (${(s.feed_symbols || []).join(", ")})` : `Yahoo · ${Math.round(s.delay_min)}m delayed`}</span></div>
-    ${missing.length ? `<div class="halt">⚠️ ${missing.join(" & ")} not on the real-time feed: add the Starnet feed alert on the ${missing.map((x) => x + "1!").join(" / ")} 1-minute chart too</div>` : ""}`;
+    ${missing.length ? `<div class="halt">⚠️ ${missing.join(" & ")} not on the real-time feed: add the Starnet feed alert on the ${missing.map((x) => x + "1!").join(" / ")} 1-minute chart too</div>` : ""}
+    ${feedLast(s)}`;
   if (!x) return data;
   if (!x.configured) return data + `<div class="row"><span>Real orders</span><span>not connected</span></div>`;
   const open = Object.entries(x.open).map(([sym, p]) => `${p.side === "buy" ? "LONG" : "SHORT"} ${p.qty} ${p.contract}`).join(", ");
