@@ -647,3 +647,25 @@ def test_lead_api(tmp_path, monkeypatch):
         assert o["treasury"]["station"]["income"] == 300 and o["leads"][0]["id"] == lead["id"]
         pps = next(v for v in o["ventures"] if v["id"] == "V-PPS")
         assert pps["results"]["leads"] == 1
+
+
+def test_jarvis_brief_is_read_only_and_token_gated(tmp_path, monkeypatch):
+    import importlib
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv("STARNET_MODE", "sim")
+    monkeypatch.setenv("STARNET_PASSWORD", "pw")
+    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("STARNET_JARVIS_TOKEN", raising=False)
+    import backend.main as main
+    importlib.reload(main)
+    with TestClient(main.app) as c:
+        assert c.get("/api/jarvis/brief").status_code == 404                     # off until the token is set
+        monkeypatch.setenv("STARNET_JARVIS_TOKEN", "j" * 40)
+        assert c.get("/api/jarvis/brief").status_code == 401
+        assert c.get("/api/jarvis/brief", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        b = c.get("/api/jarvis/brief", headers={"Authorization": "Bearer " + "j" * 40}).json()
+        assert b["mission"]["name"] == "First Dollar" and any(v["id"] == "V-PPS" for v in b["ventures"])
+        assert c.post("/api/jarvis/brief", headers={"Authorization": "Bearer " + "j" * 40}).status_code == 405   # read only
+        assert c.get("/api/station", headers={"Authorization": "Bearer " + "j" * 40}).status_code == 401      # token opens nothing else
+        monkeypatch.setenv("STARNET_JARVIS_TOKEN", "short")
+        assert c.get("/api/jarvis/brief", headers={"Authorization": "Bearer short"}).status_code == 401       # weak tokens refused

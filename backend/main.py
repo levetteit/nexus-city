@@ -12,7 +12,7 @@ import json
 import os
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -249,7 +249,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Starnet trading city", lifespan=lifespan)
 
 PASSWORD = os.getenv("STARNET_PASSWORD")   # set this whenever the city is reachable from the internet
-OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook")   # health checks, and webhooks (they have their own secret)
+OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook", "/api/jarvis/brief")   # health checks, and webhooks (they have their own secret)
 
 
 class PasswordGate:
@@ -915,6 +915,30 @@ async def station_venture_outreach(rid: str, request: Request) -> dict:
     on = bool((await request.json()).get("on"))
     return st.store.update("ventures", rid, {"outreach_allowed": on}, "owner", f"outreach {'allowed' if on else 'off'} for {rid}",
                            kind="venture.outreach_allowed")
+
+
+@app.get("/api/jarvis/brief")
+def jarvis_brief(request: Request) -> dict:
+    """Read-only briefing for Jarvis's morning check-in. Its own token (STARNET_JARVIS_TOKEN), sent as a Bearer header;
+    it can read ULTRON's report and the board's summary, and nothing else. Off (404) until the token is set."""
+    token = os.getenv("STARNET_JARVIS_TOKEN", "")
+    given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(404)
+    if len(token) < 24 or not hmac.compare_digest(given.encode(), token.encode()):
+        raise HTTPException(401)
+    st = _station()
+    o = st.overview(engine)
+    reports = st.reports(1)
+    return {"report": reports[0] if reports else None, "now": o["now"], "coordinating": o["coordinating"],
+            "mission": o["mission"], "treasury": {k: o["treasury"][k] for k in ("pool", "runway_months", "city", "station", "ai", "goals")},
+            "ventures": [{k: v.get(k) for k in ("id", "name", "stage", "health", "pnl", "tasks", "results", "next_action")} for v in o["ventures"]],
+            "waiting_for_owner": [a["action"] for a in o["approvals"]] + [t["title"] for t in o["owner_tasks"]]
+                                 + [f"post by hand: {a['payload'].get('platform')}" for a in o["outbox"]["manual"]],
+            "outbound": o["outbound"], "connectors": o["connectors"], "alerts": [e["summary"] for e in o["alerts"]],
+            "warroom": {k: (o["warroom"] or {}).get(k) for k in ("at", "summary", "stop_doing", "start_doing")},
+            "leads_7d": sum(1 for l in o["leads"] if l["created_at"] >= (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()),
+            "error": o["error"]}
 
 
 @app.post("/api/station/ventures/{rid}/leads")
