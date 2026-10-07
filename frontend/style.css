@@ -170,6 +170,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #accounts .sum div { background: rgba(255, 255, 255, .05); border-radius: 8px; padding: 8px; text-align: center; }
 #accounts .sum b { display: block; font-size: 15px; }
 #accounts .sum small { color: var(--muted); font-size: 10px; }
+#orderlog { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(600px, calc(100vw - 24px)); max-height: 82vh; overflow: auto; z-index: 9; font-size: 12.5px; }
+#orderlog .row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; }
+#orderlog .card { background: rgba(255, 255, 255, .04); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; border-left: 3px solid #7c5cff; }
+#orderlog .card.funded { border-left-color: var(--green); } #orderlog .card.failed { border-left-color: var(--red); }
 #scale { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(600px, calc(100vw - 24px)); max-height: 82vh; overflow: auto; z-index: 9; font-size: 12.5px; }
 #scale .row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; }
 #scale .sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }

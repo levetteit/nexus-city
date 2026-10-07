@@ -117,3 +117,13 @@ def test_every_order_is_market_with_the_last_price(tmp_path):
     r.flatten_all(["MNQ"])                                   # FLATTEN ALL: market, with the price too
     flat = r.queue.get_nowait()[1]
     assert flat["action"] == "exit" and flat["orderType"] == "market" and flat["signalPrice"] == 25_000.0
+
+
+def test_order_log_is_readable_newest_first(tmp_path):
+    r = TradersPostRouter(str(tmp_path), webhooks=["https://example.test/hook"])
+    assert r.recent() == [] and r.status(1.0)["targets"] == 1
+    r._log("MNQ", {"action": "skip-open"}, "data 4.0 min old", 0)
+    r._log("MNQ", {"ticker": "MNQZ2026", "action": "buy", "quantity": 3}, "MNQ OG → shared webhook 1", 400, '{"error":"no subscription"}')
+    rows = r.recent()
+    assert [x["action"] for x in rows] == ["buy", "skip-open"]
+    assert rows[0]["http_status"] == "400" and "no subscription" in rows[0]["response"] and rows[1]["reason"] == "data 4.0 min old"
