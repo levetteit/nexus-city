@@ -54,12 +54,16 @@ def parse_terms(text: str, default: int = 20) -> list[tuple[str, int]]:
     return out[:15]
 
 
+UI_WORDS = {"ad", "ads", "popular", "bestseller", "seller", "sales", "stated", "reviews", "badge", "both", "none"}   # Etsy page labels, not phrases
+
+
 def suggest_terms(text: str) -> list[str]:
     """Search phrases written in `backticks` in a task's instructions or inputs (how the crew writes them)."""
     found = []
     for m in re.findall(r"`([^`\n]{3,60})`", text or ""):
         m = m.strip().lower()
-        if re.fullmatch(r"[a-z0-9 &'\-]+", m) and " " in m and m not in found and not m.endswith(".csv"):
+        if (re.fullmatch(r"[a-z0-9 &'\-]+", m) and " " in m and m not in found and not m.endswith(".csv")
+                and not (set(m.split()) & UI_WORDS)):
             found.append(m)
     return found[:12]
 

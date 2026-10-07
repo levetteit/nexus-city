@@ -1152,7 +1152,8 @@ def test_owner_etsy_scan_runs_through_the_api(ultron):
     s = u.store
     src = s.create("tasks", {"title": "Write the scan kit", "venture": "V-001", "assigned_agent": "A-002", "kind": "agent",
                              "instructions": "", "status": "done", "depends_on": [],
-                             "output": {"deliverable": "Type each phrase: `caregiver binder`, `elder care binder` and `scan.csv`"}}, "test", "t")
+                             "output": {"deliverable": "Type each phrase: `caregiver binder`, `elder care binder` and `scan.csv`. "
+                                                        "Skip `Ad by Etsy seller`; badge `Popular now`; unknown = `not stated`."}}, "test", "t")
     t = s.create("tasks", {"title": "Run the Etsy and Pinterest demand scan", "venture": "V-001", "assigned_agent": "OWNER",
                            "kind": "owner", "instructions": "Also try `senior care planner`.", "status": "waiting_owner",
                            "depends_on": [src["id"]], "output": None}, "test", "t")
