@@ -167,7 +167,6 @@ class Market:
         self.underlyings: dict[str, Underlying] = {
             "MNQ": Underlying("MNQ", 24500.0, iv=0.20, vol=0.22, tick_size=0.25),  # Micro Nasdaq-100
             "MES": Underlying("MES", 6850.0, iv=0.15, vol=0.17, tick_size=0.25),   # Micro S&P 500
-            "M2K": Underlying("M2K", 2480.0, iv=0.22, vol=0.24, tick_size=0.10),   # Micro Russell 2000
         }
 
     def step(self) -> None:

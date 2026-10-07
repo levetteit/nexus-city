@@ -49,7 +49,7 @@ costs and paper profit never fly. Preview with `?shuttle=payout` or `?shuttle=sa
 
 Every robot has its own look, in the city (standing in front of its building), in its streamer room and on
 the space station: OG_Pointer in a backwards cap and chain, SixMinuteSage in a beanie and prayer beads,
-SPX_Scout in glasses and a bow tie, SweepQueen with cat ears and neon shades, SmallCapKid with a propeller cap;
+SPX_Scout in glasses and a bow tie, SweepQueen with cat ears and neon shades, TheLookout in a visor and goggles;
 ULTRON wears a commander's crest, QA a hard hat, the Auditor a monocle, and so on.
 
 More apparel is **earned from real results and never taken back**:
@@ -737,6 +737,21 @@ Tap an agent for their card (job, status, what they're working on, milestones) a
 the same streamer room as the trading bots, with their current task and stats on the screens. Tap a building to
 see who works there. Everything shown is live station data.
 
+## The Lookout (`backend/bots/watcher.py`)
+
+The M2K bot is gone: the Russell added nothing to a strategy that trades NQ and ES. Its building is now
+**TheLookout** (NQ/ES LOOKOUT, district BIG BOARD), who watches the big contracts and **never trades**:
+
+- runs the PROC read (FFVGs, taps, 3-6m pointers, PROCs) on NQ and ES and calls each PROC with whether the
+  other market is with it ("NQ 4m PROC ↑ 10:32 · ES is with it"); those calls show in the city feed
+- keeps one read on his board: **together ↑ / together ↓** (both charts agree), **split** (they disagree:
+  careful), a market moving **alone**, or **quiet**
+- OG Pointer and SixMinuteSage only enter when ES agrees: that confirmation reads the **same shared engine**
+  as the Lookout's ES read (`proc.shared_engine`), so there is one read, never a copy
+- has no contracts and no position, sends no orders, and keeps watching through an account stop
+
+Nothing about the trading changed: same entries, same exits, same numbers in the backtests.
+
 ## Strategy Forge (`backend/forge.py`)
 
 New setups are found, tested honestly, shadow-traded on paper, and go live only when you approve. Open it with
@@ -887,11 +902,18 @@ real orders are blocked whenever prices are more than 2.5 minutes old. The
 it closes (needs a paid TradingView plan with webhooks and CME real-time data):
 
 1. In Render → your service → **Environment**, copy `STARNET_FEED_SECRET`.
-2. TradingView → open **MNQ1!** on the **1-minute** chart → Pine Editor → paste
+2. TradingView → open **NQ1!** on the **1-minute** chart → Pine Editor → paste
    the script → **Add to chart** → settings → paste the secret.
 3. **Create Alert** → Condition **Starnet feed → Any alert() function call** →
    Notifications: **Webhook URL** `https://<your-render-url>/api/feed` → Create.
-4. Repeat 2–3 on **MES1!** (MES confirms every MNQ entry).
+4. Repeat 2–3 on **ES1!** (ES confirms every entry).
+
+Like Macre, the bots read the **full-size** charts and execute on the micros: NQ1!'s candles feed the MNQ
+bots, ES1!'s the MES side, and orders still go to MNQ / MES. NQ and MNQ trade at the same price, but NQ's
+book is far deeper, so its wicks (and so its FFVGs, taps and pointers) are the clean ones; Yahoo's NQ=F /
+ES=F, which every backtest here used, are the full-size contracts too. MNQ1! / MES1! alerts still work on
+their own, but while an NQ1! / ES1! alert is feeding, a micro alert for the same market is ignored (the feed
+log says so: delete it). The account panel shows which chart feeds which symbol (`NQ → MNQ`).
 
 The account panel shows **Price data: TradingView · real-time** once it's flowing.
 After updating the script (it now also sends volume), re-create both alerts: TradingView keeps the old
@@ -1018,7 +1040,7 @@ other alert you set up:
    {"secret": "<your secret>", "ticker": "{{ticker}}", "signal": "long", "price": {{close}}}
    ```
    `signal` is `long`, `short` or `exit`. Alerts go to every bot on that symbol
-   (`MNQ1!`, `MES1!`, `M2K1!`), or add `"bot": "mnq-3m"` for one bot.
+   (`MNQ1!`, `MES1!`), or add `"bot": "mnq-3m"` for one bot.
 
 ## Going live (read this first)
 

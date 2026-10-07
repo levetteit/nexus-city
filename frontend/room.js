@@ -454,6 +454,7 @@ export class Room {
     if (b.status === "stopped") return "defeated";
     if (b.status === "off_duty") return "chill";
     if (b.status === "in_trade") return b.unrealized >= 0 ? "confident" : "nervous";
+    if (b.watcher) return /^split/.test(b.info?.read || "") ? "thinking" : "focused";
     if (this.data?.waiting) return "thinking";
     return "focused";
   }
@@ -679,8 +680,33 @@ export class Room {
     tex.needsUpdate = true;
   }
 
+  // the Lookout's big board: what NQ and ES are doing, and whether they agree
+  drawWatchBoard() {
+    const b = this.bot, i = b.info || {}, { g, tex } = this.screens.pnl;
+    g.fillStyle = "#0a0716"; g.fillRect(0, 0, W, H);
+    g.fillStyle = b.color; g.font = "bold 30px Inter, sans-serif";
+    g.fillText(b.persona?.handle || b.name, 24, 52);
+    g.fillStyle = "#9a93c8"; g.font = "20px Inter, sans-serif";
+    g.fillText(b.status === "disabled" ? "OFF" : "WATCHING NQ · ES  ·  NEVER TRADES", 24, 84);
+    const read = i.read || "quiet";
+    g.fillStyle = /^together ↑/.test(read) ? "#4dff9a" : /^together ↓/.test(read) ? "#ff5470" : /^split/.test(read) ? "#ffd34d" : "#cfc8ff";
+    g.font = "bold 44px Inter, sans-serif";
+    g.fillText(read.toUpperCase().slice(0, 26), 24, 160);
+    g.font = "bold 24px Inter, sans-serif";
+    Object.entries(i.marks || {}).forEach(([sym, m], k) => {
+      g.fillStyle = "#9a93c8"; g.fillText(sym, 24, 232 + k * 46);
+      g.fillStyle = /↑/.test(m) ? "#4dff9a" : /↓/.test(m) ? "#ff5470" : "#5c5688"; g.fillText(m, 96, 232 + k * 46);
+    });
+    g.fillStyle = "#cfc8ff"; g.font = "17px Inter, sans-serif";
+    g.fillText((i.setup || "").slice(0, 58), 24, 338);
+    g.fillStyle = "#5c5688"; g.font = "15px Inter, sans-serif";
+    g.fillText("OG Pointer & Sage wait for this read before they enter", 24, 380);
+    tex.needsUpdate = true;
+  }
+
   drawPnl() {
     if (this.kind === "agent") { this.drawAgentCard(); return this.drawExtras(); }
+    if (this.bot?.watcher) { this.drawWatchBoard(); return this.drawExtras(); }
     const b = this.bot, d = this.data, { g, tex } = this.screens.pnl;
     g.fillStyle = "#0a0716"; g.fillRect(0, 0, W, H);
     g.fillStyle = b.color; g.font = "bold 30px Inter, sans-serif";
@@ -916,6 +942,7 @@ function star(g, cx, cy, r) {
 
 export function moodEmoji(bot) {
   if (bot.status === "disabled") return "😴";
+  if (bot.watcher) return "👀";
   if (bot.status === "walked") return "🚶";
   if (bot.status === "stopped") return "😤";
   if (bot.status === "off_duty") return bot.realized >= 0 ? "😎" : "🫡";

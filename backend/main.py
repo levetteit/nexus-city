@@ -207,6 +207,7 @@ def state() -> dict:
         snap["delay_min"] = round(engine.market.delay_minutes, 1)
         snap["feed"] = engine.market.feed
         snap["feed_symbols"] = sorted(engine.market.realtime_symbols)   # symbols with a live TradingView alert
+        snap["feed_charts"] = {s: engine.market.charts.get(s, s) for s in snap["feed_symbols"]}   # MNQ <- NQ chart
         snap["feed_last"] = FEED_LOG[-1] if FEED_LOG else None
         if router:
             snap["execution"] = router.status(engine.market.delay_minutes)
@@ -567,7 +568,7 @@ def bot_room(bot_id: str) -> dict:
     return engine.bots[bot_id].room(engine.market)
 
 
-FULL_SIZE = {"NQ": "MNQ", "ES": "MES", "RTY": "M2K", "YM": "MYM"}   # full-size charts feed their micro
+FULL_SIZE = {"NQ": "MNQ", "ES": "MES", "RTY": "M2K", "YM": "MYM"}   # full-size charts feed their micro (the bots read NQ/ES)
 
 
 FEED_LOG: list[dict] = []   # the last few TradingView feed webhooks and what happened to them
@@ -605,8 +606,8 @@ async def feed(request: Request) -> dict:
     if engine is None or MODE != "live":
         _feed_note(False, "server still starting", ticker)
         raise HTTPException(503, "live mode is still starting")
-    sym = normalize_symbol(ticker)
-    sym = FULL_SIZE.get(sym, sym)
+    chart = normalize_symbol(ticker)
+    sym = FULL_SIZE.get(chart, chart)
     try:
         ts = int(float(p["t"]))
         ts = ts // 1000 if ts > 10**12 else ts
@@ -615,9 +616,12 @@ async def feed(request: Request) -> dict:
         _feed_note(False, "missing t/o/h/l/c: use the Starnet feed script as is", ticker)
         raise HTTPException(400, "need t, o, h, l, c")
     if sym not in engine.market.underlyings:
-        _feed_note(False, f"unknown symbol {ticker!r}: use the MNQ1! and MES1! charts", ticker)
+        _feed_note(False, f"unknown symbol {ticker!r}: use the NQ1! and ES1! charts", ticker)
         raise HTTPException(400, f"unknown symbol {ticker}")
-    engine.market.push(sym, ts, o, h, l, c)
+    if not engine.market.push(sym, ts, o, h, l, c, chart):
+        _feed_note(True, f"ignored: the {sym} candles come from the {engine.market.charts.get(sym)} chart; "
+                         f"delete this {chart} alert", ticker)
+        return {"ok": True, "symbol": sym, "ignored": True}
     if history:   # keep TradingView's own candles for future backtests (Yahoo's copy differs)
         try:
             vol = float(p["v"]) if p.get("v") not in (None, "", "NaN") else None
@@ -1325,6 +1329,7 @@ def _city_brief() -> dict:
     if MODE == "live":
         out["feed"] = {"source": engine.market.feed, "delay_min": round(engine.market.delay_minutes, 1),
                        "realtime_symbols": sorted(engine.market.realtime_symbols),
+                       "charts": {s: engine.market.charts.get(s, s) for s in sorted(engine.market.realtime_symbols)},
                        "last": FEED_LOG[-3:][::-1]}   # what happened to the last webhooks (ok / why rejected)
     if router:
         st = router.status(getattr(engine.market, "delay_minutes", 0.0))   # the sim market has no feed delay

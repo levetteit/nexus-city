@@ -1,6 +1,7 @@
 // Starnet real-time feed: sends every closed 1-minute candle to your Starnet City server.
 //
-// Setup (once per chart: do it on MNQ1! and on MES1!, both on the 1-minute timeframe):
+// Setup (once per chart: do it on NQ1! and on ES1!, both on the 1-minute timeframe).
+// The bots read the full-size charts, like Macre, and still trade MNQ / MES:
 //   1. Pine Editor → paste this → "Add to chart".
 //   2. Indicator settings → paste your STARNET_FEED_SECRET into "Feed secret".
 //   3. Create Alert → Condition: "Starnet feed" → "Any alert() function call"

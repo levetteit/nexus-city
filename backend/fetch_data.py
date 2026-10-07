@@ -2,10 +2,10 @@
 
 Yahoo keeps 1-minute history for about the last 30 days, served in chunks of
 up to 8 days. Micro contracts track the full-size ones tick for tick (same
-index, smaller multiplier), so NQ=F stands in for MNQ, ES=F for MES and
-RTY=F for M2K.
+index, smaller multiplier), so NQ=F stands in for MNQ and ES=F for MES.
+(M2K / RTY=F was dropped: the strategy only trades MNQ and MES.)
 
-  python -m backend.fetch_data --out data          # writes data/MNQ_1m.csv, MES_1m.csv, M2K_1m.csv
+  python -m backend.fetch_data --out data          # writes data/MNQ_1m.csv, MES_1m.csv
 
 Run it every few weeks and it merges new candles into the existing files, so
 your history keeps growing past Yahoo's 30-day window.
@@ -20,7 +20,7 @@ import sys
 import time
 import urllib.request
 
-SOURCES = {"MNQ": "NQ=F", "MES": "ES=F", "M2K": "RTY=F"}
+SOURCES = {"MNQ": "NQ=F", "MES": "ES=F"}
 URL = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}?interval=1m&period1={p1}&period2={p2}&includePrePost=true"
 
 

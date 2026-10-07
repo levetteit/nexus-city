@@ -533,6 +533,7 @@ const STATUS_TEXT = {
   stopped: () => "account stop · sent home",
   walked: (b) => `${b.info?.inverses ?? 3} pointer inverses · walked away`,
   disabled: () => "turned off",
+  watching: (b) => `watching NQ · ES · ${b.info?.read ?? "quiet"}`,
 };
 const fmt = (v) => `$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const money = (v) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -557,7 +558,9 @@ function applyState(s) {
     const star = bot.id === top.id && top.realized > 0 ? "★ " : "";
     const live = bot.status === "in_trade" ? ` <span class="earned ${bot.unrealized < 0 ? "neg" : ""}">(${money(bot.unrealized)} open)</span>` : "";
     const gadget = tierOf(bot.career_best) > 0 ? ` <span title="${GADGETS[tierOf(bot.career_best)][2]}">${"💎".repeat(Math.min(3, Math.ceil(tierOf(bot.career_best) / 3)))}</span>` : "";
-    b.tag.innerHTML = `<div class="name">${moodEmoji(bot)} ${star}${bot.name}${gadget}</div><div class="status ${statusCls}">${STATUS_TEXT[bot.status](bot)}</div><div class="earned ${bot.realized < 0 ? "neg" : ""}">earned ${money(bot.realized)}${live}</div>`;
+    const earned = bot.watcher ? `<div class="earned">confirms for the traders · never trades</div>`
+      : `<div class="earned ${bot.realized < 0 ? "neg" : ""}">earned ${money(bot.realized)}${live}</div>`;
+    b.tag.innerHTML = `<div class="name">${moodEmoji(bot)} ${star}${bot.name}${gadget}</div><div class="status ${statusCls}">${(STATUS_TEXT[bot.status] || (() => bot.status))(bot)}</div>${earned}`;
     b.tag.classList.toggle("dim", bot.status === "disabled");
     b.tag.classList.toggle("off", bot.status === "disabled");
     b.status = bot.status;
@@ -654,8 +657,11 @@ function execRows(s) {
   const x = s.execution, live = s.feed === "tradingview";
   // MNQ trades and MES confirms: both need the real-time feed, or the late MES candles are lost
   const missing = live ? ["MNQ", "MES"].filter((x) => !(s.feed_symbols || []).includes(x)) : [];
-  const data = `<div class="row"><span>Price data</span><span class="${live && !missing.length ? "pos" : missing.length ? "neg" : ""}">${live ? `TradingView · real-time (${(s.feed_symbols || []).join(", ")})` : `Yahoo · ${Math.round(s.delay_min)}m delayed`}</span></div>
-    ${missing.length ? `<div class="halt">⚠️ ${missing.join(" & ")} not on the real-time feed: add the Starnet feed alert on the ${missing.map((x) => x + "1!").join(" / ")} 1-minute chart too</div>` : ""}
+  const BIG = { MNQ: "NQ", MES: "ES" }, charts = s.feed_charts || {};
+  const micro = live ? (s.feed_symbols || []).filter((x) => charts[x] === x) : [];
+  const data = `<div class="row"><span>Price data</span><span class="${live && !missing.length ? "pos" : missing.length ? "neg" : ""}">${live ? `TradingView · real-time (${(s.feed_symbols || []).map((x) => charts[x] && charts[x] !== x ? `${charts[x]} → ${x}` : x).join(", ")})` : `Yahoo NQ/ES · ${Math.round(s.delay_min)}m delayed`}</span></div>
+    ${missing.length ? `<div class="halt">⚠️ ${missing.join(" & ")} not on the real-time feed: add the Starnet feed alert on the ${missing.map((x) => (BIG[x] || x) + "1!").join(" / ")} 1-minute chart too</div>` : ""}
+    ${micro.length ? `<div class="halt">The bots read the big charts: move the feed alert${micro.length > 1 ? "s" : ""} from ${micro.map((x) => x + "1!").join(" / ")} to ${micro.map((x) => (BIG[x] || x) + "1!").join(" / ")}</div>` : ""}
     ${feedLast(s)}`;
   if (!x) return data;
   if (!x.configured) return data + `<div class="row"><span>Real orders</span><span>not connected</span></div>`;
@@ -1175,6 +1181,7 @@ function feedSetups(s) {   // what each working bot is thinking: PROC seen, wait
     if (!setup || b.status === "disabled" || lastSetup.get(b.id) === setup) continue;
     const first = !lastSetup.has(b.id);
     lastSetup.set(b.id, setup);
+    if (b.watcher && !/is with it/.test(setup)) continue;   // the Lookout reports only calls where NQ and ES agree
     if (!first && !/waiting for a PROC|entered|closed/.test(setup)) feed(`<b>${b.name}</b> ${setup}`, "think");
   }
 }
@@ -1243,9 +1250,28 @@ function wardrobeHtml(bot) {
     <div class="row"><span>Wearing</span><span style="text-align:right;max-width:65%">${worn}</span></div>${earn}`;
 }
 
+function renderWatcher(bot) {
+  const i = bot.info || {}, enabled = bot.status !== "disabled";
+  const marks = Object.entries(i.marks || {}).map(([sym, m]) => `<div class="row"><span>${sym} last</span><span>${m}</span></div>`).join("");
+  document.getElementById("worker-body").innerHTML = `
+    <h3 style="color:${bot.color}">${bot.name}</h3>
+    <p class="small">Watches the big contracts, NQ and ES, the way Macre does, and never trades. Orders still go to MNQ / MES.
+      OG Pointer and SixMinuteSage enter only when ES agrees with them: that's this read.</p>
+    <div class="row"><span>The read</span><span>${i.read ?? "quiet"}</span></div>
+    ${marks}
+    <div class="row"><span>Current NQ PROC</span><span>${i.proc ?? "none"}</span></div>
+    <div class="row"><span>Untapped NQ zones</span><span>${i.untapped_zones ?? 0}</span></div>
+    ${i.setup ? `<div class="row"><span>Last call</span><span style="text-align:right;max-width:65%">${i.setup}</span></div>` : ""}
+    <div class="row"><span>Charts</span><span>${i.pointer_tfs ? i.pointer_tfs.map((t) => t + "m").join("/") + " pointers" : ""}</span></div>
+    ${wardrobeHtml(bot)}
+    <button class="toggle ${enabled ? "off" : "on"}" data-bot="${bot.id}" data-action="${enabled ? "off" : "on"}">${enabled ? "SEND HOME" : "PUT ON SHIFT"}</button>
+    <p class="small">Sending the Lookout home only hides his board: the traders keep reading ES either way.</p>`;
+}
+
 function renderWorker() {
   const bot = state?.bots.find((b) => b.id === openWorkerId);
   if (!bot) return;
+  if (bot.watcher) return renderWatcher(bot);
   const enabled = bot.status !== "disabled";
   const pos = bot.position
     ? `<div class="row"><span>Holding</span><span>${bot.position.qty}× ${bot.position.contract}</span></div>
@@ -1267,7 +1293,7 @@ function renderWorker() {
     ${bot.info?.signals ? `<div class="row"><span>Signals from</span><span>${{ builtin: "built-in detection", tradingview: "TradingView alerts", both: "built-in + TradingView" }[bot.info.signals]}</span></div>` : ""}
     ${bot.info?.last_signal ? `<div class="row"><span>Last TV alert</span><span>${bot.info.last_signal}</span></div>` : ""}
     ${bot.info?.walk_after ? `<div class="row"><span>Pointer inverses</span><span>${bot.info.inverses} / ${bot.info.walk_after}</span></div>` : ""}
-    <div class="row"><span>Status</span><span>${STATUS_TEXT[bot.status](bot)}</span></div>
+    <div class="row"><span>Status</span><span>${(STATUS_TEXT[bot.status] || (() => bot.status))(bot)}</span></div>
     <div class="row"><span>Earned today</span><span class="${bot.realized >= 0 ? "pos" : "neg"}">${money(bot.realized)}</span></div>
     <div class="row"><span>Trades / wins</span><span>${bot.trades} / ${bot.wins}</span></div>
     ${pos}
