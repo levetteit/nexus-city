@@ -695,7 +695,17 @@ email and Stripe change at once.
 **Jarvis's morning check-in:** set `STARNET_JARVIS_TOKEN` (a long random string, at least 24 characters)
 on Render and the same value in the Claude cloud environment. A scheduled session reads
 `GET /api/jarvis/brief` (Bearer token; read-only: ULTRON's latest report, money, ventures, what's waiting
-for you) every weekday at 8:45 ET and briefs you. Without the token the address doesn't exist (404).
+for you, and `blockers`: what holds each venture up) every weekday at 8:45 ET and briefs you. Without the token
+the address doesn't exist (404).
+
+**Jarvis works the board for you** (`backend/jarvis.py`, `POST /api/jarvis/act`, same token). The owner's rule
+(Oct 7 2026): Jarvis does whatever needs doing on the board without asking, and only brings you what involves real
+money or an account. It can retry or cancel tasks, do owner tasks that need no account, fix a draft's words (it goes
+back through Compliance & QA), OK a waiting social post, pause or resume a venture, ask for a new channel plan or
+today's posts, decide $0 approvals with no account to open, run a routine or the War Room, give ULTRON and the
+crew a standing directive, and push a message to your phone. Everything it does is on the audit log as `jarvis`.
+Refused (403, yours): spending, funding goals, Stripe links, the trading desk and live orders, Forge promotions,
+killing a venture, and any task or launch that needs an account, a payment or your identity.
 
 **Setup:** it runs with the city, in both modes. Research and agent drafting need `ANTHROPIC_API_KEY` (the
 same key as the trading desk). Without it, records, approvals and the treasury still work.

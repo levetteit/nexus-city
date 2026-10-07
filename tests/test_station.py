@@ -1347,3 +1347,11 @@ def test_mail_login_cleans_a_pasted_app_password(monkeypatch):
     assert connectors.mail_login() == ("starnetstudio.team@gmail.com", "abcdefghijklmnop")
     msg = connectors.mail_error(Exception("b'[AUTHENTICATIONFAILED] Invalid credentials (Failure)'"))
     assert "app password" in msg and "AUTHENTICATIONFAILED" in msg
+
+
+def test_blockers_show_what_holds_each_venture(tmp_path):
+    u = Ultron(str(tmp_path), client=None)
+    b = u.blockers()
+    ids = [v["id"] for v in b["ventures"]]
+    assert "V-PPS" in ids and "V-001" not in ids
+    assert {"policy", "failures", "recent_posts"} <= set(b)

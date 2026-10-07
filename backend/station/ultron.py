@@ -220,6 +220,11 @@ class Ultron:
             return {"kind": "revise", "action": a["id"]}
         if self.cfg.get("warroom_now") or warroom.due(s, self.cfg, now):
             return {"kind": "warroom"}
+        if self.cfg.get("run_now"):   # Jarvis asked for a routine now
+            rid = self.cfg["run_now"].pop(0)
+            self._save_cfg()
+            if s.get("routines", rid):
+                return {"kind": "routine", "routine": rid}
         selling = [v for v in s.all("ventures") if v["id"] != "V-001" and v["stage"] in ACTIVE_STAGES and v.get("planned")
                    and v["stage"] != "approved" and not v.get("agent_run")]   # the Etsy shop sells through its own pipeline
         for v in selling:
@@ -682,6 +687,50 @@ class Ultron:
         return e
 
     # ---------------------------------------------------------------- reading
+    def blockers(self) -> dict:
+        """What is holding each venture up, from the records: open actions, unfinished tasks (and what they wait on),
+        products, and the last failures. Read-only, for Jarvis; no secrets (no URLs, keys or contact lists)."""
+        s = self.store
+        out = []
+        for v in sorted(s.all("ventures"), key=lambda v: v["id"]):
+            if v["id"] == "V-001" or v["stage"] in ("killed",):
+                continue
+            acts = [a for a in s.all("actions") if a.get("venture") == v["id"] and a["status"] not in ("sent", "rejected")]
+            tasks = [t for t in s.find("tasks", venture=v["id"]) if t["status"] != "done"]
+            mp = v.get("marketing_plan") or {}
+            out.append({
+                "id": v["id"], "name": v["name"], "stage": v["stage"], "autonomous": bool(v.get("autonomous")),
+                "launched_at": v.get("launched_at"), "product_at": v.get("product_at"), "content_day": v.get("content_day"),
+                "channels": v.get("channels"), "outreach_allowed": bool(v.get("outreach_allowed")),
+                "marketing_plan": "none" if not mp else ("failed " + mp["failed_at"]) if mp.get("failed_at") else "ok",
+                "actions": [{"id": a["id"], "kind": a["kind"], "status": a["status"], "why": a.get("why", "")[:100],
+                             "platform": (a.get("payload") or {}).get("platform"), "revisions": a.get("revisions", 0),
+                             "qa": ((a.get("qa") or {}).get("verdict"), str((a.get("qa") or {}).get("issues") or "")[:200]),
+                             "manual_reason": a.get("manual_reason"), "error": str((a.get("result") or {}).get("error") or "")[:160],
+                             "created_at": a.get("created_at")} for a in acts][-12:],
+                "tasks": [{"id": t["id"], "title": t["title"][:90], "status": t["status"], "kind": t.get("kind"),
+                           "attempts": t.get("attempts", 0), "error": (t.get("error") or "")[:160],
+                           "waits_on": [d for d in t.get("depends_on", []) if (s.get("tasks", d) or {}).get("status") != "done"]}
+                          for t in tasks],
+                "products": [{"title": p["title"][:80], "active": p.get("active")} for p in s.all("products") if p["venture"] == v["id"]],
+            })
+        posts = sorted((a for a in s.find("actions", kind="social.post") if a["status"] == "sent"),
+                       key=lambda a: a.get("sent_at", ""), reverse=True)[:10]
+        return {"ventures": out,
+                "approvals": [{"id": a["id"], "kind": a["kind"], "action": a["action"][:120], "cost": a.get("cost"),
+                               "venture": a.get("venture"), "owner_actions": (a.get("payload") or {}).get("owner_actions"),
+                               "reason": (a.get("reason") or "")[:240]} for a in s.find("approvals", status="pending")],
+                "owner_tasks": [{"id": t["id"], "venture": t.get("venture"), "title": t["title"][:120],
+                                 "instructions": (t.get("instructions") or "")[:400]} for t in s.find("tasks", status="waiting_owner")],
+                "post_by_hand": [{"id": a["id"], "venture": a.get("venture"), "platform": a["payload"].get("platform"),
+                                  "why": a.get("manual_reason"), "text": a["payload"].get("text", "")[:200]}
+                                 for a in s.find("actions", status="manual")],
+                "recent_posts": [{"venture": a.get("venture"), "platform": a["payload"].get("platform"), "sent_at": a.get("sent_at"),
+                                  "text": a["payload"].get("text", "")[:140]} for a in posts],
+                "failures": [{"at": e["at"], "kind": e["kind"], "summary": e["summary"][:160]}
+                             for e in s.events(400) if "fail" in e["kind"] or e.get("severity") in ("ERROR", "ACTION NEEDED")][:20],
+                "policy": dict(actions.POLICY), "auto_launch": AUTO_LAUNCH, "max_experiments": MAX_EXPERIMENTS}
+
     def health(self, v: dict) -> int:
         """0-100: money, progress and time since the last progress."""
         if v["id"] == "V-001":

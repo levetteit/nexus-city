@@ -51,3 +51,15 @@ def test_scale_plan(client):
     p = c.get("/api/scale").json()
     assert p["mode"] == "sim" and p["accounts"][0]["stage"] == "evaluation"
     assert p["next_eval"]["can_fund"] is False and "Set the evaluation price" in p["next_eval"]["text"]
+
+
+def test_jarvis_act_needs_its_token_and_refuses_money(client, monkeypatch):
+    c, main = client
+    assert c.post("/api/jarvis/act", json={"op": "warroom"}).status_code == 404     # off until the token is set
+    monkeypatch.setenv("STARNET_JARVIS_TOKEN", "t" * 32)
+    assert c.post("/api/jarvis/act", json={"op": "warroom"}).status_code == 401
+    h = {"Authorization": "Bearer " + "t" * 32}
+    if main.station is None:
+        return
+    assert c.post("/api/jarvis/act", json={"op": "venture.stage", "id": "V-001", "stage": "paused", "why": "x"}, headers=h).status_code == 403
+    assert c.post("/api/jarvis/act", json={"op": "warroom"}, headers=h).json() == {"queued": "warroom"}
