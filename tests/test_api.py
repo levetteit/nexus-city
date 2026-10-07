@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(scope="module")
 def client():
-    os.environ.update({"STARNET_MODE": "sim", "STARNET_PASSWORD": "pw", "STARNET_FEED_SECRET": "s3cret"})
+    os.environ.update({"NEXUS_MODE": "sim", "NEXUS_PASSWORD": "pw", "NEXUS_FEED_SECRET": "s3cret"})
     import backend.main as main
     importlib.reload(main)
     return TestClient(main.app), main
@@ -56,7 +56,7 @@ def test_scale_plan(client):
 def test_jarvis_act_needs_its_token_and_refuses_money(client, monkeypatch):
     c, main = client
     assert c.post("/api/jarvis/act", json={"op": "warroom"}).status_code == 404     # off until the token is set
-    monkeypatch.setenv("STARNET_JARVIS_TOKEN", "t" * 32)
+    monkeypatch.setenv("NEXUS_JARVIS_TOKEN", "t" * 32)
     assert c.post("/api/jarvis/act", json={"op": "warroom"}).status_code == 401
     h = {"Authorization": "Bearer " + "t" * 32}
     if main.station is None:

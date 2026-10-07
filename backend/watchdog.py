@@ -91,11 +91,11 @@ class Watchdog:
         out: list[tuple[str, str]] = []
         for key, msg in problems.items():
             if key not in self.active:
-                out.append(("🚨 Starnet: data problem", msg))
+                out.append(("🚨 Nexus City: data problem", msg))
         for key in list(self.active):
             if key not in problems:
                 what = f"{key.split(':')[1]} is back on the real-time feed" if key.startswith("feed:") else "Candles are flowing again"
-                out.append(("✅ Starnet: fixed", what))
+                out.append(("✅ Nexus City: fixed", what))
         self.active = problems
 
         if et.weekday() < 5 and (et.hour, et.minute) >= CHECK_AT and self.checked_on != et.date().isoformat():
@@ -117,7 +117,7 @@ class Watchdog:
                          + (f" · last error: {desk.last_error}" if desk.enabled and desk.last_error else ""))
         lines.append("Renew your TradingView alerts before they expire.")
         ok = not self.active and live and not (router and router.last_error)
-        return ("✅ Starnet systems check: all good" if ok else "⚠️ Starnet systems check: needs a look", "\n".join(lines))
+        return ("✅ Nexus City systems check: all good" if ok else "⚠️ Nexus City systems check: needs a look", "\n".join(lines))
 
     def status(self) -> dict:
         return {"expected_feed": self.expected, "problems": list(self.active.values()), "checked_on": self.checked_on}

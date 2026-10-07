@@ -1,18 +1,18 @@
-// Starnet real-time feed: sends every closed 1-minute candle to your Starnet City server.
+// Nexus City real-time feed: sends every closed 1-minute candle to your Nexus City server.
 //
 // Setup (once per chart: do it on NQ1! and on ES1!, both on the 1-minute timeframe).
 // The bots read the full-size charts, like Macre, and still trade MNQ / MES:
 //   1. Pine Editor → paste this → "Add to chart".
-//   2. Indicator settings → paste your STARNET_FEED_SECRET into "Feed secret".
-//   3. Create Alert → Condition: "Starnet feed" → "Any alert() function call"
+//   2. Indicator settings → paste your NEXUS_FEED_SECRET (or the legacy STARNET_FEED_SECRET) into "Feed secret".
+//   3. Create Alert → Condition: "Nexus City feed" → "Any alert() function call"
 //      → Notifications: tick "Webhook URL" → https://<your-render-url>/api/feed → Create.
 //      Leave the message box alone: the script writes the message itself.
 // TradingView needs a paid plan for webhooks, and CME real-time data for the candles
 // to be live (without it TradingView's futures data is delayed too).
 //@version=6
-indicator("Starnet feed", overlay = true)
+indicator("Nexus City feed", overlay = true)
 
-secret = input.string("", "Feed secret", tooltip = "STARNET_FEED_SECRET from your Render environment")
+secret = input.string("", "Feed secret", tooltip = "NEXUS_FEED_SECRET (or the legacy STARNET_FEED_SECRET) from your Render environment")
 
 if barstate.isconfirmed and timeframe.period == "1"
     msg = '{"secret":"' + secret + '","ticker":"' + syminfo.ticker + '","t":' + str.tostring(math.floor(time / 1000)) +
@@ -21,4 +21,4 @@ if barstate.isconfirmed and timeframe.period == "1"
     alert(msg, alert.freq_once_per_bar_close)
 
 plotchar(barstate.isconfirmed and timeframe.period != "1", "wrong timeframe", "!", location.top, color.red,
-         text = "Starnet feed needs the 1-minute chart")
+         text = "Nexus City feed needs the 1-minute chart")

@@ -20,12 +20,13 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+from ..env import env
 from .store import Store, now_iso
 
 # Claude Opus 5.5 list prices (USD per million tokens) and web search ($ per search)
 PRICES = {"input": 4.00, "output": 20.00, "cache_read": 0.20, "cache_write": 5.00, "search": 0.01}
-AI_BUDGET = float(os.getenv("STARNET_STATION_AI_BUDGET", "50"))        # $/month cap on the station's Claude usage
-PAYOUT_SPLIT = float(os.getenv("STARNET_PAYOUT_SPLIT", "0.9"))         # the trader's share of a Lucid payout
+AI_BUDGET = float(env("STATION_AI_BUDGET", "50"))        # $/month cap on the station's Claude usage
+PAYOUT_SPLIT = float(env("PAYOUT_SPLIT", "0.9"))         # the trader's share of a Lucid payout
 RESERVE_MONTHS = 1.0   # the pool keeps one month of bills before it funds anything new
 
 DEFAULT_BILLS = [
@@ -109,12 +110,13 @@ class Treasury:
         amount = (session.get("amount_total") or 0) / 100
         if not sid or session.get("payment_status") != "paid" or amount <= 0:
             return None
-        venture = ((session.get("metadata") or {}).get("starnet_venture")
+        meta = session.get("metadata") or {}   # links made before the rename carry starnet_* keys
+        venture = (meta.get("nexus_venture") or meta.get("starnet_venture")
                    or ((session.get("payment_link") and self.venture_for_link(session["payment_link"])) or None))
         with self.store.lock:   # the webhook and the Auditor's reconciliation can race: book each sale once
             if self.has_ref(sid):
                 return None
-            product = (session.get("metadata") or {}).get("starnet_product")
+            product = meta.get("nexus_product") or meta.get("starnet_product")
             sale = self.book("income", amount, "station", "stripe", f"Stripe sale {sid[-8:]}" + (f" · {product}" if product else ""),
                              venture=venture, ref=sid)
             self.book("expense", stripe_fee(amount), "station", "stripe", f"Stripe fee (est.) {sid[-8:]}", venture=venture,

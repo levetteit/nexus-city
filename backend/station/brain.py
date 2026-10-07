@@ -11,9 +11,10 @@ import json
 import os
 from typing import Optional
 
+from ..env import env
 from .economy import Treasury
 
-MODEL = os.getenv("STARNET_STATION_MODEL", "claude-opus-5-5")
+MODEL = env("STATION_MODEL", "claude-opus-5-5")
 
 
 class BudgetExceeded(RuntimeError):

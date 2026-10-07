@@ -135,7 +135,7 @@ OPPORTUNITY_SCHEMA = {
     "additionalProperties": False,
 }
 
-SYSTEM = ("You are the Market Research Agent of the StarNet Research Station, reporting to ULTRON, the "
+SYSTEM = ("You are the Market Research Agent of the Nexus City Research Station, reporting to ULTRON, the "
           "station's commander. You find real, current business opportunities and make them executable. "
           + MANDATE + " " + RULES)
 

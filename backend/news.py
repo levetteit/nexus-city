@@ -6,7 +6,7 @@ account. Around every high-impact USD event the bots:
 
 * take no new entries from `before` minutes ahead until `after` minutes after it
   (FOMC rate decisions and press conferences get `after_fomc`), and
-* close open trades `flatten` minutes before it (STARNET_NEWS_FLATTEN=0 to hold instead).
+* close open trades `flatten` minutes before it (NEXUS_NEWS_FLATTEN=0 to hold instead).
 
 The calendar is the free ForexFactory weekly feed (this week's events, refreshed
 every few hours and cached in data/news_calendar.json, so past weeks pile up for
@@ -23,15 +23,16 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
+from .env import env
 
 ET = ZoneInfo("America/New_York")
 FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 REFRESH_SECONDS = 6 * 3600   # the feed asks for few downloads; the week's events rarely change
 
-BEFORE = int(os.getenv("STARNET_NEWS_BEFORE", "10"))
-AFTER = int(os.getenv("STARNET_NEWS_AFTER", "15"))
-AFTER_FOMC = int(os.getenv("STARNET_NEWS_AFTER_FOMC", "45"))
-FLATTEN = int(os.getenv("STARNET_NEWS_FLATTEN", "2"))   # minutes before; 0 = keep open trades
+BEFORE = int(env("NEWS_BEFORE", "10"))
+AFTER = int(env("NEWS_AFTER", "15"))
+AFTER_FOMC = int(env("NEWS_AFTER_FOMC", "45"))
+FLATTEN = int(env("NEWS_FLATTEN", "2"))   # minutes before; 0 = keep open trades
 
 
 @dataclass(frozen=True)
@@ -136,7 +137,7 @@ class NewsCalendar:
             return False
         self.fetched_at = time.time()
         try:
-            req = urllib.request.Request(FEED_URL, headers={"User-Agent": "starnet-city"})
+            req = urllib.request.Request(FEED_URL, headers={"User-Agent": "nexus-city"})
             with urllib.request.urlopen(req, timeout=15) as r:
                 fresh = self.parse(json.load(r))
         except Exception as exc:   # keep trading on the cached calendar

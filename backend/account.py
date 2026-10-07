@@ -97,13 +97,13 @@ class Guards:
 def funded_guards() -> Guards:
     """Funded-stage guards. Same as the evaluation unless overridden: LucidFlex funded has no
     consistency rule, so the $1,200 cap is no longer required there, but on our 21 real days a
-    higher cap only helped in one half of the data. Override with STARNET_FUNDED_* env vars."""
-    import os
+    higher cap only helped in one half of the data. Override with NEXUS_FUNDED_* env vars."""
+    from .env import env
     g = Guards()
-    for env, attr in (("STARNET_FUNDED_DAILY_GOAL", "daily_goal"), ("STARNET_FUNDED_DAILY_CAP", "daily_cap"),
-                      ("STARNET_FUNDED_DAILY_STOP", "daily_stop"), ("STARNET_FUNDED_KEEP_ROOM", "payout_keep_room")):
-        if os.getenv(env):
-            setattr(g, attr, float(os.environ[env]))
+    for name, attr in (("FUNDED_DAILY_GOAL", "daily_goal"), ("FUNDED_DAILY_CAP", "daily_cap"),
+                       ("FUNDED_DAILY_STOP", "daily_stop"), ("FUNDED_KEEP_ROOM", "payout_keep_room")):
+        if env(name):
+            setattr(g, attr, float(env(name)))
     return g
 
 

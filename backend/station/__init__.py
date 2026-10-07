@@ -1,4 +1,4 @@
-"""The StarNet Space Station: ULTRON's business operations, run alongside the trading city.
+"""The Nexus City Space Station: ULTRON's business operations, run alongside the trading city.
 
 store.py     durable records (ventures, agents, tasks, approvals, opportunities, missions, routines)
              and the append-only event log every change is written to

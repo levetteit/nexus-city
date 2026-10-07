@@ -197,7 +197,7 @@ def readiness() -> list[str]:
     r = connectors.rails()
     return [f"Etsy: {'connected (the app can create digital-download listings)' if r['etsy_digital'] else 'NOT connected'}",
             f"Stripe: {'configured (payment links can be created)' if connectors.stripe_configured() else 'NOT configured'}",
-            f"Station storefront: {'live (it can host a product page)' if r['storefront'] else 'not live (needs Stripe and STARNET_PUBLIC_URL)'}",
+            f"Station storefront: {'live (it can host a product page)' if r['storefront'] else 'not live (needs Stripe and NEXUS_PUBLIC_URL)'}",
             f"Pinterest: {'connected' if r['pinterest'] else 'not checked: no Pinterest access yet (trial pending)'}"]
 
 

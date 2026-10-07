@@ -609,10 +609,10 @@ function b64ToBytes(b64) {
   return Uint8Array.from(s, (c) => c.charCodeAt(0));
 }
 async function turnOnAlerts() {
-  if (isIOS && !standalone) return alert("On iPhone, open Starnet from its home-screen icon first, then tap this again.");
+  if (isIOS && !standalone) return alert("On iPhone, open Nexus City from its home-screen icon first, then tap this again.");
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) return alert("This browser doesn't support notifications.");
   const perm = await Notification.requestPermission();
-  if (perm !== "granted") return alert("Notifications are blocked. Allow them in Settings → Notifications → Starnet.");
+  if (perm !== "granted") return alert("Notifications are blocked. Allow them in Settings → Notifications → Nexus City.");
   const { public_key } = await (await fetch("/api/push")).json();
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(public_key) });
@@ -660,7 +660,7 @@ function execRows(s) {
   const BIG = { MNQ: "NQ", MES: "ES" }, charts = s.feed_charts || {};
   const micro = live ? (s.feed_symbols || []).filter((x) => charts[x] === x) : [];
   const data = `<div class="row"><span>Price data</span><span class="${live && !missing.length ? "pos" : missing.length ? "neg" : ""}">${live ? `TradingView · real-time (${(s.feed_symbols || []).map((x) => charts[x] && charts[x] !== x ? `${charts[x]} → ${x}` : x).join(", ")})` : `Yahoo NQ/ES · ${Math.round(s.delay_min)}m delayed`}</span></div>
-    ${missing.length ? `<div class="halt">⚠️ ${missing.join(" & ")} not on the real-time feed: add the Starnet feed alert on the ${missing.map((x) => (BIG[x] || x) + "1!").join(" / ")} 1-minute chart too</div>` : ""}
+    ${missing.length ? `<div class="halt">⚠️ ${missing.join(" & ")} not on the real-time feed: add the Nexus City feed alert on the ${missing.map((x) => (BIG[x] || x) + "1!").join(" / ")} 1-minute chart too</div>` : ""}
     ${micro.length ? `<div class="halt">The bots read the big charts: move the feed alert${micro.length > 1 ? "s" : ""} from ${micro.map((x) => x + "1!").join(" / ")} to ${micro.map((x) => (BIG[x] || x) + "1!").join(" / ")}</div>` : ""}
     ${feedLast(s)}`;
   if (!x) return data;
@@ -1584,14 +1584,14 @@ const intro = { t: -1, from: camera.position.clone(), dur: 2.8 };
     el.classList.add("leaving");
     document.body.classList.remove("in-intro");
     setTimeout(() => el.remove(), 900);
-    try { sessionStorage.setItem("starnet_intro", "1"); } catch { /* private mode */ }
+    try { sessionStorage.setItem("nexus_intro", "1"); } catch { /* private mode */ }
   };
   if (el) {
     document.body.classList.add("in-intro");
     el.querySelector("button").onclick = start;
     el.addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
     let seen = false;
-    try { seen = !!sessionStorage.getItem("starnet_intro"); } catch { /* private mode */ }
+    try { seen = !!sessionStorage.getItem("nexus_intro"); } catch { /* private mode */ }
     if (seen) { intro.dur = 1.4; start(); }   // already entered this visit: just a quick swoop
   } else {
     camera.position.copy(HOME);

@@ -1,6 +1,6 @@
 {
-  "name": "Starnet City",
-  "short_name": "Starnet",
+  "name": "Nexus City",
+  "short_name": "Nexus City",
   "description": "Pointer-strategy trading bots in a live 3D city",
   "start_url": "/",
   "display": "standalone",

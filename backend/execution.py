@@ -4,7 +4,7 @@ How it works: every time a bot opens, adds to, trims or closes a trade, a webhoo
 goes to your TradersPost strategy; TradersPost places the market order on
 every Lucid (Tradovate) account subscribed to that strategy.
 
-  STARNET_TRADERSPOST_WEBHOOKS   your TradersPost strategy webhook URL
+  NEXUS_TRADERSPOST_WEBHOOKS   your TradersPost strategy webhook URL
                                  (comma-separate several to route to more strategies)
 
 Safety, in order of importance:
@@ -12,7 +12,7 @@ Safety, in order of importance:
     restart keeps whatever you chose.
   * New entries are blocked whenever the price data is more than
     MAX_DATA_DELAY_MIN minutes old: the free Yahoo feed is ~10 minutes late, so
-    real orders need the real-time TradingView feed (see tradingview/starnet_feed.pine).
+    real orders need the real-time TradingView feed (see tradingview/nexus_city_feed.pine).
   * No new entries from 15:50 ET: Tradovate's session for the micros ends at 16:00 (the bots are flat by 15:55).
   * Adds and exits are only sent for positions this router actually opened.
     Exits are always sent, even on stale data: getting flat is never blocked.
@@ -30,6 +30,7 @@ import os
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from .env import env
 
 MAX_DATA_DELAY_MIN = 2.5
 QUARTERS = {3: "H", 6: "M", 9: "U", 12: "Z"}
@@ -62,8 +63,8 @@ def front_month(symbol: str, today: Optional[date] = None) -> str:
 class TradersPostRouter:
     def __init__(self, data_dir: str, webhooks: Optional[list[str]] = None) -> None:
         self.data_dir = data_dir
-        env = os.getenv("STARNET_TRADERSPOST_WEBHOOKS", "")
-        self.webhooks = webhooks if webhooks is not None else [u.strip() for u in env.split(",") if u.strip()]
+        configured = env("TRADERSPOST_WEBHOOKS", "")
+        self.webhooks = webhooks if webhooks is not None else [u.strip() for u in configured.split(",") if u.strip()]
         self.state_path = os.path.join(data_dir, "execution.json")
         self.armed = False
         self.last_px: dict[str, float] = {}   # last price seen per symbol, sent with every order
@@ -98,7 +99,7 @@ class TradersPostRouter:
 
     def arm(self, on: bool) -> None:
         if on and not self.configured:
-            raise ValueError("set STARNET_TRADERSPOST_WEBHOOKS first")
+            raise ValueError("set NEXUS_TRADERSPOST_WEBHOOKS first")
         self.armed = on
         self._save()
 

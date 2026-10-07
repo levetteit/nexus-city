@@ -7,7 +7,7 @@
   QA         every listing goes through Compliance & QA like any post: trademarks, copyrighted phrases,
              claims, Etsy's rules. Fails get one revision, then they're dropped
   list       the Shop Manager creates the product in Printify (priced above cost, never below), and
-             Printify publishes it to the Etsy shop. STARNET_SHOP_LISTINGS_PER_DAY caps new listings
+             Printify publishes it to the Etsy shop. NEXUS_SHOP_LISTINGS_PER_DAY caps new listings
              (each costs $0.20 on Etsy)
   orders     every 6 hours the Shop Manager reads Printify's orders: units, retail sales, which listing
 
@@ -27,16 +27,17 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from ..env import env
 from . import connectors, media
 from .brain import Brain
 from .store import Store, now_iso
 
 VENTURE = "V-ETSY"
-LISTINGS_PER_DAY = int(os.getenv("STARNET_SHOP_LISTINGS_PER_DAY", "2"))
-RESEARCH_EVERY = timedelta(hours=float(os.getenv("STARNET_SHOP_RESEARCH_HOURS", "48")))
+LISTINGS_PER_DAY = int(env("SHOP_LISTINGS_PER_DAY", "2"))
+RESEARCH_EVERY = timedelta(hours=float(env("SHOP_RESEARCH_HOURS", "48")))
 ORDERS_EVERY = timedelta(hours=6)
 BRIEFS_PER_RUN = 4
-MIN_PROFIT_CENTS = int(os.getenv("STARNET_SHOP_MIN_PROFIT_CENTS", "400"))   # per item, after cost and Etsy's fees
+MIN_PROFIT_CENTS = int(env("SHOP_MIN_PROFIT_CENTS", "400"))   # per item, after cost and Etsy's fees
 ETSY_FEES = (0.065 + 0.03, 25 + 20)   # transaction + payment processing (share of price), processing + listing fee (cents)
 OPEN = ("qa", "revise", "ready", "manual", "waiting_owner")
 DISCLOSURE = ("\n\nDesigned by our studio with the help of AI tools. Made to order and shipped by our print partner, "

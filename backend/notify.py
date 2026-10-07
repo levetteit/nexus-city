@@ -2,10 +2,10 @@
 
 Two ways, use either or both:
 
-* Web Push to the Starnet app on your home screen (iPhone iOS 16.4+, Android).
+* Web Push to the Nexus City app on your home screen (iPhone iOS 16.4+, Android).
   Tap the bell in the city to turn it on. The app's push keys are generated on
-  first run and saved in data/vapid.pem (or set STARNET_VAPID_PRIVATE_KEY).
-* ntfy (free app, App Store / Play Store): set STARNET_NTFY_TOPIC to a long,
+  first run and saved in data/vapid.pem (or set NEXUS_VAPID_PRIVATE_KEY).
+* ntfy (free app, App Store / Play Store): set NEXUS_NTFY_TOPIC to a long,
   hard-to-guess topic name and subscribe to it in the ntfy app.
 
 Sent for: entries, adds, exits (with P&L), account stops/caps, news pauses, the
@@ -19,9 +19,10 @@ import json
 import os
 import urllib.request
 from typing import Optional
+from .env import env
 
-PUBLIC_URL = os.getenv("STARNET_PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL", "")   # Render sets the latter
-PUSH_CONTACT = os.getenv("STARNET_PUSH_CONTACT", "mailto:starnet-alerts@users.noreply.github.com")   # push services want a contact
+PUBLIC_URL = env("PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL", "")   # Render sets the latter
+PUSH_CONTACT = env("PUSH_CONTACT", "mailto:nexus-city-alerts@users.noreply.github.com")   # push services want a contact
 
 
 def _b64url(b: bytes) -> str:
@@ -32,7 +33,7 @@ class Notifier:
     def __init__(self, data_dir: str) -> None:
         self.data_dir = data_dir
         self.subs_path = os.path.join(data_dir, "push_subscriptions.json")
-        self.ntfy_topic = os.getenv("STARNET_NTFY_TOPIC", "").strip()
+        self.ntfy_topic = env("NTFY_TOPIC", "").strip()
         self.subs: list[dict] = []
         self._vapid = None
         self.public_key = ""
@@ -50,7 +51,7 @@ class Notifier:
             from py_vapid import Vapid
         except ImportError:   # pywebpush not installed: web push off, ntfy still works
             return
-        pem = os.getenv("STARNET_VAPID_PRIVATE_KEY")
+        pem = env("VAPID_PRIVATE_KEY")
         path = os.path.join(self.data_dir, "vapid.pem")
         if pem:
             v = Vapid.from_pem(pem.encode())
@@ -128,7 +129,7 @@ class Notifier:
             if msg:
                 self.send(*msg)
 
-    def send(self, title: str, body: str, tag: str = "starnet", url: str = "/") -> None:
+    def send(self, title: str, body: str, tag: str = "nexus", url: str = "/") -> None:
         """`url`: the page in the app a tap on the notification opens."""
         if not (self.subs or self.ntfy_topic):
             return

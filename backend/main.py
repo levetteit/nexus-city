@@ -1,6 +1,6 @@
 """Run with:  uvicorn backend.main:app --reload   then open http://localhost:8000
 
-STARNET_MODE=live runs the city on real candles with paper trading (see live.py).
+NEXUS_MODE=live runs the city on real candles with paper trading (see live.py).
 """
 from __future__ import annotations
 
@@ -21,12 +21,13 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from .env import env
 from .config import TICK_SECONDS
 from .bots.pointer import SIGNALS
 from .backtest import ET
 from .engine import Engine
 
-MODE = os.getenv("STARNET_MODE", "sim")
+MODE = env("MODE", "sim")
 POLL_SECONDS = 20
 engine = Engine() if MODE != "live" else None   # live mode builds its engine at startup (needs a download)
 router = None     # real-order router (live mode only), see execution.py
@@ -86,7 +87,7 @@ async def run_live() -> None:
     router.url_names = lambda: {a.webhook: a.name for a in book.accounts if a.webhook}
     closed = router.start()
     if closed:   # we restarted while real positions were open: they were just closed
-        notifier.send("🔄 Starnet restarted with real positions open",
+        notifier.send("🔄 Nexus City restarted with real positions open",
                       f"Sent exits for {', '.join(closed)}: the bots restart flat. Check your accounts.", "watchdog")
     from .watchdog import Watchdog
     watchdog = Watchdog(live.DATA_DIR)
@@ -340,8 +341,12 @@ def _station_notify(title: str, body: str) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global station
+    from .env import legacy_names_in_use
     from .station.ultron import Ultron
-    station = Ultron(os.getenv("STARNET_DATA_DIR", "data"), notify=_station_notify)
+    legacy = legacy_names_in_use()
+    if legacy:   # names only, never values
+        print(f"settings: {len(legacy)} deprecated STARNET_* name(s) still in use, rename to NEXUS_*: {', '.join(legacy)}")
+    station = Ultron(env("DATA_DIR", "data"), notify=_station_notify)
     task = asyncio.create_task(run_live() if MODE == "live" else run_city())
     station_task = asyncio.create_task(run_station())
     yield
@@ -349,24 +354,28 @@ async def lifespan(app: FastAPI):
     station_task.cancel()
 
 
-app = FastAPI(title="Starnet trading city", lifespan=lifespan)
+app = FastAPI(title="Nexus City", lifespan=lifespan)
 
-PASSWORD = os.getenv("STARNET_PASSWORD")   # set this whenever the city is reachable from the internet
+PASSWORD = env("PASSWORD")   # set this whenever the city is reachable from the internet
 OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook", "/api/jarvis/brief", "/api/jarvis/act")   # health checks, and webhooks (they have their own secret)
 
 
+COOKIE, LEGACY_COOKIE = "nexus_auth", "starnet_auth"   # the old name is still accepted: no one is logged out
+
+
 class PasswordGate:
-    """HTTP Basic auth for every page, API call and the WebSocket when STARNET_PASSWORD is set.
+    """HTTP Basic auth for every page, API call and the WebSocket when NEXUS_PASSWORD is set.
     A successful login also sets a cookie, so the browser's WebSocket gets in too."""
 
     def __init__(self, app) -> None:
         self.app = app
+        # the "starnet:" salt is kept so existing cookies stay valid (docs/MIGRATION_FROM_STARNET.md)
         self.token = hashlib.sha256(f"starnet:{PASSWORD}".encode()).hexdigest() if PASSWORD else None
 
     def _authorized(self, headers: dict) -> tuple[bool, bool]:
         """(allowed, set_cookie)"""
         cookie = headers.get(b"cookie", b"").decode()
-        if f"starnet_auth={self.token}" in cookie:
+        if f"{COOKIE}={self.token}" in cookie or f"{LEGACY_COOKIE}={self.token}" in cookie:
             return True, False
         auth = headers.get(b"authorization", b"").decode()
         if auth.lower().startswith("basic "):
@@ -388,7 +397,7 @@ class PasswordGate:
             if scope["type"] == "websocket":
                 return await send({"type": "websocket.close", "code": 4401})
             await send({"type": "http.response.start", "status": 401,
-                        "headers": [(b"www-authenticate", b'Basic realm="Starnet City"'),
+                        "headers": [(b"www-authenticate", b'Basic realm="Nexus City"'),
                                     (b"content-type", b"text/plain")]})
             return await send({"type": "http.response.body", "body": b"password required"})
         if not set_cookie:
@@ -397,7 +406,7 @@ class PasswordGate:
         async def send_with_cookie(msg):
             if msg["type"] == "http.response.start":
                 msg = {**msg, "headers": list(msg.get("headers", [])) + [
-                    (b"set-cookie", f"starnet_auth={self.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000".encode())]}
+                    (b"set-cookie", f"{COOKIE}={self.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000".encode())]}
             await send(msg)
         return await self.app(scope, receive, send_with_cookie)
 
@@ -585,8 +594,8 @@ def _feed_note(ok: bool, reason: str, ticker: str = "") -> None:
 
 @app.post("/api/feed")
 async def feed(request: Request) -> dict:
-    """Real-time 1m candles from the Starnet feed script on TradingView (tradingview/starnet_feed.pine)."""
-    secret = os.getenv("STARNET_FEED_SECRET") or os.getenv("STARNET_WEBHOOK_SECRET")
+    """Real-time 1m candles from the Nexus City feed script on TradingView (tradingview/nexus_city_feed.pine)."""
+    secret = env("FEED_SECRET") or env("WEBHOOK_SECRET")
     raw = await request.body()
     try:
         p = json.loads(raw)
@@ -595,8 +604,8 @@ async def feed(request: Request) -> dict:
         raise HTTPException(400, "body must be JSON")
     ticker = str(p.get("ticker", "")) if isinstance(p, dict) else ""
     if not secret:
-        _feed_note(False, "STARNET_FEED_SECRET is not set on the server", ticker)
-        raise HTTPException(503, "set STARNET_FEED_SECRET to enable the real-time feed")
+        _feed_note(False, "NEXUS_FEED_SECRET is not set on the server", ticker)
+        raise HTTPException(503, "set NEXUS_FEED_SECRET to enable the real-time feed")
     if not isinstance(p, dict) or not hmac.compare_digest(str(p.get("secret", "")), secret):
         got = str(p.get("secret", "")) if isinstance(p, dict) else ""
         hint = "empty: set the secret in the indicator, then create the alert again" if not got else \
@@ -613,7 +622,7 @@ async def feed(request: Request) -> dict:
         ts = ts // 1000 if ts > 10**12 else ts
         o, h, l, c = (float(p[k]) for k in ("o", "h", "l", "c"))
     except (KeyError, ValueError, TypeError):
-        _feed_note(False, "missing t/o/h/l/c: use the Starnet feed script as is", ticker)
+        _feed_note(False, "missing t/o/h/l/c: use the Nexus City feed script as is", ticker)
         raise HTTPException(400, "need t, o, h, l, c")
     if sym not in engine.market.underlyings:
         _feed_note(False, f"unknown symbol {ticker!r}: use the NQ1! and ES1! charts", ticker)
@@ -728,7 +737,7 @@ async def push_subscribe(request: Request) -> dict:
         n.subscribe(json.loads(await request.body()))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    n.send("🔔 Starnet alerts are on", "You'll get a buzz every time a bot enters, adds, or exits a trade.", "setup")
+    n.send("🔔 Nexus City alerts are on", "You'll get a buzz every time a bot enters, adds, or exits a trade.", "setup")
     return n.status()
 
 
@@ -884,12 +893,12 @@ def normalize_symbol(ticker: str) -> str:
 async def tradingview(request: Request) -> dict:
     """TradingView alert webhook. Put a JSON message in the alert, for example:
 
-    {"secret": "<STARNET_WEBHOOK_SECRET>", "ticker": "{{ticker}}", "signal": "bullish_pointer",
+    {"secret": "<NEXUS_WEBHOOK_SECRET>", "ticker": "{{ticker}}", "signal": "bullish_pointer",
      "price": {{close}}, "high": {{high}}, "low": {{low}}, "tf": "{{interval}}"}
     """
-    secret = os.getenv("STARNET_WEBHOOK_SECRET")
+    secret = env("WEBHOOK_SECRET")
     if not secret:
-        raise HTTPException(503, "set STARNET_WEBHOOK_SECRET to enable the TradingView webhook")
+        raise HTTPException(503, "set NEXUS_WEBHOOK_SECRET to enable the TradingView webhook")
     try:
         payload = json.loads(await request.body())
     except ValueError:
@@ -1014,7 +1023,7 @@ async def station_email_test() -> dict:
     """Send a test email to the outreach inbox and log in to read it: both results, in plain words."""
     from .station import mailbox
     if not mailbox.configured():
-        raise HTTPException(400, "set the STARNET_SMTP_* and STARNET_MAIL_* settings on Render first")
+        raise HTTPException(400, "set the NEXUS_SMTP_* and NEXUS_MAIL_* settings on Render first")
     return await asyncio.to_thread(mailbox.test, _station().store)
 
 
@@ -1176,7 +1185,7 @@ def storefront_download(slug: str, session_id: str = "", file: int = 0):
     files = p.get("files") or [{"pdf": p["pdf"], "label": ""}]
     if not 0 <= file < len(files):
         raise HTTPException(404)
-    path = digital.pdf_path(os.getenv("STARNET_DATA_DIR", "data"), files[file]["pdf"])
+    path = digital.pdf_path(env("DATA_DIR", "data"), files[file]["pdf"])
     if not path:
         raise HTTPException(404)
     label = files[file].get("label", "").lower().replace(" ", "-")
@@ -1275,7 +1284,7 @@ async def station_feedback(request: Request) -> dict:
 def station_media(name: str):
     """A post's image card or a product design. Names are 128-bit random, so they're unguessable; nothing else is served here."""
     from .station import media
-    path = media.path_for(os.getenv("STARNET_DATA_DIR", "data"), name)
+    path = media.path_for(env("DATA_DIR", "data"), name)
     if not path:
         raise HTTPException(404)
     return FileResponse(path, media_type="image/png" if path.endswith(".png") else "image/jpeg")
@@ -1293,8 +1302,8 @@ async def station_venture_outreach(rid: str, request: Request) -> dict:
 
 
 def _jarvis_auth(request: Request) -> None:
-    """Jarvis's own token (STARNET_JARVIS_TOKEN), sent as a Bearer header. Off (404) until the token is set."""
-    token = os.getenv("STARNET_JARVIS_TOKEN", "")
+    """Jarvis's own token (NEXUS_JARVIS_TOKEN), sent as a Bearer header. Off (404) until the token is set."""
+    token = env("JARVIS_TOKEN", "")
     given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not token:
         raise HTTPException(404)
