@@ -51,7 +51,7 @@ after 3 invalidated PROCs in a session.
 
 Hard rules (enforced in code, not by you): daily goal +$600 (no new entries after), cap +$1,200 (flatten), \
 daily stop -$600 (flatten), stop after 3 losing trades in a row, EOD trailing drawdown $2,000 (MLL), no new \
-trades from 10 min before to 15 min after high-impact news (45 after FOMC), flat before 16:45 ET.
+trades from 10 min before to 15 min after high-impact news (45 after FOMC), no entries after 15:50 ET and flat by 15:55 ET (Tradovate's session for the micros ends at 16:00).
 
 Your one lever is the risk mode for the next session, and it can only take risk off:
 - normal: trade as usual. This is the default and the right answer on most days. The edge only pays if the \

@@ -1,8 +1,8 @@
 """Simulated futures market over the full trading day, every session.
 
 The trading day runs like CME equity futures under a prop firm's flat rule:
-it opens at 18:00 ET (Asia), runs through London and New York, and ends at
-16:45 ET, when every position must be flat. All times are US Eastern.
+it opens at 18:00 ET (Asia), runs through London and New York, and rolls at
+16:45 ET. The bots are flat by 15:55 ET: Tradovate's session for the micros ends at 16:00. All times are US Eastern.
 
 Prices follow geometric Brownian motion with a drift "regime" that switches
 between trending up, trending down and chop, and volatility that changes by
@@ -19,7 +19,10 @@ from typing import Optional
 # Minutes are counted from midnight of the day the session opens, so the
 # 18:00 open is 1080 and the next afternoon's 16:45 close is 1440 + 1005.
 SESSION_OPEN_MIN = 18 * 60              # 18:00 ET, Asia opens
-SESSION_CLOSE_MIN = 24 * 60 + 16 * 60 + 45   # 16:45 ET next day, flat by then
+SESSION_CLOSE_MIN = 24 * 60 + 16 * 60 + 45   # 16:45 ET next day: the trading day rolls (prop firm EOD)
+# Tradovate's session for the micros ends at 16:00 ET: an order after that never reaches the account. So the
+# bots stop opening (and adding) 10 minutes before and are flat 5 minutes before, whatever the day's close.
+FLAT_BY_MIN = 24 * 60 + 16 * 60              # 16:00 ET
 
 # (start, label, volatility multiplier), by minutes since midnight of the open day
 SESSIONS = [
@@ -196,6 +199,11 @@ class Market:
     @property
     def minutes_to_close(self) -> float:
         return SESSION_CLOSE_MIN - self.clock_min
+
+    @property
+    def minutes_to_flat(self) -> float:
+        """Minutes until 16:00 ET, when the broker's session ends: no entries in the last 10, flat by the last 5."""
+        return FLAT_BY_MIN - self.clock_min
 
     @property
     def clock_str(self) -> str:

@@ -308,7 +308,7 @@ class PointerBot(Bot):
             return None
 
         # direct 'long' / 'short' orders
-        if self.position or market.minutes_to_close <= 10:
+        if self.position or market.minutes_to_flat <= 10:
             return None
         target = float(sig["target"]) if sig.get("target") is not None else None
         entry = self._plan(side, market, "TradingView alert", target)
