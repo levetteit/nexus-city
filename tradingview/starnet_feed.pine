@@ -16,7 +16,7 @@ secret = input.string("", "Feed secret", tooltip = "STARNET_FEED_SECRET from you
 if barstate.isconfirmed and timeframe.period == "1"
     msg = '{"secret":"' + secret + '","ticker":"' + syminfo.ticker + '","t":' + str.tostring(math.floor(time / 1000)) +
          ',"o":' + str.tostring(open) + ',"h":' + str.tostring(high) + ',"l":' + str.tostring(low) +
-         ',"c":' + str.tostring(close) + '}'
+         ',"c":' + str.tostring(close) + ',"v":' + str.tostring(volume) + '}'
     alert(msg, alert.freq_once_per_bar_close)
 
 plotchar(barstate.isconfirmed and timeframe.period != "1", "wrong timeframe", "!", location.top, color.red,

@@ -659,7 +659,16 @@ function historyRows(s) {
   const syms = Object.keys(h.symbols);
   const span = syms.length ? `${h.symbols[syms[0]].first} → ${(h.symbols[syms[0]].last || "").slice(0, 10)}` : "saving…";
   return `<div class="row"><span><b>📼 Candle history</b></span><span>${h.days} days · ${span}</span></div>
-    ${syms.length ? `<div class="row"><span>Download</span><span>${syms.map((x) => `<a href="/api/history/${x}.csv" download>${x}</a>`).join(" · ")}</span></div>` : ""}`;
+    ${syms.length ? `<div class="row"><span>Download</span><span>${syms.map((x) => `<a href="/api/history/${x}.csv" download>${x}</a>`).join(" · ")}</span></div>` : ""}
+    ${tvRows(h)}`;
+}
+function tvRows(h) {   // the TradingView feed's own candles, saved as they arrive
+  const tv = h.tradingview || {}, syms = Object.keys(tv);
+  if (!syms.length) return `<div class="row"><span>TradingView candles</span><span>start with the first feed candle</span></div>`;
+  const first = syms.map((x) => tv[x].first).sort()[0];
+  const vol = syms.some((x) => tv[x].volume);
+  return `<div class="row"><span>TradingView candles</span><span>${h.tv_days} days since ${first}${vol ? " · with volume" : ""}</span></div>
+    <div class="row"><span>Download</span><span>${syms.map((x) => `<a href="/api/history/tradingview/${x}.csv" download>${x} (TV)</a>`).join(" · ")}</span></div>`;
 }
 
 function newsRows(s) {

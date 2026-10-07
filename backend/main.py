@@ -425,6 +425,13 @@ def history_status() -> dict:
     return history.status()
 
 
+@app.get("/api/history/tradingview/{symbol}.csv")
+def history_tv_csv(symbol: str):
+    if history is None or symbol not in history.status()["tradingview"]:
+        raise HTTPException(404, "no TradingView candles saved for that symbol yet")
+    return FileResponse(history.tv_path(symbol), media_type="text/csv", filename=f"{symbol}_tradingview_1m.csv")
+
+
 @app.get("/api/history/{symbol}.csv")
 def history_csv(symbol: str):
     if history is None or symbol not in history.status()["symbols"]:
@@ -517,6 +524,15 @@ async def feed(request: Request) -> dict:
         _feed_note(False, f"unknown symbol {ticker!r}: use the MNQ1! and MES1! charts", ticker)
         raise HTTPException(400, f"unknown symbol {ticker}")
     engine.market.push(sym, ts, o, h, l, c)
+    if history:   # keep TradingView's own candles for future backtests (Yahoo's copy differs)
+        try:
+            vol = float(p["v"]) if p.get("v") not in (None, "", "NaN") else None
+        except (TypeError, ValueError):
+            vol = None
+        try:
+            history.record_feed(sym, ts, o, h, l, c, vol)
+        except OSError as exc:   # a full disk must never stop the feed
+            history.last_error = f"tradingview candles: {exc}"[:200]
     _feed_note(True, "ok", sym)
     return {"ok": True, "symbol": sym}
 
