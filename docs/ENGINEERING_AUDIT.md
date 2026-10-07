@@ -453,5 +453,6 @@ testing guide.
 2. **Phase 3/4 — safe security fixes.** S-H1 (Origin check), S-H2 (live mode needs a password), S-H3 (HMAC
    cookie + Secure + throttle), M-1, M-2, L-1. A-H1, A-H2, A-H3, A-H4 and A-H5 change no trading behaviour.
 3. **Trading reliability that doesn't change strategy.** C-1, T-H2, T-H3, T-H5, T-H6, M-5.
-4. **Owner sign-off first.** T-H1, T-H4, T-H7, M-4, M-11 (these change trading behaviour); M-10 (send policy
+4. **Owner sign-off first.** T-H1, T-H4, T-H7, M-4, M-11 (these change trading behaviour).
+   **Owner decision (2026-10-07): approved.** They will be implemented with tests in the trading-reliability work; M-10 (send policy
    default); O-H1 (repository visibility/history); O-H2 (deploy filters).
