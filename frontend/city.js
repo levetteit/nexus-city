@@ -581,9 +581,7 @@ function execRows(s) {
     ${x.armed && !x.data_ok ? `<div class="halt">entries paused: price data is over ${x.max_delay} min old</div>` : ""}
     ${open ? `<div class="row"><span>On your accounts</span><span>${open}</span></div>` : ""}
     ${x.last_error ? `<div class="halt">last order failed: ${x.last_error}</div>` : ""}
-    <div class="exec-btns">${x.armed
-      ? `<button data-exec="disarm">DISARM</button><button class="danger" data-exec="flatten">FLATTEN ALL</button>`
-      : `<button class="arm" data-exec="arm">ARM REAL ORDERS</button>`}</div>`;
+    <div class="exec-btns">${x.armed ? `<button data-exec="disarm">DISARM</button>` : `<button class="arm" data-exec="arm">ARM REAL ORDERS</button>`}<button class="danger" data-exec="flatten">FLATTEN ALL</button></div>`;
 }
 
 const PHASES = { evaluation: "EVALUATION", funded: "FUNDED", failed: "FAILED" };
@@ -607,11 +605,13 @@ function renderAccount(a) {
        ${a.scale_micros ? `<div class="row"><span>Scaling plan</span><span>${a.scale_micros} micros max today</span></div>` : ""}
        ${a.payout_eligible ? `<button class="desk-btn" data-payout="${a.safe_payout || a.payout_limit}">💸 RECORD A PAYOUT</button>` : ""}`;
   document.getElementById("acct-sum").innerHTML = `
+    ${state.execution?.armed ? `<span class="neg">● REAL</span>` : ""}
     <span>${fmt(a.balance)}</span>
     <span class="${a.day_pnl >= 0 ? "pos" : "neg"}">today ${money(a.day_pnl)}</span>
     <span class="${room < 500 ? "neg" : ""}">${fmt(Math.max(0, room))} room</span>
     <span class="more">▾</span>`;
   document.getElementById("acct-body").innerHTML = `
+    ${execRows(state)}
     <div class="row"><span>Balance</span><span>${fmt(a.balance)}</span></div>
     ${stage}
     <div class="row"><span>Drawdown</span><span>${fmt(a.mll)}${a.mll_locked ? " 🔒" : ""} · <b class="${room < 500 ? "neg" : ""}">${fmt(Math.max(0, room))} room</b></span></div>
@@ -630,7 +630,6 @@ function renderAccount(a) {
     ${historyRows(state)}
     ${newsRows(state)}
     ${alertRows(state)}
-    ${execRows(state)}
     ${a.halted ? `<div class="halt">${a.halted}</div>` : ""}
     ${a.phase === "failed" || a.halted.includes("reset") ? `<button class="reset" data-reset>RESET EVALUATION</button>` : ""}
     ${state.mode === "live" ? `<button class="desk-btn" data-sync>🔄 SYNC WITH MY LUCID ACCOUNT</button>` : ""}`;
