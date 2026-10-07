@@ -581,6 +581,8 @@ function execRows(s) {
     ${x.armed && !x.data_ok ? `<div class="halt">entries paused: price data is over ${x.max_delay} min old</div>` : ""}
     ${open ? `<div class="row"><span>On your accounts</span><span>${open}</span></div>` : ""}
     ${x.last_error ? `<div class="halt">last order failed: ${x.last_error}</div>` : ""}
+    <div class="row"><span>Orders sent</span><span>${x.sent} ok · ${x.blocked} entries skipped · ${x.targets} webhook${x.targets === 1 ? "" : "s"}</span></div>
+    <button class="desk-btn" data-orderlog>📜 ORDER LOG: WHAT WAS SENT AND WHAT CAME BACK</button>
     <div class="exec-btns">${x.armed ? `<button data-exec="disarm">DISARM</button>` : `<button class="arm" data-exec="arm">ARM REAL ORDERS</button>`}<button class="danger" data-exec="flatten">FLATTEN ALL</button></div>`;
 }
 
@@ -803,6 +805,23 @@ async function openAccounts() {
       <div><b>${fmt(d.paid_out * 0.9)}</b><small>you've kept (90%)</small></div></div>
     ${cards || `<p class="note">Add each Lucid account you buy. The bots' trades are applied to every account, so you can see each one's drawdown room, evaluation progress and payouts. Give an account its own TradersPost webhook and accounts that must stop (target reached, daily stop, close to the MLL) are left out of new trades automatically.</p>`}
     <button class="add" data-acct="add">＋ ADD A LUCID ACCOUNT</button>`;
+}
+
+// ---------------------------------------------------------------- real-order log (execution.py → data/orders.csv)
+async function openOrderLog() {
+  const panel = document.getElementById("orderlog"), body = document.getElementById("orderlog-body");
+  panel.classList.remove("hidden");
+  body.innerHTML = `<p class="note">loading…</p>`;
+  let rows;
+  try { rows = (await (await fetch("/api/execution/orders")).json()).orders; } catch { body.innerHTML = `<p class="note">the order log is only kept in live mode</p>`; return; }
+  if (!rows || !rows.length) { body.innerHTML = `<p class="note">No orders yet. A trade a bot opened before you armed isn't sent: only trades opened while armed go out, and their adds and exits follow.</p>`; return; }
+  const when = (iso) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  body.innerHTML = rows.map((r) => {
+    const st = +r.http_status, ok = st >= 200 && st < 300, skipped = st === 0 && r.action.startsWith("skip");
+    return `<div class="card ${ok ? "funded" : skipped ? "" : "failed"}"><div class="row"><b>${esc(r.action)} ${esc(r.quantity || "")} ${esc(r.ticker)}</b><span>${when(r.sent_utc)}</span></div>
+      <div class="row"><span>${esc(r.reason)}</span><span class="${ok ? "pos" : "neg"}">${ok ? `HTTP ${st} ✓` : skipped ? "skipped" : st ? `HTTP ${st}` : "no response"}</span></div>
+      ${r.response ? `<div class="row"><span style="white-space:normal;font-family:var(--mono, monospace);font-size:11px">${esc(r.response)}</span></div>` : ""}</div>`;
+  }).join("");
 }
 
 // ---------------------------------------------------------------- scale plan (backend/scale.py)
@@ -1170,6 +1189,7 @@ document.addEventListener("click", async (e) => {
   if (e.target.closest("[data-desk]")) openDesk();
   if (e.target.closest("[data-accounts]")) openAccounts();
   if (e.target.closest("[data-scale]")) openScale();
+  if (e.target.closest("[data-orderlog]")) openOrderLog();
   if (e.target.closest("[data-scale-set]")) {
     const p = prompt("What Lucid charges you for one LucidFlex 50K evaluation ($):", scaleData?.eval_price ?? "");
     if (p !== null) {

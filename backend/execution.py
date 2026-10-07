@@ -104,7 +104,17 @@ class TradersPostRouter:
     def status(self, delay_min: float) -> dict:
         return {"configured": self.configured, "armed": self.armed, "open": self.open,
                 "data_ok": delay_min <= MAX_DATA_DELAY_MIN, "max_delay": MAX_DATA_DELAY_MIN,
-                "sent": self.sent, "blocked": self.blocked, "last_error": self.last_error}
+                "sent": self.sent, "blocked": self.blocked, "last_error": self.last_error,
+                "targets": len(self.all_urls()), "shared": len(self.webhooks)}
+
+    def recent(self, n: int = 20) -> list[dict]:
+        """The last orders from data/orders.csv, newest first: what was sent, skipped or rejected, and what came back."""
+        path = os.path.join(self.data_dir, "orders.csv")
+        if not os.path.exists(path):
+            return []
+        with open(path, newline="") as f:
+            rows = list(csv.DictReader(f))
+        return rows[-n:][::-1]
 
     # ---------------------------------------------------------------- orders
     def start(self) -> list[str]:

@@ -563,6 +563,12 @@ async def execution_arm(request: Request) -> dict:
     return r.status(engine.market.delay_minutes)
 
 
+@app.get("/api/execution/orders")
+def execution_orders() -> dict:
+    """The real-order log, newest first: every order sent (with TradersPost's reply) and every entry skipped, and why."""
+    return {"orders": _router().recent(30)}
+
+
 @app.post("/api/execution/flatten")
 def execution_flatten() -> dict:
     """Kill switch: exit every real position, close the paper ones, disarm."""
