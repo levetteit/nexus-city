@@ -5,3 +5,6 @@ __pycache__/
 data/
 results.json
 .pytest_cache/
+.env.*
+!.env.example
+*.pem

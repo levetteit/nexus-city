@@ -31,6 +31,7 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from .env import env
+from .redact import redact
 
 MAX_DATA_DELAY_MIN = 2.5
 QUARTERS = {3: "H", 6: "M", 9: "U", 12: "Z"}
@@ -235,7 +236,7 @@ class TradersPostRouter:
                     await asyncio.sleep(1 + attempt)
                 ok = 200 <= status < 300
                 self.sent += ok
-                self.last_error = "" if ok else f"{payload['action']} {payload['ticker']}: HTTP {status} {body[:120]}"
+                self.last_error = "" if ok else redact(f"{payload['action']} {payload['ticker']}: HTTP {status} {body}")[:200]
                 name = self.url_names().get(url) or (f"shared webhook {self.webhooks.index(url) + 1}"
                                                      if url in self.webhooks else "webhook")
                 self._log(symbol, payload, f"{reason} → {name}", status, body)
@@ -256,4 +257,4 @@ class TradersPostRouter:
             if new:
                 w.writerow(["sent_utc", "symbol", "ticker", "action", "quantity", "reason", "http_status", "response"])
             w.writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), symbol, payload.get("ticker", ""),
-                        payload.get("action"), payload.get("quantity", ""), reason, status, body[:200]])
+                        payload.get("action"), payload.get("quantity", ""), redact(reason), status, redact(body)[:200]])

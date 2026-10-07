@@ -12,6 +12,7 @@ import os
 from typing import Optional
 
 from ..env import env
+from ..redact import redact
 from .economy import Treasury
 
 MODEL = env("STATION_MODEL", "claude-opus-5-5")
@@ -57,10 +58,10 @@ class Brain:
             resp = self.client.beta.messages.create(
                 model=MODEL, betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kw)
         except anthropic.APIStatusError as exc:
-            self.last_error = f"Claude API {exc.status_code}: {exc.message}"[:200]
+            self.last_error = redact(f"Claude API {exc.status_code}: {exc.message}")[:200]
             raise
         except anthropic.APIConnectionError as exc:
-            self.last_error = connection_problem(exc)
+            self.last_error = redact(connection_problem(exc))
             raise
         self.treasury.charge_ai(resp.usage, agent, venture, note)
         self.last_error = ""

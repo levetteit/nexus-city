@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
 from ..env import env
+from ..redact import redact
 from . import actions, connectors, credits, crew, digital, finance, kits, mailbox, marketing, recognition, research, results, shop, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
@@ -88,7 +89,7 @@ class Ultron:
         try:
             kits.sync(s)   # owner-made products that ship with the app (kits/)
         except OSError as exc:
-            self.last_error = f"kits: {exc}"[:200]
+            self.last_error = redact(f"kits: {exc}")[:200]
         for r in research.ROUTINES:
             if not s.get("routines", r["id"]):
                 s.create("routines", {"id": r["id"], "name": r["name"], "station": "research", "days": r["days"],
@@ -375,7 +376,7 @@ class Ultron:
                 self.busy = f"{t['title']} ({t['venture']})"
                 return crew.run_task(s, self.brain, t)
         except Exception as exc:
-            self.last_error = (self.brain.last_error or str(exc))[:200] if _is_connection(exc) else str(exc)[:200]
+            self.last_error = redact(self.brain.last_error or str(exc) if _is_connection(exc) else str(exc))[:200]
             if "credit balance" in str(exc).lower():
                 credits.mark_empty(s, now)
             if _is_connection(exc):
