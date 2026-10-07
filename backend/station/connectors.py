@@ -134,6 +134,25 @@ def email_configured() -> bool:
                                       "STARNET_MAIL_FROM", "STARNET_MAIL_ADDRESS"))
 
 
+def mail_login() -> tuple[str, str]:
+    """The mailbox login, cleaned: Google shows app passwords in groups of four ("abcd efgh ijkl mnop") and a
+    paste often keeps the spaces or quotes; an app password never contains either."""
+    user = (os.getenv("STARNET_SMTP_USER") or "").strip().strip("'\"")
+    pw = "".join((os.getenv("STARNET_SMTP_PASSWORD") or "").split()).strip("'\"")
+    return user, pw
+
+
+def mail_error(exc: Exception) -> str:
+    """Turn a login failure into what to check."""
+    msg = str(exc)
+    if any(k in msg for k in ("535", "AUTHENTICATIONFAILED", "Invalid credentials", "Username and Password not accepted",
+                              "Application-specific password required")):
+        return ("the mailbox refused the login: STARNET_SMTP_USER must be the full address of the account the app password "
+                "was made in, and STARNET_SMTP_PASSWORD the 16-letter app password (not the Gmail password). "
+                f"Server said: {msg[:120]}")
+    return msg[:200]
+
+
 def send_email(to: str, subject: str, body: str) -> dict:
     if not email_configured():
         raise ConnectorError("email isn't connected (STARNET_SMTP_* settings)")
@@ -146,10 +165,10 @@ def send_email(to: str, subject: str, body: str) -> dict:
     try:
         with smtplib.SMTP(host, port, timeout=30) as smtp:
             smtp.starttls()
-            smtp.login(os.getenv("STARNET_SMTP_USER"), os.getenv("STARNET_SMTP_PASSWORD"))
+            smtp.login(*mail_login())
             smtp.send_message(msg)
     except (smtplib.SMTPException, OSError) as exc:
-        raise ConnectorError(f"email failed: {exc}"[:200])
+        raise ConnectorError(f"email failed: {mail_error(exc)}"[:300])
     return {"sent_to": to}
 
 

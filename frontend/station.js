@@ -333,7 +333,8 @@ function renderMarketing() {
   const row = (name, on, how) => `<div class="conn"><span>${esc(name)}</span><span class="${on === true ? "pos" : "muted"}">${on === true ? "connected" : esc(on || how)}</span></div>`;
   $("#conn").innerHTML = row("Stripe (checkout links)", c.stripe, "not connected") + row("Stripe sales → treasury", c.stripe_webhook, "no webhook yet") +
     row("Email outreach", c.email, "not connected") +
-    row("Replies inbox (opt-outs + leads)", c.inbox && c.inbox.configured ? (c.inbox.error ? `error: ${c.inbox.error}` : c.inbox.checked_at ? true : "connected, first check soon") : "connects with email") + row("Facebook Page", c.social.includes("facebook"), "not connected") +
+    row("Replies inbox (opt-outs + leads)", c.inbox && c.inbox.configured ? (c.inbox.error ? `error: ${c.inbox.error}` : c.inbox.checked_at ? true : "connected, first check soon") : "connects with email") +
+    (c.email ? `<div class="conn"><span></span><span><button class="btn small" data-mailtest>Test email</button></span></div>` : "") + row("Facebook Page", c.social.includes("facebook"), "not connected") +
     row("Instagram", c.social.includes("instagram"), "not connected") + row("LinkedIn", c.social.includes("linkedin"), "off") +
     row("TikTok", c.tiktok) +
     row("Fiverr", c.fiverr) + row("Etsy (via Printify)", c.printify === true ? true : c.etsy) +
@@ -486,6 +487,10 @@ async function openRecord(col, id) {
 }
 
 document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-mailtest]")) {
+    toast("Testing: sending and logging in…");
+    return api("/api/station/email/test", {}).then((r) => alert(`Sending: ${r.send}\n\nReading replies: ${r.read}`)).catch((err) => toast(err.message)).then(load);
+  }
   const kitBtn = e.target.closest("[data-kit]");
   if (kitBtn) {
     const id = kitBtn.dataset.kit, price = +(($(`#kit-price-${id}`) || {}).value || 0);

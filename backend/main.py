@@ -879,6 +879,15 @@ async def station_kit_publish(kit_id: str, request: Request) -> dict:
         raise HTTPException(502, str(exc))
 
 
+@app.post("/api/station/email/test")
+async def station_email_test() -> dict:
+    """Send a test email to the outreach inbox and log in to read it: both results, in plain words."""
+    from .station import mailbox
+    if not mailbox.configured():
+        raise HTTPException(400, "set the STARNET_SMTP_* and STARNET_MAIL_* settings on Render first")
+    return await asyncio.to_thread(mailbox.test, _station().store)
+
+
 @app.get("/api/station/{collection}/{rid}")
 def station_record(collection: str, rid: str) -> dict:
     st = _station()

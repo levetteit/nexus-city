@@ -1338,3 +1338,12 @@ def test_outreach_inbox_honors_opt_outs_and_turns_replies_into_leads(ultron, mon
     again = mailbox.check(s, MON_0900 + timedelta(minutes=21), fetcher=lambda since: [m for m in msgs if m["uid"] > since])
     assert again == {"opt_outs": 0, "replies": 0, "ignored": 0}                                      # each message once
     assert actions.create(s, "outreach.email", "A-005", v["id"], {"to_email": "ann@roofco.com", "source_url": "https://x"}, "x") is None
+
+
+def test_mail_login_cleans_a_pasted_app_password(monkeypatch):
+    from backend.station import connectors
+    monkeypatch.setenv("STARNET_SMTP_USER", " starnetstudio.team@gmail.com ")
+    monkeypatch.setenv("STARNET_SMTP_PASSWORD", '"abcd efgh ijkl mnop"')
+    assert connectors.mail_login() == ("starnetstudio.team@gmail.com", "abcdefghijklmnop")
+    msg = connectors.mail_error(Exception("b'[AUTHENTICATIONFAILED] Invalid credentials (Failure)'"))
+    assert "app password" in msg and "AUTHENTICATIONFAILED" in msg
