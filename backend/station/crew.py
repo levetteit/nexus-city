@@ -274,7 +274,8 @@ def plan_venture(store: Store, brain: Brain, venture: dict, opp: dict) -> dict:
 
 
 def ready(store: Store, task: dict) -> bool:
-    return all((store.get("tasks", d) or {}).get("status") == "done" for d in task.get("depends_on", []))
+    # a cancelled dependency was dropped on purpose (by the owner or Jarvis): it no longer holds the work up
+    return all((store.get("tasks", d) or {}).get("status") in ("done", "cancelled") for d in task.get("depends_on", []))
 
 
 def run_task(store: Store, brain: Brain, task: dict) -> dict:

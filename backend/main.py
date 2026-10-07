@@ -352,7 +352,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Starnet trading city", lifespan=lifespan)
 
 PASSWORD = os.getenv("STARNET_PASSWORD")   # set this whenever the city is reachable from the internet
-OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook", "/api/jarvis/brief")   # health checks, and webhooks (they have their own secret)
+OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook", "/api/jarvis/brief", "/api/jarvis/act")   # health checks, and webhooks (they have their own secret)
 
 
 class PasswordGate:
@@ -1292,16 +1292,41 @@ async def station_venture_outreach(rid: str, request: Request) -> dict:
                            kind="venture.outreach_allowed")
 
 
-@app.get("/api/jarvis/brief")
-def jarvis_brief(request: Request) -> dict:
-    """Read-only briefing for Jarvis's morning check-in. Its own token (STARNET_JARVIS_TOKEN), sent as a Bearer header;
-    it can read ULTRON's report and the board's summary, and nothing else. Off (404) until the token is set."""
+def _jarvis_auth(request: Request) -> None:
+    """Jarvis's own token (STARNET_JARVIS_TOKEN), sent as a Bearer header. Off (404) until the token is set."""
     token = os.getenv("STARNET_JARVIS_TOKEN", "")
     given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not token:
         raise HTTPException(404)
     if len(token) < 24 or not hmac.compare_digest(given.encode(), token.encode()):
         raise HTTPException(401)
+
+
+@app.post("/api/jarvis/act")
+async def jarvis_act(request: Request) -> dict:
+    """Jarvis works the board for the owner (backend/jarvis.py): tasks, drafts, ventures, $0 decisions, directives to
+    ULTRON, a push to the owner. Money, accounts and the trading desk are refused (403): they stay the owner's."""
+    from . import jarvis
+    _jarvis_auth(request)
+    try:
+        b = await request.json()
+    except ValueError:
+        raise HTTPException(400, "body must be JSON")
+    try:
+        return jarvis.act(_station(), b if isinstance(b, dict) else {}, notify=_station_notify)
+    except jarvis.Refused as exc:
+        raise HTTPException(403, f"the owner's: {exc}")
+    except KeyError as exc:
+        raise HTTPException(404, f"not found: {exc}")
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.get("/api/jarvis/brief")
+def jarvis_brief(request: Request) -> dict:
+    """Briefing for Jarvis: ULTRON's report, the board's summary and what holds each venture up. What Jarvis may
+    change goes through /api/jarvis/act."""
+    _jarvis_auth(request)
     st = _station()
     o = st.overview(engine)
     reports = st.reports(1)
