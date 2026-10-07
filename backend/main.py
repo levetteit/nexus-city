@@ -322,7 +322,7 @@ async def run_station() -> None:
     while True:
         try:
             job = station.tick(engine, real_account=MODE == "live")
-            if MODE == "live":
+            if MODE == "live" and engine is not None:   # the live engine is still loading candles at startup
                 _scale_plan()   # keeps the next-evaluation goal in step with the accounts and the treasury
             if job:
                 await asyncio.to_thread(station.run_job, job)
@@ -1315,6 +1315,7 @@ def jarvis_brief(request: Request) -> dict:
             "leads_7d": sum(1 for l in o["leads"] if l["created_at"] >= (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()),
             "credits": {k: o["credits"][k] for k in ("state", "remaining", "added", "used", "today", "per_day_7d", "days_left")},
             "city": _city_brief(),
+            "blockers": st.blockers(),   # what holds each venture up, in detail (read-only)
             "error": o["error"]}
 
 
