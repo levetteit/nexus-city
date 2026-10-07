@@ -90,7 +90,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .pos { color: var(--green); } .neg { color: var(--red); }
 .note { font-size: 11px; color: var(--muted); margin: 10px 0 0; }
 
-#account { left: 16px; top: 52px; width: 290px; padding: 12px 14px; font-size: 12px; }
+#account { left: 16px; top: 52px; width: 290px; padding: 12px 14px; font-size: 12px;
+  max-height: calc(100dvh - 52px - 120px); overflow-y: auto; overscroll-behavior: contain; }   /* long in live mode: scroll inside */
 #account .acct-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
   font-family: var(--pixel); font-size: 8px; color: #d8d0ff; gap: 8px; }
 #account .phase { padding: 3px 6px; border-radius: 4px; background: #3a2c8f; }
@@ -258,7 +259,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
   #room-title span { display: none; }
   #room-bubble { top: calc(env(safe-area-inset-top) + 70px); font-size: 13px; }
   #room #room-close { font-size: 14px; min-width: 48px; }
-  #account { width: auto; right: 16px; padding: 8px 12px; font-size: 11px; }
+  #account { width: auto; right: 16px; padding: 8px 12px; font-size: 11px; max-height: calc(100dvh - 44px - env(safe-area-inset-top) - 24px); }
   #acct-sum { display: flex; margin-top: 2px; }
   #account:not(.expanded) #acct-body { display: none; }
   #account .acct-head { margin-bottom: 4px; }
