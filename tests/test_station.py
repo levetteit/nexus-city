@@ -1355,3 +1355,31 @@ def test_blockers_show_what_holds_each_venture(tmp_path):
     ids = [v["id"] for v in b["ventures"]]
     assert "V-PPS" in ids and "V-001" not in ids
     assert {"policy", "failures", "recent_posts"} <= set(b)
+
+
+def test_autonomous_ventures_get_an_offer(tmp_path):
+    from backend.station.ultron import offer_of
+    o = {"title": "Pet sitter binder", "product_format": "fillable PDF", "summary": "A binder for pet sitters.", "price_point": "$9-12"}
+    assert offer_of(o) == "fillable PDF · A binder for pet sitters. · price $9-12"
+    u = Ultron(str(tmp_path), client=None)
+    o = u.store.create("opportunities", {**o, "status": "promoted"}, "test")
+    v = u.store.create("ventures", {"name": "Pet sitter binder", "stage": "launch", "autonomous": True, "opportunity": o["id"],
+                                    "offer": None}, "test")
+    again = Ultron(str(tmp_path), client=None)
+    assert again.store.get("ventures", v["id"])["offer"].startswith("fillable PDF")
+
+
+def test_cut_off_answer_retries_with_less_thinking():
+    from types import SimpleNamespace
+    from backend.station.brain import Brain
+    calls = []
+
+    class B(Brain):
+        def __init__(self):
+            pass
+
+        def _request(self, agent, venture, note, **kw):
+            calls.append(kw["output_config"]["effort"])
+            stop = "max_tokens" if len(calls) == 1 else "end_turn"
+            return SimpleNamespace(stop_reason=stop, content=[SimpleNamespace(type="text", text='{"ok": true}')])
+    assert B().structured("A-001", "s", "p", {}) == {"ok": True} and calls == ["high", "low"]
