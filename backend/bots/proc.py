@@ -330,6 +330,15 @@ DEFAULTS = {
     "min_range_pts": 0.0,       # chop filter: average 1m high-low over the last 30 minutes must be at least this
 }
 
+# The full-size contract each micro's candles come from (Yahoo NQ=F / ES=F, or TradingView NQ1! / ES1!)
+BIG = {"MNQ": "NQ", "MES": "ES"}
+
+
+def chart_of(market: Market, symbol: str) -> str:
+    """The chart a symbol's candles really come from: the live market knows; otherwise the full-size one."""
+    return getattr(market, "charts", {}).get(symbol) or BIG.get(symbol, symbol)
+
+
 # One engine per (market, symbol, settings), shared by every bot that needs it
 _ENGINES: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
@@ -365,6 +374,8 @@ class ProcBot(Bot):
         self._day_open: Optional[float] = None       # 00:00 ET open
         self._day_hi = self._day_lo = None             # this trading day so far (from 18:00 ET)
         self._prev_range: Optional[tuple[float, float]] = None
+        self._chart = BIG.get(self.cfg.underlying, self.cfg.underlying)     # the chart this bot reads (NQ for MNQ)
+        self._partner_chart = BIG.get(self.p["confirm_with"], self.p["confirm_with"])
         self.reset_day()
 
     def reset_day(self) -> None:
@@ -380,6 +391,9 @@ class ProcBot(Bot):
         mod = int(market.clock_min) % (24 * 60)
         self._track_day(bar, mod)
         self.engine = shared_engine(market, self.cfg.underlying, self.p)
+        self._chart = chart_of(market, self.cfg.underlying)
+        if self.p["confirm_with"]:
+            self._partner_chart = chart_of(market, self.p["confirm_with"])
         tfs = self.p["pointer_tfs"]
         self._events = [(k, p) for k, p in self.engine.update(bar, mod) if p.tf in tfs]
         partner = self.p["confirm_with"]
@@ -493,7 +507,7 @@ class ProcBot(Bot):
             else:
                 self.pending.append(p)
                 self.last_event = (f"{p.tf}m PROC {arrow} at {market.clock_str} · waiting for "
-                                   f"{self.p['confirm_with']} to confirm ({self.p['confirm_mode']})")
+                                   f"{self._partner_chart} to confirm ({self.p['confirm_mode']})")
         still = []
         for q in self.pending:
             if q in ready:
@@ -503,7 +517,7 @@ class ProcBot(Bot):
             elif now - q.time < self.p["confirm_window"]:
                 still.append(q)
             else:
-                self.last_event = f"{q.tf}m PROC not confirmed by {self.p['confirm_with']} · skipped"
+                self.last_event = f"{q.tf}m PROC not confirmed by {self._partner_chart} · skipped"
         self.pending = still
         return ready
 
@@ -512,7 +526,7 @@ class ProcBot(Bot):
             self.pending = []
             self.my_proc = p
             arrow = "↑" if p.side == "long" else "↓"
-            both = f" + {self.p['confirm_with']}" if self._confirming and self.partner else ""
+            both = f" + {self._partner_chart}" if self._confirming and self.partner else ""
             self.last_event = f"{p.tf}m PROC {arrow}{both} off {p.zone.label()} · entered {p.side}"
             price = market.underlyings[self.cfg.underlying].price
             self.trims_done, self.trim_last = 0, None
@@ -567,7 +581,7 @@ class ProcBot(Bot):
         if mode in ("pointer", "partner_pointer"):
             eng = self.engine if mode == "pointer" else self.partner
             if eng is not None:
-                triggers += [f"{tf}m {'MES ' if mode == 'partner_pointer' else ''}pointer with the trade"
+                triggers += [f"{tf}m {self._partner_chart + ' ' if mode == 'partner_pointer' else ''}pointer with the trade"
                              for t, k, sd, tf in eng.recent if t == eng.last_t and k == "pointer" and sd == side]
         if triggers and pos.pnl(self.broker.mark(pos, market)) > 0 and self.add(market, triggers[0]):
             self.last_event = f"added to {pos.qty} contracts · {triggers[0]}"
@@ -605,7 +619,7 @@ class ProcBot(Bot):
                 out["proc"] = {"side": p.side, "tf": p.tf, "high": p.high, "low": p.low, "t": p.time,
                                "zone": p.zone.label()}
         out["waiting"] = len(self.pending)
-        out["confirm_with"] = self.p["confirm_with"] if self._confirming else None
+        out["confirm_with"] = self._partner_chart if self._confirming else None
         return out
 
     def chart(self, market: Market, tf: int = 1, count: int = 180) -> dict:
@@ -625,7 +639,7 @@ class ProcBot(Bot):
             out["proc"] = {"side": p.side, "tf": p.tf, "high": p.high, "low": p.low, "t": p.time - p.time % tf,
                            "zone": p.zone.label()}
         if self._confirming and self.partner:
-            out["partner"] = {"symbol": self.p["confirm_with"], "mode": self.p["confirm_mode"],
+            out["partner"] = {"symbol": self._partner_chart, "mode": self.p["confirm_mode"],
                               "marks": [{"t": t - t % tf, "kind": k, "side": sd, "tf": ptf}
                                         for t, k, sd, ptf in self.partner.recent
                                         if k in ("proc", "pointer") and t >= first]}
@@ -638,7 +652,7 @@ class ProcBot(Bot):
         return {"setup": self.last_event, "inverses": self.inverses, "walk_after": self.p["walk_after"],
                 "signals": self.p["signals"], "last_signal": self.last_signal,
                 "untapped_zones": len(live), "pointer_tfs": self.p["pointer_tfs"],
-                "confirm": (f"{self.p['confirm_with']} {self.p['confirm_mode']} within {self.p['confirm_window']}m"
+                "confirm": (f"{self._partner_chart} {self.p['confirm_mode']} within {self.p['confirm_window']}m"
                             if self._confirming else None),
                 "waiting": len(self.pending),
                 "proc": (f"{e.proc.tf}m {'bullish' if e.proc.side == 'long' else 'bearish'} "

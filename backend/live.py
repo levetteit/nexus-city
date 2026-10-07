@@ -1,8 +1,8 @@
-"""Live paper trading: the city runs on real MNQ / MES / M2K candles as they print.
+"""Live paper trading: the city runs on real MNQ / MES candles as they print.
 
 Start it with:  STARNET_MODE=live uvicorn backend.main:app
 
-* Candles come from Yahoo Finance (NQ=F / ES=F / RTY=F stand in for the micros).
+* Candles come from Yahoo Finance (NQ=F / ES=F, the full-size contracts, stand in for the micros).
   Yahoo's CME futures feed runs about 10 minutes behind, so the bots act on
   real prices, just 10 minutes late. That's fine for forward testing and not
   for real money: a live account needs a real-time feed from your broker.
@@ -50,6 +50,9 @@ class LiveMarket(ReplayMarket):
         self._prev_day = 0
         self.last_push: datetime | None = None   # last candle from the real-time TradingView feed
         self._pushed: dict[str, datetime] = {}
+        self._full_push: dict[str, datetime] = {}   # last candle from a full-size chart (NQ1! / ES1!)
+        # which chart each symbol's candles come from: Yahoo's NQ=F / ES=F are the full-size contracts
+        self.charts: dict[str, str] = {s: SOURCES[s].split("=")[0] for s in self.symbols if s in SOURCES}
 
     def poll(self) -> int:
         """Fetch the newest candles. Returns how many new timestamps are ready to step through."""
@@ -78,14 +81,25 @@ class LiveMarket(ReplayMarket):
                 break
         return added
 
-    def push(self, symbol: str, ts: int, o: float, h: float, l: float, c: float) -> None:
-        """A closed 1m candle pushed in real time (TradingView feed). Newer than Yahoo, so it wins."""
+    def push(self, symbol: str, ts: int, o: float, h: float, l: float, c: float, chart: str | None = None) -> bool:
+        """A closed 1m candle pushed in real time (TradingView feed). Newer than Yahoo, so it wins.
+        `chart` is the chart it came from (NQ for an NQ1! chart feeding MNQ). The full-size chart is the one
+        the strategy reads (Macre watches NQ/ES and executes on the micros), so while it's feeding, candles
+        from a micro chart of the same market are ignored. Returns False for an ignored candle."""
         if symbol not in self.underlyings:
-            return
+            return False
+        now = datetime.now(timezone.utc)
+        chart = chart or symbol
+        if chart != symbol:
+            self._full_push[symbol] = now
+        elif symbol in self._full_push and (now - self._full_push[symbol]).total_seconds() < 180:
+            return False
+        self.charts[symbol] = chart
         row = (datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(ET), o, h, l, c)
         if row[0] > self.last_seen:
             self._pending.setdefault(row[0], {})[symbol] = row
-        self.last_push = self._pushed[symbol] = datetime.now(timezone.utc)
+        self.last_push = self._pushed[symbol] = now
+        return True
 
     def release(self) -> int:
         """Move pushed/polled candles that are complete onto the timeline."""

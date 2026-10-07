@@ -203,17 +203,24 @@ def sync_bots(store: Store, engine) -> None:
     """Trading bots join the roster as Venture #1's crew; their status follows the city."""
     for b in engine.bots.values():
         aid = f"BOT-{b.cfg.id}"
-        status = {"in_trade": "WORKING", "scanning": "THINKING", "disabled": "ON BREAK"}.get(b.status, "WAITING")
+        status = {"in_trade": "WORKING", "scanning": "THINKING", "watching": "THINKING", "disabled": "ON BREAK"}.get(b.status, "WAITING")
         rec = store.get("agents", aid)
+        lookout = getattr(b, "strategy_name", "") == "NQ/ES lookout"
         if not rec:
-            store.create("agents", {"id": aid, "name": b.cfg.name, "role": "Trader", "department": "city", "kind": "bot",
-                                    "specialty": f"PROC strategy on {b.cfg.underlying}", "status": status,
+            store.create("agents", {"id": aid, "name": b.cfg.name, "role": "Lookout" if lookout else "Trader",
+                                    "department": "city", "kind": "bot",
+                                    "specialty": "watches NQ and ES for the traders, never trades" if lookout
+                                    else f"PROC strategy on {b.cfg.underlying}", "status": status,
                                     "current_venture": "V-001", "current_task": None, "tasks_done": 0,
                                     "achievements": []}, "city", "trading bot joined the station roster")
         elif rec.get("status") != status:
             with store.lock:   # live status, not an audited decision: keep it out of the event log
                 store.data["agents"][aid]["status"] = status
                 store._save("agents")
+    here = {f"BOT-{i}" for i in engine.bots}
+    for a in store.all("agents"):   # a bot that left the city (M2K): benched on the record, never deleted
+        if a.get("kind") == "bot" and a["id"] not in here and a.get("status") != "BENCHED":
+            store.update("agents", a["id"], {"status": "BENCHED"}, "city", "left the city: its building was handed over")
 
 
 def staff(store: Store, role: str, venture: str, by: str = "A-001") -> str:

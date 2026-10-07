@@ -25,7 +25,7 @@ export const LOOKS = {
   "mnq-6m": { finish: "matte", wear: ["beanie", "beads"], title: "Lo-fi zen" },
   "mes-3m": { finish: "pearl", wear: ["glasses", "bowtie"], title: "Data nerd" },
   "mes-6m": { finish: "carbon", wear: ["cat_ears", "shades_neon"], title: "Neon night-owl" },
-  "m2k": { finish: "copper", wear: ["propeller", "bandana"], title: "Chaotic gremlin" },
+  "watch": { finish: "navy", wear: ["visor_cap", "goggles", "scarf"], title: "Rooftop lookout" },
   "A-001": { finish: "crimson", wear: ["crest"], title: "Commander" },
   "A-002": { finish: "pearl", wear: ["goggles"], title: "Researcher" },
   "A-003": { finish: "navy", wear: ["glasses"], title: "Validator" },
