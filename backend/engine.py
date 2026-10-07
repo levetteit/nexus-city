@@ -18,6 +18,7 @@ class Engine:
     def __init__(self, broker: Broker | None = None, market=None, account: PropAccount | None = None,
                  workers=None, params: dict | None = None, news=None) -> None:
         self.news = news                # NewsCalendar: no trades around high-impact releases (news.py)
+        self.pending_params: dict | None = None   # owner-promoted Forge settings, switched in at the next session roll
         self.desk = None                # TradingDesk: may take risk off for a session (desk.py)
         self._desk_seen = None
         self._news_seen: set = set()
@@ -51,6 +52,9 @@ class Engine:
             self.events.clear()
             return []
         if self.market.day != before:
+            if self.pending_params:
+                self.apply_params(self.pending_params)
+                self.pending_params = None
             phase, could_pay = self.account.phase, self.account.payout_eligible
             self.account.end_of_day()
             for bot in self.bots.values():
@@ -120,6 +124,17 @@ class Engine:
             if bot.status not in ("disabled", "stopped", "off_duty", "walked"):
                 bot.halt(reason, "stopped" if loss else "off_duty", self.market)
         self.account.check(self._unrealized())
+
+    def apply_params(self, params: dict) -> None:
+        """Switch in promoted Strategy Forge settings (forge.py). Only settings the bots read at decision time
+        are allowed, so this is safe between sessions; the PROC zone settings never change here."""
+        from .forge import KNOBS
+        params = {k: v for k, v in params.items() if k in KNOBS}
+        for bot in self.bots.values():
+            bot.cfg = replace(bot.cfg, params={**bot.cfg.params, **params})
+            if hasattr(bot, "p"):
+                bot.p.update(params)
+        self.events.append({"type": "strategy_promoted", "params": params})
 
     def resume_after_sync(self) -> list[str]:
         """After the owner syncs with the real account: if it may trade again, bots the account sent home come back.

@@ -14,8 +14,8 @@ const FINISH = {
   carbon: { color: "#22232b", metalness: 0.6, roughness: 0.35 },
   copper: { color: "#d08a5a", metalness: 0.85, roughness: 0.3 },
   gold: { color: "#ffcf40", metalness: 0.95, roughness: 0.2, emissive: "#5a3d00" },
-  navy: { color: "#2c3a5e", metalness: 0.6, roughness: 0.35 },
-  crimson: { color: "#3a0f1a", metalness: 0.7, roughness: 0.3 },
+  navy: { color: "#4a5f96", metalness: 0.55, roughness: 0.35 },
+  crimson: { color: "#9a2238", metalness: 0.6, roughness: 0.3 },
   ivory: { color: "#e9e2cf", metalness: 0.2, roughness: 0.55 },
 };
 

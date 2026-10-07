@@ -101,7 +101,9 @@ class Scorecard:
                 for s, rows in data.items()}
         data = {s: rows for s, rows in data.items() if rows}
         market = ReplayMarket(data)
-        engine = Engine(market=market, account=copy.deepcopy(day["account"]), news=self.news)
+        from .forge import live_params
+        engine = Engine(market=market, account=copy.deepcopy(day["account"]), news=self.news,
+                        params=live_params(self.data_dir) or None)   # the settings the bots really trade with
         for bot_id, on in day["enabled"].items():
             if bot_id in engine.bots:
                 engine.bots[bot_id].status = "scanning" if on else "disabled"

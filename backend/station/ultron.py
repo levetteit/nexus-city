@@ -47,7 +47,7 @@ ACTIVE_STAGES = ("approved", "build", "launch", "operate", "measure", "optimize"
 REPORT_AT = (8, 30)   # ET, daily
 AUDIT_AT = (7, 0)     # ET, daily
 
-APPROVAL_KINDS = ("launch_venture", "fund_goal", "venture_decision", "spend")
+APPROVAL_KINDS = ("launch_venture", "fund_goal", "venture_decision", "spend", "strategy_promote")
 # The owner's rule (Oct 6 2026): a $0 venture the crew can run end to end on its own rails launches without
 # waiting; the owner is told and can kill it. It closes itself after KILL_AFTER days with no sale.
 AUTO_LAUNCH = os.getenv("STARNET_AUTO_LAUNCH", "1") not in ("0", "false", "off")
