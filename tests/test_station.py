@@ -1195,11 +1195,24 @@ def test_owner_etsy_scan_runs_through_the_api(ultron):
     assert done["status"] == "done" and done["scan"]["state"] == "done"
     text = done["output"]["deliverable"]
     assert "NS rather than guessed" in text and "Pinterest" in text and len(text) <= 6000
+    assert sm["listing_reviews_reliable"] and "DATA WARNING" not in text
     with open(os.path.join(s.dir, "scans", f"{t['id']}.csv")) as f:
         csv_text = f.read()
     assert csv_text.splitlines()[0].startswith("scan_date,search_term,rank") and csv_text.count("\n") == 5
     with pytest.raises(ValueError):
         u.etsy_scan(t["id"], [("x y", 1)], call=fake)                                     # done once
+
+    # what the V-006 scan hit: shops that clearly sell, but every listing shows 0 reviews and 0 favorites
+    row = lambda i, sales, reviews, favs, price=9.99: {"notes": "", "price_usd": price, "shop_sales_count": sales,
+                                                         "listing_review_count": reviews, "favorites": favs, "shop_review_count": 40,
+                                                         "fillable": "N", "year_in_title": "N", "page_count": NS}
+    from backend.station.etsyscan import NS, deliverable, summarize
+    bad = summarize([row(i, 373, 0, 0) for i in range(6)] + [row(9, 50, 0, 0, "8.0 CAD")])
+    assert not bad["listing_reviews_reliable"] and bad["listings_50plus_reviews"] is None and bad["non_usd_excluded"] == 1
+    note = deliverable({"date": "2026-10-07", "rows": [], "terms": [], "summary": bad}, "/x.csv")
+    assert "DATA WARNING" in note and "Do NOT use listing reviews" in note and "not converted" in note
+    good = summarize([row(i, 373, 80, 40) for i in range(4)] + [row(9, 500, 0, 0)])
+    assert good["listing_reviews_reliable"] and good["listings_50plus_reviews"] == 4
 
 
 def test_owner_kit_imports_and_publishes(ultron, tmp_path, monkeypatch):
@@ -1243,6 +1256,11 @@ def test_owner_kit_imports_and_publishes(ultron, tmp_path, monkeypatch):
 
     with pytest.raises(ValueError):
         kits.publish(s, "binder", 1.0)                                       # price out of range
+    s.update("ventures", v["id"], {"stage": "killed"}, "owner", "scan said kill")
+    assert next(x for x in kits.status(s) if x["id"] == "binder")["shelved"]
+    with pytest.raises(ValueError, match="shelved"):
+        kits.publish(s, "binder", 12.99)                                     # a killed venture's kit can't go on sale
+    s.update("ventures", v["id"], {"stage": "validate"}, "owner", "back on")
     out = kits.publish(s, "binder", 12.99)
     p = s.get("products", out["product"])
     assert p["price_usd"] == 12.99 and p["kit"] == "binder" and len(p["files"]) == 2 and p["active"]

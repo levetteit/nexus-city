@@ -162,10 +162,21 @@ def summarize(rows: list[dict]) -> dict:
     pct = lambda q: round(statistics.quantiles(prices, n=100, method="inclusive")[q - 1], 2) if len(prices) >= 2 else (prices[0] if prices else None)
     sales = [_num(r["shop_sales_count"]) for r in uniq]
     revs = [_num(r["listing_review_count"]) for r in uniq]
+    shop_revs = [_num(r["shop_review_count"]) for r in uniq]
+    # The API can return 0 listing reviews and 0 favorites for listings whose shops clearly sell. When nearly every
+    # listing from a shop with 100+ sales shows zeros, those two fields are not evidence of anything.
+    sellers = [r for r in uniq if (_num(r["shop_sales_count"]) or 0) >= 100]
+    zeros = [r for r in sellers if not _num(r["listing_review_count"]) and not _num(r["favorites"])]
+    reliable = not (len(sellers) >= 5 and len(zeros) >= 0.8 * len(sellers))
+    non_usd = sum(1 for r in uniq if r["price_usd"] not in (NS, "", None) and _num(r["price_usd"]) is None)
     return {"unique_listings": len(uniq), "duplicates": len(rows) - len(uniq), "priced": len(prices),
+            "non_usd_excluded": non_usd, "listing_reviews_reliable": reliable,
+            "shops_100plus_sales_with_zero_listing_reviews_and_favorites": f"{len(zeros)} of {len(sellers)}",
             "median_price": round(statistics.median(prices), 2) if prices else None, "p25_price": pct(25), "p75_price": pct(75),
             "min_price": prices[0] if prices else None, "max_price": prices[-1] if prices else None,
-            "listings_50plus_reviews": sum(1 for r in revs if r is not None and r >= 50),
+            "listings_50plus_reviews": sum(1 for r in revs if r is not None and r >= 50) if reliable else None,
+            "shops_100plus_reviews": sum(1 for r in shop_revs if r is not None and r >= 100),
+            "median_shop_sales": statistics.median([x for x in sales if x is not None]) if any(x is not None for x in sales) else None,
             "shops_under_1000_sales": sum(1 for s in sales if s is not None and s < 1000),
             "shops_10000plus_sales": sum(1 for s in sales if s is not None and s >= 10000),
             "fillable": sum(r["fillable"] == "Y" for r in uniq), "year_in_title": sum(r["year_in_title"] not in ("N", "") for r in uniq),
@@ -198,6 +209,14 @@ def deliverable(result: dict, csv_url: str, limit: int = 5800) -> str:
              "repeats across phrases marked DUP. NOT available from the API, so recorded as NS rather than guessed: "
              "ads, Bestseller/Popular now badges, sale prices, the website's exact result order. Pinterest: not checked.",
              "Per phrase: " + "; ".join(f"'{t['term']}' {t['found']}/{t['wanted']} (physical skipped {t['physical_skipped']})" for t in result["terms"]),
+             *([] if s.get("listing_reviews_reliable", True) else [
+                 "DATA WARNING: listing review counts and favorites came back as 0 for "
+                 f"{s['shops_100plus_sales_with_zero_listing_reviews_and_favorites']} listings whose shops have 100+ sales. "
+                 "The API is not returning them reliably, so listings_50plus_reviews is left empty (None). Do NOT use listing "
+                 "reviews or favorites as a go or kill signal from this scan; use shop sales and shop review counts, or a manual "
+                 "check of the listing pages."]),
+             *([f"Prices: {s['non_usd_excluded']} listings priced in other currencies are excluded from the price stats (not converted)."]
+               if s.get("non_usd_excluded") else []),
              "Summary: " + ", ".join(f"{k}={v}" for k, v in s.items()),
              "Account readiness: " + " | ".join(readiness()),
              f"Full CSV: {csv_url}",

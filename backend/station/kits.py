@@ -90,7 +90,9 @@ def status(store: Store) -> list[dict]:
     out = []
     for k in (store.load_doc(DOC) or {}).values():
         p = store.get("products", k["product"]) if k.get("product") else None
-        out.append({"id": k["id"], "name": k["name"], "venture": k.get("venture"), "cover": k["cover"], "images": k["images"],
+        v = store.get("ventures", k["venture"]) if k.get("venture") else None
+        out.append({"id": k["id"], "name": k["name"], "venture": k.get("venture"), "shelved": bool(v and v.get("stage") == "killed"),
+                    "cover": k["cover"], "images": k["images"],
                     "pins": len(k["pins"]), "files": [f["label"] for f in k["files"]], "pages": k.get("pages"),
                     "title": k["copy"]["title"], "etsy_title": k["copy"]["etsy_title"],
                     "product": {"id": p["id"], "url": p["url"], "price_usd": p["price_usd"], "active": p.get("active"),
@@ -112,6 +114,8 @@ def publish(store: Store, kit_id: str, price: float, venture: Optional[str] = No
     v_id = venture or k.get("venture")
     if not v_id or not store.get("ventures", v_id):
         raise ValueError("this kit has no venture yet: pick one")
+    if store.get("ventures", v_id)["stage"] == "killed":
+        raise ValueError(f"{v_id} was killed, so this kit is shelved: move the venture back first to sell it")
     if not connectors.rails()["storefront"]:
         raise ValueError("the storefront needs Stripe and STARNET_PUBLIC_URL first")
     c, dd, price = k["copy"], digital._data_dir(store), round(float(price), 2)
