@@ -21,6 +21,22 @@ against the last day's — **storm** (lightning, heavy rain) at 1.8x or during a
 Each district's towers grow with its bot's best-ever profit (up to 1.8x at $16k), and the background skyline
 grows with the account's profit. Preview any sky with `/?weather=storm&hour=13`.
 
+## Owner-made products (`kits/`, `backend/station/kits.py`)
+
+A finished product you (or Jarvis) made outside the crew ships with the app as a kit. A kit is a folder in
+`kits/` holding the PDFs, the listing images, a 2:3 cover, the pins and a `kit.json` with compliance-checked
+listing copy. On startup the station imports it: PDFs go to the private products folder (served only after a
+verified payment) and images go to `media/`. The kit is then attached to its venture.
+
+It shows under **Marketing → Your finished products** and on the venture's page. **Publish**, with a price, is
+the go decision. It does three things:
+- creates a Stripe checkout and a storefront page, delivering every PDF after payment;
+- lists it on Etsy with all its images and files, when Etsy is connected (Etsy charges its listing fee);
+- posts the first pin, when Pinterest is connected. The remaining pins go out one a day.
+
+Nothing is listed until you press Publish. The first kit is the Caregiver Care Binder (V-006): 35 pages,
+US Letter + A4, 5 listing images, 10 pins. Its layout scripts are in `kits/caregiver-care-binder/source/`.
+
 ## Payout shuttles (`frontend/shuttle.js`)
 
 Real money in flies. The Space Station now hangs over the city (tap it to go aboard). When you record a Lucid

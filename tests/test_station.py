@@ -1200,3 +1200,75 @@ def test_owner_etsy_scan_runs_through_the_api(ultron):
     assert csv_text.splitlines()[0].startswith("scan_date,search_term,rank") and csv_text.count("\n") == 5
     with pytest.raises(ValueError):
         u.etsy_scan(t["id"], [("x y", 1)], call=fake)                                     # done once
+
+
+def test_owner_kit_imports_and_publishes(ultron, tmp_path, monkeypatch):
+    import json as _json
+    from backend.station import connectors, digital, kits
+    u, _ = ultron
+    s = u.store
+    root = tmp_path / "kits"
+    (root / "binder").mkdir(parents=True)
+    for name in ("Book-US-Letter.pdf", "Book-A4.pdf"):
+        (root / "binder" / name).write_bytes(b"%PDF-1.4 " + name.encode())
+    for name in ("l1.jpg", "l2.jpg", "pin-01.jpg", "pin-02.jpg"):
+        (root / "binder" / name).write_bytes(b"\xff\xd8 " + name.encode())
+    copy = {"title": "Care Binder", "subtitle": "Keep key care details in one place", "etsy_title": "Caregiver Binder Printable",
+            "tags": ["caregiver binder"], "description": "An organizer.", "bullets": ["35 pages"], "faq": [],
+            "pin_title": "Care Binder", "pin_description": "Printable organizer"}
+    (root / "binder" / "kit.json").write_text(_json.dumps({
+        "id": "binder", "name": "Care Binder", "venture": {"id": "V-099", "match": "caregiver"},
+        "files": ["Book-US-Letter.pdf", "Book-A4.pdf"], "listing_images": ["l1.jpg", "l2.jpg"], "cover": "pin-01.jpg",
+        "pins": ["pin-01.jpg", "pin-02.jpg"], "pages": 35, "copy": copy}))
+
+    doc = kits.sync(s, root=str(root))
+    k = doc["binder"]
+    assert k["venture"] is None and len(k["files"]) == 2 and [f["label"] for f in k["files"]] == ["US Letter", "A4"]
+    dd = digital._data_dir(s)
+    assert digital.pdf_path(dd, k["files"][1]["pdf"])                        # private: served only after payment
+    v = s.create("ventures", {"name": "Caregiver Binder", "stage": "validate"}, "test", "t")
+    assert kits.sync(s, root=str(root))["binder"]["venture"] == v["id"]      # found by name once the venture exists
+    assert kits.sync(s, root=str(root))["binder"]["files"] == k["files"]     # imported once
+
+    monkeypatch.setattr(connectors, "rails", lambda: {"storefront": True, "etsy_digital": True, "pinterest": True})
+    monkeypatch.setattr(connectors, "etsy_connected", lambda: True)
+    monkeypatch.setattr(connectors, "pinterest_connected", lambda: True)
+    monkeypatch.setattr(digital, "store_url", lambda slug="": f"https://x.test/shop/{slug}")
+    monkeypatch.setattr(connectors, "stripe_payment_link", lambda *a, **kw: {"url": "https://buy.stripe.test/abc", "payment_link": "plink_1"})
+    listed, pinned = [], []
+    monkeypatch.setattr(connectors, "etsy_digital_listing",
+                        lambda *a, **kw: listed.append((a, kw)) or {"listing_id": 7, "url": "https://www.etsy.com/listing/7"})
+    monkeypatch.setattr(connectors, "pinterest_pin", lambda *a, **kw: pinned.append(a) or {"id": f"P{len(pinned)}"})
+    monkeypatch.setattr("backend.station.media.public_url", lambda name: f"https://x.test/media/{name}")
+
+    with pytest.raises(ValueError):
+        kits.publish(s, "binder", 1.0)                                       # price out of range
+    out = kits.publish(s, "binder", 12.99)
+    p = s.get("products", out["product"])
+    assert p["price_usd"] == 12.99 and p["kit"] == "binder" and len(p["files"]) == 2 and p["active"]
+    a, kw = listed[0]
+    assert a[0] == "Caregiver Binder Printable" and a[3] == 12.99 and a[5] == "Book-US-Letter.pdf"
+    assert [n for n, _ in kw["more_files"]] == ["Book-A4.pdf"] and len(kw["more_images"]) == 1
+    assert out["etsy"]["listing_id"] == 7 and out["pin"] == "P1" and pinned[0][3] == "https://www.etsy.com/listing/7"
+    assert s.get("products", p["id"])["pins_queue"] == [k["pins"][1]]
+    assert kits.pins_due(s, MON_0900.replace(year=2030)) == [p["id"]] and kits.pins_due(s, datetime.now(ET)) == []
+    with pytest.raises(ValueError):
+        kits.publish(s, "binder", 12.99)                                     # once
+    html = digital.page_thanks(s.get("products", p["id"]), "cs_test_1234567890", True)
+    assert "file=0" in html and "file=1" in html and "(A4)" in html
+    assert "store it securely" in digital.page_product(s.get("products", p["id"]))
+    assert next(x for x in kits.status(s) if x["id"] == "binder")["product"]["etsy"] == "https://www.etsy.com/listing/7"
+
+
+def test_shipped_kits_are_valid():
+    from backend.station import kits
+    ms = kits.manifests()
+    assert any(m["id"] == "caregiver-care-binder" for m in ms)
+    for m in ms:
+        for f in m["files"] + m["listing_images"] + m["pins"] + [m["cover"]]:
+            assert os.path.exists(os.path.join(m["dir"], f)), f
+        c = m["copy"]
+        assert len(c["etsy_title"]) <= 140 and len(c["tags"]) <= 13 and all(len(t) <= 20 for t in c["tags"])
+        text = (c["description"] + c["etsy_title"] + " ".join(c["bullets"])).lower()
+        for banned in ("hipaa", "instant download", "fillable", "doctor-approved", "prevents", "guarantee", "bestseller"):
+            assert banned not in text, banned

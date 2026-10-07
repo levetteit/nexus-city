@@ -310,6 +310,22 @@ function productsSection(sf, ventureId) {
     ${works.length ? `<h2>In the works</h2>${works.map((x) => item(x, `${esc(x.status)} · ${money(x.price_usd)}`)).join("")}` : ""}`;
 }
 
+// Owner-made products that ship with the app (backend/station/kits.py): publish = the owner's go
+function kitCard(k) {
+  const p = k.product, r = k.rails || {};
+  const gallery = k.images.map((im) => `<img src="/media/${esc(im)}" alt="" style="height:64px;border-radius:6px">`).join(" ");
+  const live = p ? `<p class="small">${p.active ? "On sale" : "Off sale"} at ${money(p.price_usd)}: <a href="${esc(p.url)}" target="_blank" rel="noopener" style="color:var(--cyan)">storefront page</a>`
+    + `${p.etsy ? ` · <a href="${esc(p.etsy)}" target="_blank" rel="noopener" style="color:var(--cyan)">Etsy listing</a>` : ""}`
+    + ` · ${p.pins_left ? `${plural(p.pins_left, "pin")} left to post${r.pinterest ? " (one a day)" : " when Pinterest connects"}` : "all pins posted"}</p>` : "";
+  const form = p && p.active ? "" : `<div class="actions"><input id="kit-price-${esc(k.id)}" type="number" step="0.01" min="3" max="97" placeholder="Price, e.g. 12.99" style="width:150px" />
+      ${k.venture ? "" : `<input id="kit-venture-${esc(k.id)}" placeholder="Venture id, e.g. V-006" style="width:150px" />`}
+      <button class="btn primary" data-kit="${esc(k.id)}">Publish</button></div>
+      <p class="muted small">Publishing is the go decision. It puts the product on the storefront (Stripe checkout, both PDFs delivered after payment)${r.etsy_digital ? ", lists it on Etsy with all ${k.images.length} images and both files (Etsy charges its listing fee)" : ""}${r.pinterest ? " and posts the first pin" : ""}. ${r.storefront ? "" : "<b>Needs Stripe and STARNET_PUBLIC_URL first.</b>"}</p>`;
+  return `<div class="item" style="display:block"><div class="t"><span><b>${esc(k.name)}</b></span><span class="pill ${p && p.active ? "green" : "gold"}">${p && p.active ? "ON SALE" : "READY"}</span></div>
+    <p class="muted small">${k.pages} pages · ${k.files.join(" + ")} · ${k.images.length} listing images · ${k.pins} pins · venture ${esc(k.venture || "not set")}</p>
+    <p class="small">Etsy title: ${esc(k.etsy_title)}</p><div style="overflow-x:auto;white-space:nowrap">${gallery}</div>${live}${form}</div>`;
+}
+
 function renderMarketing() {
   const c = S.connectors;
   const row = (name, on, how) => `<div class="conn"><span>${esc(name)}</span><span class="${on === true ? "pos" : "muted"}">${on === true ? "connected" : esc(on || how)}</span></div>`;
@@ -320,6 +336,7 @@ function renderMarketing() {
     row("Fiverr", c.fiverr) + row("Etsy (via Printify)", c.printify === true ? true : c.etsy) +
     row("Storefront (/shop)", c.rails && c.rails.storefront ? true : "needs Stripe + STARNET_PUBLIC_URL") +
     connectRow("Etsy digital downloads", "etsy", c.etsy_digital) + connectRow("Pinterest", "pinterest", c.pinterest);
+  if ($("#kits")) $("#kits").innerHTML = (S.kits || []).map(kitCard).join("") || `<div class="empty">No finished products waiting.</div>`;
   $("#ob-manual").innerHTML = S.outbox.manual.map(actionRow).join("") || `<div class="empty">Nothing to post by hand.</div>`;
   $("#ob-wait").innerHTML = S.outbox.waiting_owner.map(actionRow).join("") || `<div class="empty">Nothing waiting.</div>`;
   $("#ob-sent").innerHTML = S.outbox.sent.map(actionRow).join("") || `<div class="empty">Nothing sent yet.</div>`;
@@ -403,6 +420,7 @@ async function openRecord(col, id) {
       <div>Income / costs</div><div>${money(r.pnl.income)} / ${money(r.pnl.costs)}</div><div>Success</div><div>${esc(r.success_criteria || "—")}</div>
       <div>Kill</div><div>${esc(r.kill_criteria || "—")}</div><div>Validation</div><div>${esc(r.validation ? r.validation.verdict + ": " + r.validation.why : "—")}</div></div>
       ${r.autonomous && S.storefront ? productsSection(S.storefront, r.id) : r.agent_run && S.shop ? shopSection(S.shop) : ""}
+      ${(S.kits || []).filter((k) => k.venture === r.id).length ? `<h2>Your finished product</h2>${S.kits.filter((k) => k.venture === r.id).map(kitCard).join("")}` : ""}
       <h2>Tasks</h2>${(r.task_list || []).map(taskRow).join("") || `<div class="empty">No tasks yet.</div>`}
       ${r.autonomous ? "" : `<h2>Where customers buy</h2>${Object.entries(r.links || {}).map(([k, u]) => `<div><span class="muted">${esc(k)}</span> <a href="${esc(u)}" target="_blank" rel="noopener" style="color:var(--cyan)">${esc(u)}</a></div>`).join("") || `<div class="empty">No link yet: marketing starts once there is one.</div>`}
       <div class="row" style="margin-top:8px"><input id="link-name" placeholder="fiverr" style="max-width:110px" /><input id="link-url" placeholder="https://…" />
@@ -465,6 +483,15 @@ async function openRecord(col, id) {
 }
 
 document.addEventListener("click", (e) => {
+  const kitBtn = e.target.closest("[data-kit]");
+  if (kitBtn) {
+    const id = kitBtn.dataset.kit, price = +(($(`#kit-price-${id}`) || {}).value || 0);
+    const venture = ($(`#kit-venture-${id}`) || {}).value || undefined;
+    if (!price) return toast("Set a price first");
+    if (!confirm(`Put it on sale at $${price.toFixed(2)}? This lists it on the storefront${S.connectors.rails && S.connectors.rails.etsy_digital ? " and on Etsy (Etsy charges its listing fee)" : ""}.`)) return;
+    kitBtn.disabled = true;
+    return act(() => api(`/api/station/kits/${id}/publish`, { price, venture }), "On sale.").finally(() => { kitBtn.disabled = false; });
+  }
   const scanBtn = e.target.closest("[data-scan]");
   if (scanBtn) {
     const terms = ($("#scan-terms") || {}).value || "";

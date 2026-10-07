@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
-from . import actions, connectors, credits, crew, digital, finance, marketing, recognition, research, results, shop, warroom
+from . import actions, connectors, credits, crew, digital, finance, kits, marketing, recognition, research, results, shop, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
 from .store import STAGES, Store, now_iso
@@ -76,6 +76,10 @@ class Ultron:
     def _seed(self) -> None:
         s = self.store
         crew.seed(s)
+        try:
+            kits.sync(s)   # owner-made products that ship with the app (kits/)
+        except OSError as exc:
+            self.last_error = f"kits: {exc}"[:200]
         for r in research.ROUTINES:
             if not s.get("routines", r["id"]):
                 s.create("routines", {"id": r["id"], "name": r["name"], "station": "research", "days": r["days"],
@@ -168,6 +172,10 @@ class Ultron:
         self._requeue_connected()
         if not self._recognized_at or now - self._recognized_at >= timedelta(minutes=5):
             self._recognized_at = now
+            try:
+                kits.sync(self.store)   # a kit waiting for its venture finds it once the venture exists
+            except OSError:
+                pass
             recognition.update(self.store)
             self.milestones = recognition.station_milestones(self.store, self.treasury)
         self._review_autonomous(now)
@@ -194,6 +202,9 @@ class Ultron:
             return {"kind": "shop_orders"}
         if credits.reconcile_due(s, now):
             return {"kind": "credits_reconcile"}
+        pins = kits.pins_due(s, now)
+        if pins:
+            return {"kind": "kit_pin", "product": pins[0]}
         if not self.brain.enabled or not self.treasury.ai_allowed() or credits.blocks_ai(s, self.treasury, now):
             return None
         if self.cfg.get("ai_backoff_until") and now < datetime.fromisoformat(self.cfg["ai_backoff_until"]):
@@ -295,6 +306,9 @@ class Ultron:
             if job["kind"] == "credits_reconcile":
                 self.busy = "Auditor: Anthropic cost report"
                 return credits.reconcile(s)
+            if job["kind"] == "kit_pin":
+                self.busy = "Social Media Manager: pinning an owner product"
+                return kits.next_pin(s, job["product"])
             if job["kind"] == "shop_orders":
                 self.busy = "Etsy Shop Manager: reading orders"
                 self.cfg["shop_orders_at"] = now.isoformat()
@@ -707,7 +721,7 @@ class Ultron:
                        "rejected": s.find("actions", status="rejected")[-10:], "failed": s.find("actions", status="failed")[-10:]},
             "lessons": s.load_doc("lessons.json") or [],
             "leads": sorted(s.all("leads"), key=lambda l: l["created_at"], reverse=True)[:40],
-            "shop": shop.summary(s), "storefront": digital.summary(s, self.treasury),
+            "shop": shop.summary(s), "storefront": digital.summary(s, self.treasury), "kits": kits.status(s),
             "credits": credits.summary(s, self.treasury),
             "milestones": self.milestones or recognition.station_milestones(s, self.treasury), "research_focus": self.cfg.get("research_focus", ""),
             "warroom": s.load_doc(s.list_docs("warroom-", 1)[0]) if s.list_docs("warroom-", 1) else None,

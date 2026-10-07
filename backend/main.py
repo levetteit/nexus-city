@@ -849,6 +849,21 @@ async def station_etsy_scan(rid: str, request: Request) -> dict:
     return {"started": True, "terms": terms, "listings": sum(n for _, n in terms)}
 
 
+@app.post("/api/station/kits/{kit_id}/publish")
+async def station_kit_publish(kit_id: str, request: Request) -> dict:
+    """The owner's go for a finished kit (kits.py): {"price": 12.99, "venture": "V-006"}. Storefront + Etsy (+ first pin)."""
+    from .station import connectors, kits
+    b = await request.json()
+    try:
+        return await asyncio.to_thread(kits.publish, _station().store, kit_id, float(b.get("price") or 0), b.get("venture") or None)
+    except KeyError:
+        raise HTTPException(404)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    except connectors.ConnectorError as exc:
+        raise HTTPException(502, str(exc))
+
+
 @app.get("/api/station/{collection}/{rid}")
 def station_record(collection: str, rid: str) -> dict:
     st = _station()
@@ -995,16 +1010,20 @@ def storefront_thanks(slug: str, session_id: str = "") -> str:
 
 
 @app.get("/shop/{slug}/download")
-def storefront_download(slug: str, session_id: str = ""):
+def storefront_download(slug: str, session_id: str = "", file: int = 0):
     from .station import digital
     st = _station()
     p = digital.find(st.store, slug)
     if not p or not digital.verify_purchase(st.store, p, session_id):
         raise HTTPException(403, "this download needs a completed purchase")
-    path = digital.pdf_path(os.getenv("STARNET_DATA_DIR", "data"), p["pdf"])
+    files = p.get("files") or [{"pdf": p["pdf"], "label": ""}]
+    if not 0 <= file < len(files):
+        raise HTTPException(404)
+    path = digital.pdf_path(os.getenv("STARNET_DATA_DIR", "data"), files[file]["pdf"])
     if not path:
         raise HTTPException(404)
-    return FileResponse(path, media_type="application/pdf", filename=f"{p['slug']}.pdf")
+    label = files[file].get("label", "").lower().replace(" ", "-")
+    return FileResponse(path, media_type="application/pdf", filename=f"{p['slug']}{'-' + label if label else ''}.pdf")
 
 
 @app.get("/api/station/connect/{service}/callback", response_class=HTMLResponse)
