@@ -284,7 +284,7 @@ Walk-forward on Yahoo's 1-minute data, Sep 8 – Oct 6: each filter judged on th
 
 None beat the current setup on both halves, so all stay off. The PROC already is an ICT-style structure entry
 (fair value gaps, inversions, killzones, SMT-like MES confirmation); the filters mostly removed good trades.
-Volume can't be tested yet: Yahoo's data has none and the TradingView feed sends OHLC only.
+Volume can't be tested yet: Yahoo's data has none. The feed script now sends volume and the server saves TradingView's candles (see Candle history), so it can be tested once a few weeks are collected.
 
 ### Daily goal
 
@@ -701,6 +701,12 @@ re-optimize on more data as it builds up:
 
     python -m backend.backtest MNQ_1m.csv MES_1m.csv M2K_1m.csv --optimize
 
+**TradingView's own candles.** Yahoo's copy differs from what TradingView sends (missing minutes, different
+closes), and TradingView's export needs a Premium plan. So every candle the feed script delivers is also
+saved, once, to `data/history/tradingview/{MNQ,MES}_1m.csv`, with volume when the script sends it. The
+account panel shows the days collected and download links (`/api/history/tradingview/MNQ.csv`); the
+backtester reads them as is. It starts with the first candle after this was deployed.
+
 ## Paper vs backtest check (`backend/scorecard.py`)
 
 When each trading day ends, live mode downloads that day's candles again and
@@ -812,6 +818,8 @@ it closes (needs a paid TradingView plan with webhooks and CME real-time data):
 4. Repeat 2–3 on **MES1!** (MES confirms every MNQ entry).
 
 The account panel shows **Price data: TradingView · real-time** once it's flowing.
+After updating the script (it now also sends volume), re-create both alerts: TradingView keeps the old
+version in an existing alert.
 
 **2. Order routing.**
 
