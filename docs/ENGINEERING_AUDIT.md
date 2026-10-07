@@ -448,7 +448,7 @@ testing guide.
 
 ## 10. Recommended order of work
 
-1. **Phase 2 — naming.** Do it backward-compatibly: `NEXUS_*` first, `STARNET_*` fallback; keep the Render
+1. **Phase 2 — naming** (owner agreed 2026-10-07). Do it backward-compatibly: `NEXUS_*` first, `STARNET_*` fallback; keep the Render
    service and disk names and the Stripe metadata readers.
 2. **Phase 3/4 — safe security fixes.** S-H1 (Origin check), S-H2 (live mode needs a password), S-H3 (HMAC
    cookie + Secure + throttle), M-1, M-2, L-1. A-H1, A-H2, A-H3, A-H4 and A-H5 change no trading behaviour.
