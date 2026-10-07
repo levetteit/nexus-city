@@ -1144,3 +1144,59 @@ def test_connect_buttons_reach_their_route(tmp_path, monkeypatch):
         monkeypatch.setattr(connectors, "_etsy", refuse)
         r = c.get("/api/station/connect/etsy", follow_redirects=False)
         assert r.status_code == 400 and "Pending Personal Approval" in r.text and "connect/etsy/callback" in r.text
+
+
+def test_owner_etsy_scan_runs_through_the_api(ultron):
+    from backend.station import etsyscan
+    u, _ = ultron
+    s = u.store
+    src = s.create("tasks", {"title": "Write the scan kit", "venture": "V-001", "assigned_agent": "A-002", "kind": "agent",
+                             "instructions": "", "status": "done", "depends_on": [],
+                             "output": {"deliverable": "Type each phrase: `caregiver binder`, `elder care binder` and `scan.csv`. "
+                                                        "Skip `Ad by Etsy seller`; badge `Popular now`; unknown = `not stated`."}}, "test", "t")
+    t = s.create("tasks", {"title": "Run the Etsy and Pinterest demand scan", "venture": "V-001", "assigned_agent": "OWNER",
+                           "kind": "owner", "instructions": "Also try `senior care planner`.", "status": "waiting_owner",
+                           "depends_on": [src["id"]], "output": None}, "test", "t")
+    assert u.scan_terms(t["id"]) == ["senior care planner", "caregiver binder", "elder care binder"]
+    assert etsyscan.parse_terms("`caregiver binder` | 3\nelder care binder\n\ncaregiver binder | 9", default=2) == \
+        [("caregiver binder", 3), ("elder care binder", 2)]
+
+    listing = lambda i, kind="download", price=999, title="Caregiver Binder Printable 40 pages fillable 2027": {
+        "listing_id": i, "shop_id": 7 if i % 2 else 8, "title": title, "description": "", "listing_type": kind,
+        "price": {"amount": price, "divisor": 100, "currency_code": "USD"}, "num_favorers": i * 10}
+    search = {"caregiver binder": [listing(1), listing(2, "physical"), listing(3, price=1450)],
+              "elder care binder": [listing(3), listing(4, "both", 500, "Elder care log")]}
+    calls = []
+
+    def fake(path):
+        calls.append(path)
+        if path.startswith("/application/listings/active"):
+            term = path.split("keywords=")[1].split("&")[0].replace("%20", " ")
+            return {"results": search[term] if "offset=0" in path else []}
+        if path.startswith("/application/shops/"):
+            return {"shop_name": f"Shop{path[-1]}", "transaction_sold_count": 500 if path.endswith("7") else 12000, "review_count": 80}
+        if "/reviews" in path:
+            return {"count": 64, "results": []}
+        raise AssertionError(path)
+
+    r = u.etsy_scan(t["id"], [("caregiver binder", 2), ("elder care binder", 2)], call=fake)
+    rows = r["rows"]
+    assert [(x["search_term"], x["rank"], x["notes"]) for x in rows] == \
+        [("caregiver binder", 1, ""), ("caregiver binder", 2, ""), ("elder care binder", 1, "DUP"), ("elder care binder", 2, "")]
+    first = rows[0]
+    assert first["price_usd"] == 9.99 and first["listing_review_count"] == 64 and first["shop_sales_count"] == 500
+    assert (first["page_count"], first["fillable"], first["year_in_title"]) == ("40", "Y", "2027")
+    assert r["terms"][0]["physical_skipped"] == 1
+    sm = r["summary"]
+    assert sm["unique_listings"] == 3 and sm["duplicates"] == 1 and sm["median_price"] == 9.99
+    assert sm["shops_under_1000_sales"] == 2 and sm["shops_10000plus_sales"] == 1 and sm["listings_50plus_reviews"] == 3
+    assert sum(c.startswith("/application/shops/") for c in calls) == 2                  # each shop fetched once
+    done = s.get("tasks", t["id"])
+    assert done["status"] == "done" and done["scan"]["state"] == "done"
+    text = done["output"]["deliverable"]
+    assert "NS rather than guessed" in text and "Pinterest" in text and len(text) <= 6000
+    with open(os.path.join(s.dir, "scans", f"{t['id']}.csv")) as f:
+        csv_text = f.read()
+    assert csv_text.splitlines()[0].startswith("scan_date,search_term,rank") and csv_text.count("\n") == 5
+    with pytest.raises(ValueError):
+        u.etsy_scan(t["id"], [("x y", 1)], call=fake)                                     # done once

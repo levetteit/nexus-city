@@ -131,6 +131,21 @@ function ventureCard(v) {
     <div class="health"><i style="width:${v.health}%"></i></div></div>`;
 }
 
+// An owner's Etsy scan task, done by the server through the Etsy API (backend/station/etsyscan.py)
+function scanBox(r, info) {
+  const sc = r.scan || {};
+  if (sc.state === "running") return `<h2>Etsy scan</h2><p class="muted small">Running through the Etsy API since ${ago(sc.at)}. The task closes itself with the results.</p>`;
+  if (r.status === "done" && sc.csv) return `<p class="small"><a href="${esc(sc.csv)}" download>Download the full scan (CSV)</a></p>`;
+  if (!info) return "";
+  if (!info.etsy) return `<h2>Etsy scan</h2><p class="muted small">Connect Etsy (Marketing) and the station can run this scan for you.</p>`;
+  const text = info.terms.map((t, i) => `${t} | ${i < 2 ? 20 : 5}`).join("\n");
+  return `<h2>Let the station run it</h2>
+    <p class="muted small">The server reads Etsy through its API: real prices, review counts, shop sales and favorites for the top digital listings per phrase. The API can't see ads, Bestseller badges or sale prices, so those are marked NS. Pinterest isn't covered. One phrase per line, with how many listings to capture.</p>
+    ${sc.state === "failed" ? `<p class="neg small">Last try failed: ${esc(sc.error || "")}</p>` : ""}
+    <textarea id="scan-terms" rows="8" style="width:100%">${esc(text)}</textarea>
+    <div class="actions"><button class="btn primary" data-scan="${r.id}">Run the scan with the Etsy API</button></div>`;
+}
+
 function taskRow(t) {
   const pill = { waiting_owner: ["gold", "WAITING FOR OWNER"], running: ["green", "working"], blocked: ["", "blocked"], failed: ["red", "failed"],
     queued: ["cyan", "queued"] }[t.status] || ["", t.status];
@@ -408,6 +423,8 @@ async function openRecord(col, id) {
   } else if (col === "tasks") {
     const deps = await Promise.all((r.depends_on || []).map((d) => api(`/api/station/tasks/${d}`).catch(() => null)));
     const out = r.output && r.output.deliverable;
+    const scanInfo = r.kind === "owner" && r.status !== "done" && /scan/i.test(r.title)
+      ? await api(`/api/station/tasks/${r.id}/scan-terms`).catch(() => null) : null;
     sheet(`<div class="label">TASK ${esc(r.id)} · ${esc(r.status.replace("_", " "))}</div><h1>${esc(r.title)}</h1>
       <div class="kv"><div>Venture</div><div>${esc(r.venture)}</div><div>Owner</div><div>${esc(r.assigned_agent === "OWNER" ? "You" : agentName(r.assigned_agent))}</div>
       <div>Why / how</div><div>${esc(r.instructions)}</div><div>Expected</div><div>${esc(r.expected_output)}</div>
@@ -417,6 +434,7 @@ async function openRecord(col, id) {
         <button class="btn" data-copy="${esc(d.id)}">Copy</button>`).join("")}
       ${out ? `<h2>Deliverable</h2><pre class="deliver">${esc(out)}</pre><button class="btn" data-copy="${esc(r.id)}">Copy</button>
         ${r.output.notes ? `<p class="muted small">${esc(r.output.notes)}</p>` : ""}${r.output.owner_next?.length ? `<h2>You do next</h2>${list(r.output.owner_next)}` : ""}` : ""}
+      ${scanBox(r, scanInfo)}
       ${r.kind === "owner" && r.status !== "done" ? `<div class="actions"><input id="done-note" placeholder="Note (optional): e.g. gig link" />
         <button class="btn primary" data-done="${r.id}">Mark done</button></div>` : ""}`);
     sheet.copy = Object.fromEntries([r, ...deps].filter((d) => d && d.output).map((d) => [d.id, d.output.deliverable]));
@@ -447,6 +465,12 @@ async function openRecord(col, id) {
 }
 
 document.addEventListener("click", (e) => {
+  const scanBtn = e.target.closest("[data-scan]");
+  if (scanBtn) {
+    const terms = ($("#scan-terms") || {}).value || "";
+    return act(() => api(`/api/station/tasks/${scanBtn.dataset.scan}/etsy-scan`, { terms }),
+      "Scanning Etsy through the API. It takes a few minutes; the task closes itself with the results.").then(() => $("#sheet").classList.add("hidden"));
+  }
   const el = e.target.closest("[data-open],[data-decide],[data-promote],[data-dismiss],[data-run],[data-done],[data-stage],[data-copy],[data-act],[data-link],[data-outreach],[data-addlead],[data-lead]");
   if (!el) return;
   const d = el.dataset;

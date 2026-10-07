@@ -604,6 +604,39 @@ class Ultron:
         return self.store.update("tasks", task_id, {"status": "done", "output": {"deliverable": note or "done by the owner"}},
                                  "owner", f"owner did: {t['title']}", kind="task.completed")
 
+    def scan_terms(self, task_id: str) -> list[str]:
+        """Search phrases the crew wrote for an owner scan task (in its instructions or the inputs it depends on)."""
+        from . import etsyscan
+        t = self.store.get("tasks", task_id) or {}
+        text = t.get("instructions", "") + "\n" + "\n".join(
+            ((self.store.get("tasks", d) or {}).get("output") or {}).get("deliverable", "") for d in t.get("depends_on", []))
+        return etsyscan.suggest_terms(text)
+
+    def etsy_scan(self, task_id: str, terms: list, call=None) -> dict:
+        """Do an owner's Etsy scan task through the Etsy API, and hand the result to the crew. Blocking."""
+        from . import etsyscan
+        t = self.store.get("tasks", task_id)
+        if not t or t["kind"] != "owner":
+            raise KeyError(task_id)
+        if t["status"] == "done":
+            raise ValueError("already done")
+        if not terms:
+            raise ValueError("give at least one search phrase")
+        self.store.update("tasks", task_id, {"scan": {"state": "running", "at": now_iso()}}, "A-002",
+                          f"scanning Etsy through the API: {len(terms)} phrases", kind="task.scan")
+        try:
+            result = etsyscan.scan(terms, call=call)
+        except Exception as exc:
+            self.store.update("tasks", task_id, {"scan": {"state": "failed", "error": str(exc)[:200], "at": now_iso()}},
+                              "A-002", f"Etsy scan failed: {str(exc)[:120]}", kind="task.scan")
+            raise
+        url = etsyscan.save_csv(self.store.dir, task_id, result["rows"])
+        s = result["summary"]
+        self.store.update("tasks", task_id, {"status": "done", "scan": {"state": "done", "at": now_iso(), "csv": url, "summary": s},
+                                             "output": {"deliverable": etsyscan.deliverable(result, url)}},
+                          "A-002", f"Etsy scan done: {s['unique_listings']} listings, median ${s['median_price']}", kind="task.completed")
+        return result
+
     def record(self, kind: str, amount: float, unit: str, note: str, venture: Optional[str] = None) -> dict:
         """Real money, entered by the owner (a sale, a fee, a bill)."""
         if kind not in ("income", "expense"):
