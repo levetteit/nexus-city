@@ -1,0 +1,79 @@
+{
+ "id": "caregiver-care-binder",
+ "name": "Caregiver Care Binder",
+ "venture": {
+  "id": "V-006",
+  "match": "caregiver"
+ },
+ "made_by": "owner (laid out by Jarvis from the crew's t4 text with the t5 compliance edits)",
+ "files": [
+  "Caregiver-Care-Binder-US-Letter.pdf",
+  "Caregiver-Care-Binder-A4.pdf"
+ ],
+ "listing_images": [
+  "listing-1-cover.jpg",
+  "listing-2-whats-inside.jpg",
+  "listing-3-medications.jpg",
+  "listing-4-hand-off.jpg",
+  "listing-5-how-it-works.jpg"
+ ],
+ "cover": "pin-01.jpg",
+ "pins": [
+  "pin-01.jpg",
+  "pin-02.jpg",
+  "pin-03.jpg",
+  "pin-04.jpg",
+  "pin-05.jpg",
+  "pin-06.jpg",
+  "pin-07.jpg",
+  "pin-08.jpg",
+  "pin-09.jpg",
+  "pin-10.jpg"
+ ],
+ "pages": 35,
+ "copy": {
+  "title": "Caregiver Care Binder",
+  "subtitle": "A printable organizer to keep key care details in one place",
+  "etsy_title": "Caregiver Binder Printable, Elder Care Organizer, Aging Parent Care Binder, Medication List and Appointment Tracker, US Letter + A4 PDF",
+  "tags": [
+   "caregiver binder",
+   "elder care binder",
+   "caregiver planner",
+   "aging parents",
+   "care organizer",
+   "caregiver printable",
+   "senior care planner",
+   "medication log",
+   "appointment tracker",
+   "caregiver checklist",
+   "hand off sheet",
+   "family caregiver",
+   "printable binder"
+  ],
+  "description": "A printable caregiver organizer to keep key care details in one place: contacts, medications as prescribed, appointments, daily notes and the papers that matter, ready to hand to family or a respite helper.\n\nHow this was made: I used AI tools to help draft the page text and structure of this binder, and to help create the layout and listing mockup images. I reviewed and edited all of it before listing. This is an organizer, not medical, legal or financial advice. No part of it has been reviewed by a medical or legal professional.\n\nWHAT'S INSIDE (35 pages, 9 sections)\n- Care Snapshot: about the person you care for, daily routine and preferences\n- Care Team & Contacts: emergency contacts and quick info, providers, pharmacy and services, family and neighbors\n- Medications: a list copied exactly from the label, a change record, a refill tracker and a daily checklist\n- Appointments: tracker, visit notes, a page of questions to ask, hospital and urgent visit record\n- Daily Care: a care log, a weekly summary and a record of changes noticed, in your own words\n- Documents Index: where insurance, legal and household papers are kept (never the numbers)\n- Hand-Off: sheets for family or respite helpers, and shift handover notes\n- Family Task-Sharing: a task grid, a weekly coverage calendar and meeting notes\n- Caregiver Self-Care: a weekly check-in and a breaks plan\nPlus a cover, a how-to-use page and a binder review log.\n\nFORMAT\n- Digital download: 2 PDF files, US Letter (8.5 x 11 in) and A4. Nothing is shipped.\n- Print at home or at a print shop and fill it in by hand.\n- Reprint as needed: the medication checklist, visit notes, care log, weekly summary, handover notes, coverage calendar and check-in pages.\n\nPLEASE NOTE\n- Once completed, this binder contains private health information. Please store it securely.\n- An information organizer only. Not medical, legal or financial advice. Consult licensed professionals. In an emergency, call local emergency services.\n- For personal use. Please don't resell or share the files.",
+  "bullets": [
+   "35 printable pages in 9 sections, US Letter and A4",
+   "Emergency contacts and a quick-info page for anyone stepping in",
+   "Medications recorded exactly as on the label, with a change record and refill tracker",
+   "Appointment tracker, visit notes and a page of questions to ask",
+   "Hand-off sheets for family or respite helpers, and a family task-sharing grid",
+   "Reprint the daily pages as needed"
+  ],
+  "faq": [
+   {
+    "q": "What do I get?",
+    "a": "Two PDF files: US Letter and A4. Download, print and fill in by hand. Nothing is shipped."
+   },
+   {
+    "q": "Is this medical advice?",
+    "a": "No. It's an organizer for recording what the care team tells you. Always follow the licensed professionals involved."
+   },
+   {
+    "q": "Can I print pages more than once?",
+    "a": "Yes. The daily and weekly pages are made to be reprinted as needed."
+   }
+  ],
+  "pin_title": "Caregiver Care Binder: a printable organizer",
+  "pin_description": "Keep key care details in one place: contacts, medications as prescribed, appointments, visit notes and an easy hand-off sheet for family or respite helpers. 35 printable pages, US Letter + A4. An organizer, not medical advice."
+ }
+}

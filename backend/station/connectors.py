@@ -601,8 +601,9 @@ def etsy_taxonomy_id() -> int:
 
 
 def etsy_digital_listing(title: str, description: str, tags: list, price_usd: float, pdf: bytes, pdf_name: str,
-                         cover: bytes, cover_name: str) -> dict:
-    """Draft → cover image → PDF → active. Returns the listing id and URL."""
+                         cover: bytes, cover_name: str, more_images: Optional[list] = None, more_files: Optional[list] = None) -> dict:
+    """Draft → images → files → active. Returns the listing id and URL. more_images / more_files: [(name, bytes)]
+    (Etsy takes up to 10 images and 5 files)."""
     shop = (_tokens().get("etsy") or {}).get("shop_id")
     if not shop:
         raise ConnectorError("Etsy is connected but has no shop id: press Connect Etsy again")
@@ -613,8 +614,12 @@ def etsy_digital_listing(title: str, description: str, tags: list, price_usd: fl
     lid = lst["listing_id"]
     _etsy("POST", f"/application/shops/{shop}/listings/{lid}/images", {"rank": 1, "alt_text": title[:500]},
           {"image": (cover_name, cover, "image/jpeg")})
-    _etsy("POST", f"/application/shops/{shop}/listings/{lid}/files", {"name": pdf_name, "rank": 1},
-          {"file": (pdf_name, pdf, "application/pdf")})
+    for rank, (name, data) in enumerate((more_images or [])[:9], start=2):
+        _etsy("POST", f"/application/shops/{shop}/listings/{lid}/images", {"rank": rank, "alt_text": title[:500]},
+              {"image": (name, data, "image/jpeg")})
+    for rank, (name, data) in enumerate([(pdf_name, pdf)] + (more_files or [])[:4], start=1):
+        _etsy("POST", f"/application/shops/{shop}/listings/{lid}/files", {"name": name, "rank": rank},
+              {"file": (name, data, "application/pdf")})
     _etsy("PATCH", f"/application/shops/{shop}/listings/{lid}", {"state": "active"})
     return {"listing_id": lid, "url": lst.get("url") or f"https://www.etsy.com/listing/{lid}"}
 

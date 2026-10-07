@@ -475,7 +475,8 @@ def page_product(p: dict) -> str:
                  f"<div><div class='small'>{html.escape(p['format'].replace('_', ' ').upper())} · PDF · {p.get('pages', '')} pages</div>"
                  f"<h1>{html.escape(sp.get('headline') or p['title'])}</h1><p class='sub'>{html.escape(sp.get('subheadline') or p['subtitle'])}</p>"
                  f"<ul>{bullets}</ul><div class='price'>${p['price_usd']:.2f}</div>{buy}"
-                 "<p class='small'>Instant download right after checkout.</p></div></div>"
+                 "<p class='small'>Download right after checkout. Nothing is shipped.</p>"
+                 + (f"<p class='small'>{html.escape(p['notice'])}</p>" if p.get("notice") else "") + "</div></div>"
                  + (f"<div class='card'><h3>Questions</h3>{faq}</div>" if faq else ""))
 
 
@@ -483,6 +484,10 @@ def page_thanks(p: dict, session_id: str, ok: bool) -> str:
     if not ok:
         return _page("Checking your payment", "<h1>We couldn't confirm this payment yet</h1><p>If you just paid, give it a minute "
                      "and refresh this page. If it still doesn't work, reply to your Stripe receipt and we'll send the file.</p>")
+    files = p.get("files") or [{"pdf": p["pdf"], "label": ""}]
+    links = "".join(
+        f"<p><a class='buy' href='/shop/{html.escape(p['slug'])}/download?session_id={html.escape(session_id)}&file={i}'>"
+        f"Download the PDF{' (' + html.escape(f['label']) + ')' if len(files) > 1 and f.get('label') else ''}</a></p>"
+        for i, f in enumerate(files))
     return _page("Thank you", f"<h1>Thank you!</h1><p class='sub'>Your copy of <b>{html.escape(p['title'])}</b> is ready.</p>"
-                 f"<p><a class='buy' href='/shop/{html.escape(p['slug'])}/download?session_id={html.escape(session_id)}'>Download the PDF</a></p>"
-                 "<p class='small'>Bookmark this page: the link keeps working for your purchase.</p>")
+                 + links + "<p class='small'>Bookmark this page: the link keeps working for your purchase.</p>")
