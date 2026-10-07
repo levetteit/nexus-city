@@ -806,6 +806,49 @@ def station_connect(service: str):
                             status_code=400)
 
 
+@app.get("/api/station/scans/{rid}.csv")
+def station_scan_csv(rid: str):
+    """The full table of an Etsy API scan (etsyscan.py)."""
+    st = _station()
+    path = os.path.join(st.store.dir, "scans", f"{os.path.basename(rid)}.csv")
+    if not os.path.exists(path):
+        raise HTTPException(404)
+    return FileResponse(path, media_type="text/csv", filename=f"etsy_scan_{os.path.basename(rid)}.csv")
+
+
+@app.get("/api/station/tasks/{rid}/scan-terms")
+def station_scan_terms(rid: str) -> dict:
+    from .station import connectors
+    return {"terms": _station().scan_terms(rid), "etsy": connectors.etsy_app()}
+
+
+@app.post("/api/station/tasks/{rid}/etsy-scan")
+async def station_etsy_scan(rid: str, request: Request) -> dict:
+    """Do an owner's Etsy scan task through the Etsy API: {"terms": "phrase | 20\nphrase | 5"}. Runs in the background."""
+    from .station import connectors, etsyscan
+    st = _station()
+    t = st.store.get("tasks", rid)
+    if not t or t.get("kind") != "owner":
+        raise HTTPException(404)
+    if t["status"] == "done":
+        raise HTTPException(409, "already done")
+    if (t.get("scan") or {}).get("state") == "running":
+        raise HTTPException(409, "a scan is already running")
+    if not connectors.etsy_app():
+        raise HTTPException(400, "set ETSY_KEYSTRING and ETSY_SHARED_SECRET on the server first")
+    terms = etsyscan.parse_terms(str((await request.json()).get("terms", "")))
+    if not terms:
+        raise HTTPException(400, "give at least one search phrase")
+
+    async def run():
+        try:
+            await asyncio.to_thread(st.etsy_scan, rid, terms)
+        except Exception as exc:   # recorded on the task; the station carries on
+            print(f"etsy scan {rid} failed: {exc}")
+    asyncio.create_task(run())
+    return {"started": True, "terms": terms, "listings": sum(n for _, n in terms)}
+
+
 @app.get("/api/station/{collection}/{rid}")
 def station_record(collection: str, rid: str) -> dict:
     st = _station()
