@@ -332,7 +332,8 @@ function renderMarketing() {
   const c = S.connectors;
   const row = (name, on, how) => `<div class="conn"><span>${esc(name)}</span><span class="${on === true ? "pos" : "muted"}">${on === true ? "connected" : esc(on || how)}</span></div>`;
   $("#conn").innerHTML = row("Stripe (checkout links)", c.stripe, "not connected") + row("Stripe sales → treasury", c.stripe_webhook, "no webhook yet") +
-    row("Email outreach", c.email, "not connected") + row("Facebook Page", c.social.includes("facebook"), "not connected") +
+    row("Email outreach", c.email, "not connected") +
+    row("Replies inbox (opt-outs + leads)", c.inbox && c.inbox.configured ? (c.inbox.error ? `error: ${c.inbox.error}` : c.inbox.checked_at ? true : "connected, first check soon") : "connects with email") + row("Facebook Page", c.social.includes("facebook"), "not connected") +
     row("Instagram", c.social.includes("instagram"), "not connected") + row("LinkedIn", c.social.includes("linkedin"), "off") +
     row("TikTok", c.tiktok) +
     row("Fiverr", c.fiverr) + row("Etsy (via Printify)", c.printify === true ? true : c.etsy) +

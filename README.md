@@ -670,6 +670,15 @@ password, because Instagram downloads the image itself; on Render the public add
 
 **Outreach is off for every venture** until you press **Allow outreach** on that venture's card.
 
+**Replies are read for you** (`backend/station/mailbox.py`). Every 20 minutes the station checks the outreach inbox
+over IMAP, using the same login as sending (a Gmail app password works for both). It looks only at mail from addresses
+it emailed, and reads without marking anything as read:
+- an opt-out ("unsubscribe", "remove me", "stop emailing", "not interested"...) goes straight onto the
+  do-not-contact list;
+- any other reply becomes a lead on that venture, and you get a push to answer it.
+
+The inbox host comes from the SMTP host (Gmail and Outlook are known). For other providers, set `STARNET_IMAP_HOST`.
+
 **Results** (`backend/station/results.py`): every 6 hours the Auditor reads each recent post's reactions,
 comments and shares (Facebook) and likes and comments (Instagram). On a venture's card you log each lead in
 one tap (DM, WhatsApp, call, comment, referral), optionally tied to the post that brought it, then mark it

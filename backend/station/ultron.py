@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
-from . import actions, connectors, credits, crew, digital, finance, kits, marketing, recognition, research, results, shop, warroom
+from . import actions, connectors, credits, crew, digital, finance, kits, mailbox, marketing, recognition, research, results, shop, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
 from .store import STAGES, Store, now_iso
@@ -202,6 +202,8 @@ class Ultron:
             return {"kind": "shop_orders"}
         if credits.reconcile_due(s, now):
             return {"kind": "credits_reconcile"}
+        if mailbox.due(s, now):
+            return {"kind": "mail_check"}
         pins = kits.pins_due(s, now)
         if pins:
             return {"kind": "kit_pin", "product": pins[0]}
@@ -306,6 +308,9 @@ class Ultron:
             if job["kind"] == "credits_reconcile":
                 self.busy = "Auditor: Anthropic cost report"
                 return credits.reconcile(s)
+            if job["kind"] == "mail_check":
+                self.busy = "Auditor: reading replies in the outreach inbox"
+                return mailbox.check(s, now, self.notify)
             if job["kind"] == "kit_pin":
                 self.busy = "Social Media Manager: pinning an owner product"
                 return kits.next_pin(s, job["product"])
@@ -727,7 +732,7 @@ class Ultron:
             "queue": queue[:40], "opportunities": opps[:25],
             "routines": sorted(s.all("routines"), key=lambda r: r["id"]),
             "treasury": self.treasury.summary(paper), "flights": self.treasury.flights(8),
-            "outbound": self.cfg.get("outbound", True), "connectors": connectors.status(),
+            "outbound": self.cfg.get("outbound", True), "connectors": {**connectors.status(), "inbox": mailbox.status(s)},
             "outbox": {"manual": s.find("actions", status="manual"), "waiting_owner": s.find("actions", status="waiting_owner"),
                        "in_qa": len(s.find("actions", status="qa")) + len(s.find("actions", status="revise")),
                        "sent": sorted(s.find("actions", status="sent"), key=lambda a: a.get("sent_at", ""), reverse=True)[:15],
