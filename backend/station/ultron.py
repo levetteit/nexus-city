@@ -54,6 +54,14 @@ AUTO_LAUNCH = os.getenv("STARNET_AUTO_LAUNCH", "1") not in ("0", "false", "off")
 KILL_AFTER = timedelta(days=int(os.getenv("STARNET_AUTO_KILL_DAYS", "21")))
 
 
+def offer_of(o: dict) -> str:
+    """What an autonomous venture sells, from its opportunity: QA won't pass a product for a venture with no offer."""
+    parts = [o.get("product_format") or "", (o.get("summary") or "").strip()]
+    price = o.get("price_point")
+    text = " · ".join(p for p in parts if p)[:400]
+    return (text + (f" · price {price}" if price else "")) if text else o.get("title", "")
+
+
 class Ultron:
     def __init__(self, data_dir: str, client=None, notify: Optional[Callable[[str, str], None]] = None) -> None:
         self.store = Store(data_dir)
@@ -145,6 +153,10 @@ class Ultron:
                                                    "the crew-run Etsy shop and the first launched venture.",
                                            "success_criteria": "First owner-recorded income from a station venture"},
                      "owner", "the Etsy shop is already open: the mission is earning, not funding it")
+        for v in s.all("ventures"):   # ventures launched before offers were set: QA blocked every product
+            o = s.get("opportunities", v.get("opportunity") or "")
+            if v.get("autonomous") and not v.get("offer") and o:
+                s.update("ventures", v["id"], {"offer": offer_of(o)}, "A-001", "offer set from its opportunity", kind="venture.offer")
         if not s.get("missions", "M-001"):
             s.create("missions", {"id": "M-001", "name": "First Dollar", "priority": 1, "state": "active", "owner": "owner",
                                   "goal": "Real money in from $0-capital ventures as fast as possible: the solar Page, "
@@ -616,6 +628,7 @@ class Ultron:
         if autonomous is None:   # an owner-approved launch of an idea the crew can run alone runs alone too
             autonomous = self._can_run_alone(o)
         extra = {"autonomous": True, "agent_run": True, "planned": True, "stage": "launch", "rails": o.get("rails") or ["storefront"],
+                 "offer": offer_of(o),
                  "product_format": o.get("product_format"), "next_action": "Product Designer: the first product",
                  "agents": ["A-DSGN", "A-011", "A-SHOP", "A-006"]} if autonomous else {}
         v = s.create("ventures", {"name": o["title"], "category": o["category"], "platform": o.get("platform"), "stage": "approved",

@@ -88,9 +88,12 @@ class Brain:
 
     def structured(self, agent: str, system: str, prompt: str, schema: dict, venture: Optional[str] = None,
                    effort: str = "high") -> dict:
-        resp = self._request(agent, venture, "structured", max_tokens=16000, system=system,
-                             messages=[{"role": "user", "content": prompt}],
-                             output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}})
+        for level in dict.fromkeys((effort, "low")):   # cut off: once more with less thinking, so the answer fits
+            resp = self._request(agent, venture, "structured", max_tokens=16000, system=system,
+                                 messages=[{"role": "user", "content": prompt}],
+                                 output_config={"effort": level, "format": {"type": "json_schema", "schema": schema}})
+            if resp.stop_reason != "max_tokens":
+                break
         if resp.stop_reason == "refusal":
             raise RuntimeError("the model declined this request")
         if resp.stop_reason == "max_tokens":
