@@ -317,11 +317,13 @@ function kitCard(k) {
   const live = p ? `<p class="small">${p.active ? "On sale" : "Off sale"} at ${money(p.price_usd)}: <a href="${esc(p.url)}" target="_blank" rel="noopener" style="color:var(--cyan)">storefront page</a>`
     + `${p.etsy ? ` · <a href="${esc(p.etsy)}" target="_blank" rel="noopener" style="color:var(--cyan)">Etsy listing</a>` : ""}`
     + ` · ${p.pins_left ? `${plural(p.pins_left, "pin")} left to post${r.pinterest ? " (one a day)" : " when Pinterest connects"}` : "all pins posted"}</p>` : "";
-  const form = p && p.active ? "" : `<div class="actions"><input id="kit-price-${esc(k.id)}" type="number" step="0.01" min="3" max="97" placeholder="Price, e.g. 12.99" style="width:150px" />
+  const form = p && p.active ? "" : k.shelved
+    ? `<p class="muted small">Shelved: venture ${esc(k.venture)} was killed, so this can't be published. The files stay on the server; move the venture back from killed to sell it.</p>`
+    : `<div class="actions"><input id="kit-price-${esc(k.id)}" type="number" step="0.01" min="3" max="97" placeholder="Price, e.g. 12.99" style="width:150px" />
       ${k.venture ? "" : `<input id="kit-venture-${esc(k.id)}" placeholder="Venture id, e.g. V-006" style="width:150px" />`}
       <button class="btn primary" data-kit="${esc(k.id)}">Publish</button></div>
       <p class="muted small">Publishing is the go decision. It puts the product on the storefront (Stripe checkout, both PDFs delivered after payment)${r.etsy_digital ? ", lists it on Etsy with all ${k.images.length} images and both files (Etsy charges its listing fee)" : ""}${r.pinterest ? " and posts the first pin" : ""}. ${r.storefront ? "" : "<b>Needs Stripe and STARNET_PUBLIC_URL first.</b>"}</p>`;
-  return `<div class="item" style="display:block"><div class="t"><span><b>${esc(k.name)}</b></span><span class="pill ${p && p.active ? "green" : "gold"}">${p && p.active ? "ON SALE" : "READY"}</span></div>
+  return `<div class="item" style="display:block"><div class="t"><span><b>${esc(k.name)}</b></span><span class="pill ${p && p.active ? "green" : k.shelved ? "" : "gold"}">${p && p.active ? "ON SALE" : k.shelved ? "SHELVED" : "READY"}</span></div>
     <p class="muted small">${k.pages} pages · ${k.files.join(" + ")} · ${k.images.length} listing images · ${k.pins} pins · venture ${esc(k.venture || "not set")}</p>
     <p class="small">Etsy title: ${esc(k.etsy_title)}</p><div style="overflow-x:auto;white-space:nowrap">${gallery}</div>${live}${form}</div>`;
 }

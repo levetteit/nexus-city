@@ -1243,6 +1243,11 @@ def test_owner_kit_imports_and_publishes(ultron, tmp_path, monkeypatch):
 
     with pytest.raises(ValueError):
         kits.publish(s, "binder", 1.0)                                       # price out of range
+    s.update("ventures", v["id"], {"stage": "killed"}, "owner", "scan said kill")
+    assert next(x for x in kits.status(s) if x["id"] == "binder")["shelved"]
+    with pytest.raises(ValueError, match="shelved"):
+        kits.publish(s, "binder", 12.99)                                     # a killed venture's kit can't go on sale
+    s.update("ventures", v["id"], {"stage": "validate"}, "owner", "back on")
     out = kits.publish(s, "binder", 12.99)
     p = s.get("products", out["product"])
     assert p["price_usd"] == 12.99 and p["kit"] == "binder" and len(p["files"]) == 2 and p["active"]
