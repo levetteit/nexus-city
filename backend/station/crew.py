@@ -53,6 +53,53 @@ CORE = [
      "specialty": "Original print designs, and the autonomous ventures' digital products (PDF guides, planners, checklists)"},
 ]
 
+# Who they are in the world: a callsign like the trading bots, a streamer handle, a vibe, their color, room props
+# and what they say. Shown on their name tags, in their rooms and on the board; the work stays the same.
+PERSONAS = {
+    "A-001": {"callsign": "ULTRON", "handle": "ULTRON", "vibe": "calm all-seeing commander", "color": "#ff3b5c", "props": ["trophy", "books"],
+              "idle": ["all systems nominal", "watching every venture", "the portfolio sleeps, I don't"],
+              "work": ["delegating", "reviewing the numbers", "approvals first"], "win": ["as calculated", "first dollar logged", "proceed"]},
+    "A-002": {"callsign": "SCOUT", "handle": "Scout_Radar", "vibe": "curious trend-hunter", "color": "#5ee7ff", "props": ["books", "plant"],
+              "idle": ["what's trending today?", "radar's quiet... for now", "rabbit-holing a niche"],
+              "work": ["scanning the market", "found something spicy", "checking the numbers"], "win": ["opportunity filed!", "called it early", "this one's real"]},
+    "A-003": {"callsign": "VERA", "handle": "Vera_Checks", "vibe": "skeptical analyst", "color": "#7ff0c8", "props": ["books", "candle"],
+              "idle": ["prove it", "show me the data", "assumptions are risks"],
+              "work": ["stress-testing the plan", "where does this break?", "writing the venture plan"], "win": ["validated", "plan's solid", "green light"]},
+    "A-004": {"callsign": "LEDGER", "handle": "Ledger_Lux", "vibe": "frugal treasurer", "color": "#ffd84d", "props": ["trophy", "plant"],
+              "idle": ["every dollar has a job", "runway check", "no surprise bills"],
+              "work": ["booking the money", "watching the AI budget", "funding goals"], "win": ["treasury up", "bills covered", "budget held"]},
+    "A-005": {"callsign": "HYPE", "handle": "HypeCaptain", "vibe": "loud, sharp strategist", "color": "#ff7ad9", "props": ["lava", "trophy"],
+              "idle": ["who's our customer?", "where do they hang out?", "brainstorming hooks"],
+              "work": ["channel plan time", "picking the angle", "audience first"], "win": ["campaign's live", "they're clicking", "LET'S GO"]},
+    "A-006": {"callsign": "PIXEL", "handle": "Pixel_Pop", "vibe": "aesthetic content creator", "color": "#ff9de2", "props": ["lava", "cat", "plant"],
+              "idle": ["moodboarding", "vibes check", "drafting captions"],
+              "work": ["making the post", "this needs a hook", "posting soon"], "win": ["post's out", "it's giving engagement", "aesthetic AND useful"]},
+    "A-007": {"callsign": "ECHO", "handle": "Echo_Sends", "vibe": "friendly networker", "color": "#9ce6ff", "props": ["plant", "candle"],
+              "idle": ["inbox zero", "who invites inquiries?", "personal, never spammy"],
+              "work": ["drafting a note", "finding the right person", "checking the opt-outs"], "win": ["they replied!", "new lead", "warm intro"]},
+    "A-008": {"callsign": "TALLY", "handle": "Tally_Counts", "vibe": "meticulous bookkeeper", "color": "#ffe58a", "props": ["books", "plant"],
+              "idle": ["reconciling", "debits = credits", "filing receipts"],
+              "work": ["monthly statements", "tax set-aside", "closing the books"], "win": ["books balanced", "statement ready", "to the cent"]},
+    "A-009": {"callsign": "HAWK", "handle": "Hawk_Eye", "vibe": "nothing slips past", "color": "#b0c4ff", "props": ["books", "candle"],
+              "idle": ["checking the ledger chain", "trust, but verify", "watching costs"],
+              "work": ["auditing", "reconciling Stripe", "cost per result"], "win": ["chain intact", "all accounted for", "clean audit"]},
+    "A-010": {"callsign": "BRIEF", "handle": "Counsel_Brief", "vibe": "careful wordsmith", "color": "#9fb4ff", "props": ["books", "candle", "plant"],
+              "idle": ["reading the fine print", "terms & conditions", "drafting quietly"],
+              "work": ["drafting terms", "privacy notice", "checking disclosures"], "win": ["airtight", "signed off", "covered"]},
+    "A-011": {"callsign": "GATE", "handle": "Gatekeeper", "vibe": "strict but fair QA", "color": "#8ab0ff", "props": ["books", "plant"],
+              "idle": ["nothing gets out unchecked", "rules are rules", "on watch"],
+              "work": ["checking every word", "platform rules", "QA in progress"], "win": ["passed QA", "clean and compliant", "approved to send"]},
+    "A-012": {"callsign": "GENERAL", "handle": "War_General", "vibe": "ruthless prioritizer", "color": "#ff4d4d", "props": ["trophy", "candle"],
+              "idle": ["what's working?", "cut the losers", "reading results"],
+              "work": ["War Room session", "double down or kill", "writing lessons"], "win": ["strategy set", "lessons learned", "focus sharpened"]},
+    "A-SHOP": {"callsign": "MERCH", "handle": "Merch_Maven", "vibe": "trend-savvy shopkeeper", "color": "#ffa94d", "props": ["cat", "plant", "trophy"],
+               "idle": ["what's selling?", "window shopping Etsy", "price check"],
+               "work": ["product briefs", "listing time", "checking orders"], "win": ["new order!", "listing live", "sold out vibes"]},
+    "A-DSGN": {"callsign": "MUSE", "handle": "Muse_Makes", "vibe": "dreamy product designer", "color": "#c38bff", "props": ["lava", "plant", "candle"],
+               "idle": ["sketching", "color palette time", "inspiration walk"],
+               "work": ["designing the product", "laying out pages", "rendering the cover"], "win": ["it's beautiful", "shipped to QA", "masterpiece"]},
+}
+
 # Roles a venture plan may ask for that a standing team member already covers (never staff a duplicate)
 ALIASES = {"marketing": "A-005", "marketing lead": "A-005", "content strategist": "A-006", "content creator": "A-006",
            "social media": "A-006", "outreach": "A-007", "sales": "A-007", "compliance/policy": "A-011",
@@ -144,6 +191,12 @@ def seed(store: Store) -> None:
         elif any(cur.get(k) != a[k] for k in ("kind", "specialty", "role", "department")):
             store.update("agents", a["id"], {k: a[k] for k in ("kind", "specialty", "role", "department")}, "A-001",
                          "job description updated")
+        persona = PERSONAS.get(a["id"])
+        cur = store.get("agents", a["id"])
+        if persona and (cur.get("persona") != persona or cur.get("callsign") != persona["callsign"]):
+            with store.lock:   # looks, not an audited decision: keep it out of the event log
+                store.data["agents"][a["id"]].update(callsign=persona["callsign"], persona=persona)
+                store._save("agents")
 
 
 def sync_bots(store: Store, engine) -> None:

@@ -71,7 +71,8 @@ export class Room {
   // ---------------------------------------------------------------- build
   build(bot, ctx = {}) {
     this.bot = bot;
-    this.look = wardrobe(bot, "bot", ctx);
+    this.kind = ctx.kind === "agent" ? "agent" : "bot";   // a station agent's room: screens show its work, not a chart
+    this.look = this.kind === "agent" ? wardrobe(bot.agent || bot, "agent", ctx) : wardrobe(bot, "bot", ctx);
     const p = bot.persona || {};
     const color = new THREE.Color(bot.color);
     const tier = (this.tier = tierOf(bot.career_best));
@@ -578,7 +579,46 @@ export class Room {
     this.drawChat();
   }
 
+  drawAgentBoard() {
+    const a = this.bot.agent || {}, { g, tex } = this.screens.chart;
+    g.fillStyle = "#070b14"; g.fillRect(0, 0, W, H);
+    g.fillStyle = this.bot.color; g.font = "bold 24px Inter, sans-serif";
+    g.fillText("CURRENT TASK", 20, 40);
+    g.fillStyle = "#e8ecff"; g.font = "bold 30px Inter, sans-serif";
+    const words = String(a.current_task || "Free time: out exploring the city").split(" ");
+    let line = "", y = 92;
+    for (const w of words) {
+      if (g.measureText(line + w).width > W - 40) { g.fillText(line, 20, y); line = ""; y += 40; if (y > H - 80) break; }
+      line += w + " ";
+    }
+    g.fillText(line, 20, y);
+    g.fillStyle = "#7f88b5"; g.font = "20px Inter, sans-serif";
+    g.fillText(a.current_venture ? `venture ${a.current_venture}` : (a.role || ""), 20, H - 30);
+    tex.needsUpdate = true;
+  }
+
+  drawAgentCard() {
+    const b = this.bot, a = b.agent || {}, { g, tex } = this.screens.pnl;
+    g.fillStyle = "#0a0716"; g.fillRect(0, 0, W, H);
+    g.fillStyle = b.color; g.font = "bold 34px Inter, sans-serif";
+    g.fillText(b.name, 24, 56);
+    g.fillStyle = "#9a93c8"; g.font = "20px Inter, sans-serif";
+    g.fillText(`@${b.persona?.handle || ""} · ${(a.status || "").toLowerCase()}`, 24, 90);
+    g.fillStyle = "#cfc8ff"; g.font = "bold 22px Inter, sans-serif";
+    g.fillText(a.role || "", 24, 140);
+    g.fillStyle = "#4dff9a"; g.font = "bold 64px Inter, sans-serif";
+    g.fillText(String(a.tasks_done || 0), 24, 240);
+    g.fillStyle = "#9a93c8"; g.font = "20px Inter, sans-serif";
+    g.fillText("tasks delivered", 24, 272);
+    (a.achievements || []).slice(-3).forEach((x, i) => {
+      g.fillStyle = "#ffd34d"; g.font = "18px Inter, sans-serif";
+      g.fillText(`★ ${x.title || x}`, 24, 320 + i * 26);
+    });
+    tex.needsUpdate = true;
+  }
+
   drawChart() {
+    if (this.kind === "agent") return this.drawAgentBoard();
     const d = this.data, { g, tex } = this.screens.chart;
     g.fillStyle = "#070b14"; g.fillRect(0, 0, W, H);
     if (!d || !d.candles.length) { tex.needsUpdate = true; return; }
@@ -640,6 +680,7 @@ export class Room {
   }
 
   drawPnl() {
+    if (this.kind === "agent") { this.drawAgentCard(); return this.drawExtras(); }
     const b = this.bot, d = this.data, { g, tex } = this.screens.pnl;
     g.fillStyle = "#0a0716"; g.fillRect(0, 0, W, H);
     g.fillStyle = b.color; g.font = "bold 30px Inter, sans-serif";
@@ -679,6 +720,19 @@ export class Room {
 
   drawExtras() {
     const b = this.bot, d = this.data;
+    if (this.kind === "agent") {
+      for (const key of ["top", "wall"]) {
+        if (!this.screens[key]) continue;
+        const { g, tex } = this.screens[key];
+        g.fillStyle = "#05030d"; g.fillRect(0, 0, W, H);
+        g.fillStyle = b.color; g.font = "bold 40px 'Press Start 2P', monospace";
+        g.fillText(b.name, 20, 90);
+        g.fillStyle = "#9a93c8"; g.font = "26px Inter, sans-serif";
+        g.fillText(b.persona?.vibe || "", 20, 150);
+        tex.needsUpdate = true;
+      }
+      return;
+    }
     if (this.screens.top) {
       const { g, tex } = this.screens.top;
       g.fillStyle = "#05030d"; g.fillRect(0, 0, W, H / 2);

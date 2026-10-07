@@ -712,6 +712,31 @@ A research routine is roughly $0.30-$1.00 of Claude usage; a drafting task, a QA
 roughly $0.05-$0.30; an outreach batch or a War Room session roughly $0.30-$0.80. With marketing running
 daily, one active venture uses most of the default $50 cap: raise it once ventures are earning.
 
+## One world: the city and the station district (`frontend/world.js`)
+
+Opening the app now starts with a title screen. **▶ PRESS START** flies the camera down from space into the world.
+The Space Station's departments are buildings on a ring around the city, joined to it by roads: Research Lab,
+Revenue Ops, Marketing & Media, Creative Lab, Marketplace Deck, Finance Observatory, Legal & QA, War Room,
+Engineering Bay, Agent Quarters, Crew Lounge, Approval Chamber and City Dock.
+
+The crew lives there. Every agent has a callsign, a handle, a vibe and lines of their own, set in `PERSONAS` in
+`backend/station/crew.py`:
+
+| | | | |
+|---|---|---|---|
+| ULTRON | SCOUT | VERA | LEDGER |
+| HYPE | PIXEL | ECHO | TALLY |
+| HAWK | BRIEF | GATE | GENERAL |
+| MERCH | MUSE | | |
+
+Each wears its skin and apparel from `skins.js`. Agents walk to their department's building when they have a task.
+On their free time they roam the roads to the lounge, the park, the plaza or a friend's building, and say things
+along the way.
+
+Tap an agent for their card (job, status, what they're working on, milestones) and **🎥 enter their room**. It's
+the same streamer room as the trading bots, with their current task and stats on the screens. Tap a building to
+see who works there. Everything shown is live station data.
+
 ## Strategy Forge (`backend/forge.py`)
 
 New setups are found, tested honestly, shadow-traded on paper, and go live only when you approve. Open it with

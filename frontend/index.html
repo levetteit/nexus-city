@@ -49,6 +49,17 @@
 <body>
   <div id="app"></div>
 
+  <div id="intro">
+    <div class="stars"></div>
+    <div class="intro-box">
+      <div class="logo">STARNET</div>
+      <div class="tag">TRADING CITY · SPACE STATION</div>
+      <p class="sub">Your bots trade the markets. Your crew runs the ventures. Everything you see is live.</p>
+      <button autofocus>▶ PRESS START</button>
+      <div class="loading"><i></i><span>connecting to the market…</span></div>
+    </div>
+  </div>
+
   <header id="hud">
     <div class="brand">STARNET<span>CITY</span></div>
     <div id="tickers"></div>
@@ -144,6 +155,16 @@
     <button class="close" data-close="reports">×</button>
     <h3>DAILY REPORTS</h3>
     <div id="reports-body"></div>
+  </section>
+
+  <section id="agentp" class="panel hidden">
+    <button class="close" data-close="agentp">×</button>
+    <div id="agentp-body"></div>
+  </section>
+
+  <section id="modulep" class="panel hidden">
+    <button class="close" data-close="modulep">×</button>
+    <div id="modulep-body"></div>
   </section>
 
   <section id="worker" class="panel hidden">

@@ -9,6 +9,7 @@ import { Room, moodEmoji, tierOf, GADGETS } from "./room.js";
 import { ChartView } from "./chart.js";
 import { wardrobe, ITEMS, dress, finishMaterial, animateApparel } from "./skins.js";
 import { Flight, newFlights } from "./shuttle.js";
+import { StationDistrict, MODULES as STATION_MODULES, moduleFor, personaOf } from "./world.js";
 
 // ---------------------------------------------------------------- setup
 const app = document.getElementById("app");
@@ -27,12 +28,14 @@ app.appendChild(labels.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#22127a");
-scene.fog = new THREE.Fog("#22127a", 90, 230);
+scene.fog = new THREE.Fog("#22127a", 120, 330);
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 600);
-camera.position.set(0, 52, 88);
 const PORTRAIT = innerWidth < innerHeight;
-if (PORTRAIT) camera.position.set(0, 112, 112); // phones: pulled back so the whole city fits between the panels
+// the view you land on: the city in the middle, the station district around it
+const HOME = PORTRAIT ? new THREE.Vector3(0, 150, 150) : new THREE.Vector3(0, 70, 122);
+if (PORTRAIT) { camera.fov = 72; camera.updateProjectionMatrix(); }   // phones: a wider lens so the district fits
+camera.position.set(0, 320, 460);   // the intro starts up in space and flies down (see "intro" below)
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, PORTRAIT ? -14 : 6, 0);   // phones: aim lower so the city sits mid-screen
@@ -41,7 +44,7 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 0.35;
 controls.maxPolarAngle = Math.PI * 0.46;
 controls.minDistance = 25;
-controls.maxDistance = 170;
+controls.maxDistance = 230;
 controls.addEventListener("start", () => (controls.autoRotate = false));
 
 const composer = new EffectComposer(renderer);
@@ -134,7 +137,7 @@ let skyline;
   const m = new THREE.Matrix4();
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2;
-    const r = 80 + Math.random() * 130;
+    const r = 104 + Math.random() * 120;   // beyond the station district
     const w = 4 + Math.random() * 7, d = 4 + Math.random() * 7, h = 6 + Math.random() * (r > 120 ? 55 : 30);
     m.compose(new THREE.Vector3(Math.cos(a) * r, h / 2, Math.sin(a) * r), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI), new THREE.Vector3(w, h, d));
     mesh.setMatrixAt(i, m);
@@ -441,6 +444,85 @@ function updateFlights(dt, t) {
   skyStation.userData.lights.color.set(stationPulse > 0.05 ? "#3dffa2" : "#5ee7ff");
 }
 
+// ---------------------------------------------------------------- the station district (world.js): the crew lives around the city
+const district = new StationDistrict(scene, clickables);
+let station = null;
+district.onAgent = (id) => openAgent(id);
+district.onModule = (id) => openModule(id);
+async function loadStation() {
+  try {
+    station = await (await fetch("/api/station")).json();
+    if (station && station.agents) district.sync(station.agents);
+    if (openAgentId) renderAgent();
+    if (roomBotId && String(roomBotId).startsWith("agent:")) {
+      const a = station.agents.find((x) => `agent:${x.id}` === roomBotId);
+      if (a) room.update(agentAsBot(a), null);
+    }
+  } catch { /* the station is optional: the city runs without it */ }
+}
+loadStation();
+setInterval(loadStation, 8000);
+
+let openAgentId = null;
+function agentAsBot(a) {
+  const p = personaOf(a);
+  return { id: a.id, name: p.callsign, color: p.color, career: 0, career_best: 0, realized: 0, trades: 0, wins: 0,
+           status: (a.status || "").toLowerCase(), persona: { handle: p.handle, vibe: p.vibe, props: p.props, win: p.win, loss: ["noted", "we adjust"], idle: p.idle },
+           agent: a };
+}
+function openAgent(id) {
+  openAgentId = id;
+  document.getElementById("agentp").classList.remove("hidden");
+  document.getElementById("modulep").classList.add("hidden");
+  renderAgent();
+}
+function renderAgent() {
+  const a = station?.agents?.find((x) => x.id === openAgentId);
+  if (!a) return;
+  const p = personaOf(a), mod = STATION_MODULES.find((m) => m.id === moduleFor(a));
+  const ach = (a.achievements || []).slice(-5);
+  document.getElementById("agentp-body").innerHTML = `
+    <div class="agent-head" style="--accent:${p.color}"><b>${esc(p.callsign)}</b><span>@${esc(p.handle)} · ${esc(p.vibe)}</span></div>
+    <div class="row"><span>Job</span><span>${esc(a.role)} · ${esc(mod ? mod.name : "")}</span></div>
+    <div class="row"><span>Status</span><span>${esc((a.status || "").toLowerCase())}</span></div>
+    <div class="row"><span>Working on</span><span>${esc(a.current_task || "free time: out exploring")}</span></div>
+    <div class="row"><span>Delivered</span><span>${a.tasks_done || 0} tasks</span></div>
+    <div class="row"><span>Specialty</span><span style="white-space:normal;text-align:right">${esc(a.specialty || "")}</span></div>
+    ${ach.length ? `<div class="row"><span>Milestones</span><span style="white-space:normal;text-align:right">${ach.map((x) => esc(x.title || x)).join(" · ")}</span></div>` : ""}
+    <button class="desk-btn" data-agentroom="${esc(a.id)}">🎥 ENTER ${esc(p.callsign)}'S ROOM</button>
+    <a class="desk-btn" style="display:block;text-align:center;text-decoration:none" href="station.html#/crew">📋 OPEN ON THE BOARD</a>`;
+}
+function openModule(id) {
+  const m = STATION_MODULES.find((x) => x.id === id);
+  if (!m) return;
+  const crew = (station?.agents || []).filter((a) => !String(a.id).startsWith("BOT-") && moduleFor(a) === id);
+  document.getElementById("agentp").classList.add("hidden");
+  const el = document.getElementById("modulep");
+  el.classList.remove("hidden");
+  document.getElementById("modulep-body").innerHTML = `
+    <div class="agent-head" style="--accent:${m.color}"><b>${esc(m.name)}</b><span>Space Station district</span></div>
+    ${crew.length ? crew.map((a) => { const p = personaOf(a); return `<div class="row crew-row" data-agentopen="${esc(a.id)}"><span><b style="color:${p.color}">${esc(p.callsign)}</b> · ${esc(a.role)}</span><span>${esc((a.status || "").toLowerCase())}</span></div>`; }).join("")
+      : `<p class="note">${id === "lounge" ? "Crew on a break come here to hang out." : id === "citydock" ? "Where the city's trading bots dock: tap a building in the city." : "No crew assigned here yet."}</p>`}
+    <a class="desk-btn" style="display:block;text-align:center;text-decoration:none" href="station.html">📋 OPEN THE STATION BOARD</a>`;
+}
+function openAgentRoom(id) {
+  const a = station?.agents?.find((x) => x.id === id);
+  if (!a) return;
+  const bot = agentAsBot(a), p = personaOf(a);
+  const el = document.getElementById("room");
+  el.classList.remove("hidden");
+  el.classList.add("agent-room");
+  el.style.setProperty("--accent", p.color);
+  document.getElementById("room-title").innerHTML = `<b>${esc(p.handle)}</b> <span>${esc(p.callsign)} · ${esc(p.vibe)}</span>`;
+  room ||= new Room(document.getElementById("room-view"));
+  if (roomBotId !== `agent:${id}`) { room.build(bot, { kind: "agent" }); room.chat = []; }
+  roomBotId = `agent:${id}`;
+  room.start();
+  room.update(bot, null);
+  clearInterval(roomTimer);
+  document.getElementById("agentp").classList.add("hidden");
+}
+
 // ---------------------------------------------------------------- state -> visuals
 let state = null;
 let openWorkerId = null;
@@ -457,6 +539,8 @@ const money = (v) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toLocaleString(undefin
 
 function applyState(s) {
   state = s;
+  const il = document.querySelector("#intro .loading span");
+  if (il) { il.textContent = `market live · ${s.bots.filter((b) => b.status !== "disabled").length} bots on shift · ready`; il.previousElementSibling.style.width = "100%"; il.previousElementSibling.style.animation = "none"; }
   const waiting = s.station ? s.station.approvals + s.station.owner_tasks : 0;
   document.getElementById("station-badge").textContent = waiting || "";
   const cr = (s.station && s.station.credits) || {};
@@ -1124,6 +1208,7 @@ function openRoom(id) {
 }
 function closeRoom() {
   document.getElementById("room").classList.add("hidden");
+  document.getElementById("room").classList.remove("agent-room");
   room?.stop();
   clearInterval(roomTimer);
   roomBotId = null;
@@ -1233,6 +1318,10 @@ document.addEventListener("click", async (e) => {
   if (e.target.closest("[data-accounts]")) openAccounts();
   if (e.target.closest("[data-scale]")) openScale();
   if (e.target.closest("[data-orderlog]")) openOrderLog();
+  const ar = e.target.closest("[data-agentroom]");
+  if (ar) openAgentRoom(ar.dataset.agentroom);
+  const ao = e.target.closest("[data-agentopen]");
+  if (ao) openAgent(ao.dataset.agentopen);
   if (e.target.closest("[data-forge]")) openForge();
   if (e.target.closest("[data-forge-run]")) {
     if (!confirm("Run the Strategy Forge now? It tests about 40 setups on the saved candles (a few minutes). Nothing goes live without your approval.")) return;
@@ -1318,8 +1407,11 @@ renderer.domElement.addEventListener("pointerdown", (e) => (downAt = [e.clientX,
 renderer.domElement.addEventListener("pointerup", (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
-  const hit = ray.intersectObjects([...clickables, dome, skyStation], true).find((h) => h.object.userData.botId || h.object === dome || h.object.userData.station);
+  const hit = ray.intersectObjects([...clickables, dome, skyStation], true).find((h) => h.object.userData.botId || h.object === dome
+    || h.object.userData.station || h.object.userData.agent || h.object.userData.module);
   if (!hit) return;
+  if (hit.object.userData.agent) { openAgent(hit.object.userData.agent); return; }
+  if (hit.object.userData.module) { openModule(hit.object.userData.module); return; }
   if (hit.object.userData.station) { location.href = "station3d.html"; return; }
   if (hit.object === dome) document.getElementById("payroll").classList.toggle("hidden");
   else openRoom(hit.object.userData.botId);
@@ -1362,10 +1454,10 @@ const SKY = [   // [ET hour, background, hemisphere sky, sun colour, light level
   [24, "#0d0838", "#5b4bd6", "#7d6cff", 0.55],
 ];
 const WEATHER = {
-  clear: { icon: "☀️", text: "calm", fog: [90, 230], dim: 1 },
-  fog: { icon: "🌫️", text: "quiet tape", fog: [30, 140], dim: 0.85 },
-  rain: { icon: "🌧️", text: "volatile", fog: [70, 200], dim: 0.8 },
-  storm: { icon: "⛈️", text: "storm", fog: [55, 170], dim: 0.6 },
+  clear: { icon: "☀️", text: "calm", fog: [120, 330], dim: 1 },
+  fog: { icon: "🌫️", text: "quiet tape", fog: [60, 230], dim: 0.85 },
+  rain: { icon: "🌧️", text: "volatile", fog: [100, 290], dim: 0.8 },
+  storm: { icon: "⛈️", text: "storm", fog: [80, 250], dim: 0.6 },
 };
 const sky = { bg: new THREE.Color("#22127a"), top: new THREE.Color("#8f7bff"), sun: new THREE.Color("#c9b8ff"), level: 1, hour: 20, kind: "clear", news: false,
   skylineGrow: 1, skylineTo: 1, flash: 0, nextFlash: 0, rainOpacity: 0 };
@@ -1455,10 +1547,47 @@ function updateSky(dt, t) {
 
 // ---------------------------------------------------------------- render loop
 const clock = new THREE.Clock();
+// ---------------------------------------------------------------- intro: a title screen, then fly in from space
+const intro = { t: -1, from: camera.position.clone(), dur: 2.8 };
+{
+  const el = document.getElementById("intro");
+  const start = () => {
+    if (intro.t >= 0) return;
+    intro.t = 0;
+    intro.from = camera.position.clone();
+    el.classList.add("leaving");
+    document.body.classList.remove("in-intro");
+    setTimeout(() => el.remove(), 900);
+    try { sessionStorage.setItem("starnet_intro", "1"); } catch { /* private mode */ }
+  };
+  if (el) {
+    document.body.classList.add("in-intro");
+    el.querySelector("button").onclick = start;
+    el.addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
+    let seen = false;
+    try { seen = !!sessionStorage.getItem("starnet_intro"); } catch { /* private mode */ }
+    if (seen) { intro.dur = 1.4; start(); }   // already entered this visit: just a quick swoop
+  } else {
+    camera.position.copy(HOME);
+  }
+}
+function updateIntro(dt) {
+  if (intro.t < 0) { controls.autoRotateSpeed = 0.8; return; }
+  if (intro.t >= 1) return;
+  intro.t = Math.min(1, intro.t + dt / intro.dur);
+  const k = 1 - Math.pow(1 - intro.t, 3);
+  camera.position.lerpVectors(intro.from, HOME, k);
+  if (intro.t >= 1) controls.autoRotateSpeed = 0.35;
+}
+
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.1);
   const t = clock.elapsedTime;
+  updateIntro(dt);
   controls.update();
+  const dist = camera.position.distanceTo(controls.target);
+  document.body.classList.toggle("far", dist > 150);
+  document.body.classList.toggle("near", dist < 105);
   runLights.rotation.y += dt * 0.15;
 
   for (const b of buildings.values()) {
@@ -1486,6 +1615,7 @@ function frame() {
   }
 
   updateSky(dt, t);
+  district.update(dt, t);
   updateFlights(dt, t);
 
   vaultPulse = Math.max(0, vaultPulse - dt * 1.5);
