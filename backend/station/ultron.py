@@ -523,6 +523,19 @@ class Ultron:
                     self.notify("🛰️ Venture closed", f"{v['name']}: no sale in {KILL_AFTER.days} days")
             if v["stage"] in ("killed", "paused") and any(p["venture"] == v["id"] and p.get("active") for p in s.all("products")):
                 digital.retire(s, v["id"])
+        # an owner kit gets the same 21 days, but the owner decides: the station can't see Etsy orders
+        # (its Etsy access is listings and shop only), so "no sale" here means no storefront sale
+        for p in s.all("products"):
+            if p.get("kit") and p.get("active") and now - datetime.fromisoformat(p["created_at"]) >= KILL_AFTER \
+                    and digital.sales(self.treasury, p["slug"]) == 0 \
+                    and not any(a["kind"] == "venture_decision" and a["payload"].get("product") == p["id"] for a in s.all("approvals")):
+                self.request("venture_decision", "A-001", f"Retire {p['title']}? ({KILL_AFTER.days} days on sale)",
+                             f"No storefront sale since it went on sale. The station can't see Etsy orders: check Etsy Shop "
+                             f"Manager → Orders first. Approve to take it off sale everywhere (storefront and Etsy) and close "
+                             f"{p['venture']}; reject to keep it on sale.",
+                             cost=0, reversible=True, risk="none: the files stay on the server", venture=p["venture"],
+                             payload={"stage": "killed", "product": p["id"]})
+                self.notify("🛰️ 21-day check", f"{p['title']}: no storefront sale yet. Keep it or retire it?")
 
     def _approval_for(self, kind: str, goal: Optional[str], pending_only: bool = False) -> Optional[dict]:
         for a in self.store.all("approvals"):

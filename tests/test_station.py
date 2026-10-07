@@ -1277,6 +1277,20 @@ def test_owner_kit_imports_and_publishes(ultron, tmp_path, monkeypatch):
     assert "store it securely" in digital.page_product(s.get("products", p["id"]))
     assert next(x for x in kits.status(s) if x["id"] == "binder")["product"]["etsy"] == "https://www.etsy.com/listing/7"
 
+    # 21 days on sale with no storefront sale: ULTRON asks the owner (it can't see Etsy orders), once
+    later = MON_0900.replace(year=2030)
+    u._review_autonomous(MON_0900)
+    assert not s.find("approvals", kind="venture_decision")                   # too early
+    u._review_autonomous(later)
+    u._review_autonomous(later)
+    asks = [a for a in s.find("approvals", kind="venture_decision") if a["payload"].get("product") == p["id"]]
+    assert len(asks) == 1 and "Etsy" in asks[0]["reason"] and asks[0]["payload"]["stage"] == "killed"
+    deactivated = []
+    monkeypatch.setattr(connectors, "etsy_deactivate", lambda lid: deactivated.append(lid))
+    u.decide(asks[0]["id"], "approve")
+    u._review_autonomous(later)
+    assert not s.get("products", p["id"])["active"] and deactivated == [7]
+
 
 def test_shipped_kits_are_valid():
     from backend.station import kits
