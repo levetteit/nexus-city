@@ -16,7 +16,7 @@ from .store import Store, now_iso
 
 METRICS_EVERY = timedelta(hours=6)
 METRICS_WINDOW = timedelta(days=14)
-SOURCES = ("dm", "whatsapp", "call", "comment", "referral", "other")
+SOURCES = ("dm", "whatsapp", "call", "comment", "referral", "email", "other")
 STATUSES = ("new", "quoted", "won", "lost")
 
 

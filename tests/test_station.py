@@ -2,7 +2,7 @@
 with a fake Claude client (no network, no cost)."""
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace as NS
 from zoneinfo import ZoneInfo
 
@@ -1304,3 +1304,37 @@ def test_shipped_kits_are_valid():
         text = (c["description"] + c["etsy_title"] + " ".join(c["bullets"])).lower()
         for banned in ("hipaa", "instant download", "fillable", "doctor-approved", "prevents", "guarantee", "bestseller"):
             assert banned not in text, banned
+
+
+def test_outreach_inbox_honors_opt_outs_and_turns_replies_into_leads(ultron, monkeypatch):
+    from backend.station import actions, mailbox
+    u, _ = ultron
+    s = u.store
+    v = s.create("ventures", {"name": "Padilla Property Solutions", "stage": "operate"}, "test", "t")
+    c = actions.contacts_doc(s)
+    for who in ("ann@roofco.com", "bob@solarpro.com", "cat@homes.com"):
+        c["contacted"][who] = {"at": "2026-10-07T10:00:00+00:00", "venture": v["id"], "action": None}
+    s.save_doc("contacts.json", c)
+    for k, val in {"STARNET_SMTP_HOST": "smtp.gmail.com", "STARNET_SMTP_USER": "hello.starnetstudio@gmail.com",
+                   "STARNET_SMTP_PASSWORD": "app-pass", "STARNET_MAIL_FROM": "Alex at StarNet Studio <hello.starnetstudio@gmail.com>",
+                   "STARNET_MAIL_ADDRESS": "PO Box 1, Town"}.items():
+        monkeypatch.setenv(k, val)
+    assert mailbox.imap_host() == "imap.gmail.com" and mailbox.due(s, MON_0900)
+    msgs = [
+        {"uid": 11, "from": "ann@roofco.com", "subject": "Re: quick question", "text": "Please unsubscribe me.\n\nOn Tue Alex wrote:\n> hi"},
+        {"uid": 12, "from": "bob@solarpro.com", "subject": "Re: quick question",
+         "text": "Sounds good, can you call me Thursday?\n\nOn Tue Alex wrote:\n> not interested? reply unsubscribe"},
+        {"uid": 13, "from": "news@somestore.com", "subject": "Sale!", "text": "unsubscribe here"},   # not someone we emailed
+        {"uid": 14, "from": "cat@homes.com", "subject": "Re: quick question", "text": "Not interested, thanks."},
+    ]
+    pushes = []
+    out = mailbox.check(s, MON_0900, notify=lambda t, b: pushes.append(b), fetcher=lambda since: [m for m in msgs if m["uid"] > since])
+    assert out == {"opt_outs": 2, "replies": 1, "ignored": 1}
+    dnc = actions.contacts_doc(s)["do_not_contact"]
+    assert "ann@roofco.com" in dnc and "cat@homes.com" in dnc and "bob@solarpro.com" not in dnc   # the quoted footer doesn't count
+    leads = s.find("leads", venture=v["id"])
+    assert len(leads) == 1 and leads[0]["source"] == "email" and "Thursday" in leads[0]["note"] and "Thursday" in pushes[0]
+    assert not mailbox.due(s, MON_0900 + timedelta(minutes=10)) and mailbox.due(s, MON_0900 + timedelta(minutes=21))
+    again = mailbox.check(s, MON_0900 + timedelta(minutes=21), fetcher=lambda since: [m for m in msgs if m["uid"] > since])
+    assert again == {"opt_outs": 0, "replies": 0, "ignored": 0}                                      # each message once
+    assert actions.create(s, "outreach.email", "A-005", v["id"], {"to_email": "ann@roofco.com", "source_url": "https://x"}, "x") is None
