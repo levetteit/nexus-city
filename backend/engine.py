@@ -121,6 +121,20 @@ class Engine:
                 bot.halt(reason, "stopped" if loss else "off_duty", self.market)
         self.account.check(self._unrealized())
 
+    def resume_after_sync(self) -> list[str]:
+        """After the owner syncs with the real account: if it may trade again, bots the account sent home come back.
+        A bot that walked away on its own signal, or that the owner switched off, stays as it is."""
+        a, back = self.account, []
+        if not a.can_trade:
+            return back
+        for bot in self.bots.values():
+            if bot.status == "stopped" or (bot.status == "off_duty" and not a.goal_reached):
+                bot.status = "scanning"
+                back.append(bot.cfg.id)
+        if back:
+            self.events.append({"type": "account_resumed", "bots": back, "day_pnl": round(a.day_pnl, 2)})
+        return back
+
     def reset_account(self) -> None:
         for bot in self.bots.values():
             if bot.position:
