@@ -272,8 +272,11 @@ class PropAccount:
         g = self.guards
         self.day_stop = min(g.daily_stop, self.balance - self.mll - g.mll_cushion)
 
-    def sync(self, phase: str, balance: float, mll: float, payouts_taken: int = 0, cycle_days: int = 0) -> None:
-        """Match the paper account to the real one (from the Lucid dashboard)."""
+    def sync(self, phase: str, balance: float, mll: float, payouts_taken: int = 0, cycle_days: int = 0,
+             day_pnl: Optional[float] = None) -> None:
+        """Match the paper account to the real one (from the Lucid dashboard). `day_pnl`: today's closed P&L on the
+        real account. Given, it replaces the paper day, so trades that never reached the account (sent before
+        real orders worked, say) stop counting toward today's goal, cap and stop."""
         if phase not in ("evaluation", "funded"):
             raise ValueError("phase must be evaluation or funded")
         if not mll < balance:
@@ -285,7 +288,10 @@ class PropAccount:
         # before the first payout the cycle runs from the funded start; after one, from now (unknown)
         self.cycle_days = int(cycle_days)
         self.cycle_start = self.rules.start_balance if not self.payouts else self.balance
-        self._note(f"synced with the firm: {phase}, balance ${balance:,.0f}, MLL ${mll:,.0f}")
+        if day_pnl is not None:
+            self.day_realized = round(float(day_pnl), 2)
+        self._note(f"synced with the firm: {phase}, balance ${balance:,.0f}, MLL ${mll:,.0f}"
+                   + (f", today {'+' if self.day_realized >= 0 else '-'}${abs(self.day_realized):,.0f}" if day_pnl is not None else ""))
         self._start_day()
 
     # ---- position budget ----------------------------------------------------

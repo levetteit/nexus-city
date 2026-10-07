@@ -117,3 +117,36 @@ def test_funded_scaling_plan_by_profit():
     assert funded().scale_micros == 20
     assert funded(51_500, 49_500).scale_micros == 30
     assert funded(52_500, 50_100).scale_micros == 40
+
+
+def test_sync_with_todays_real_pnl_lifts_a_stop_from_trades_that_never_reached_the_account():
+    a = PropAccount()
+    a.filled("mnq-3m", "MNQ", 6)
+    a.closed("mnq-3m", "MNQ", -420.0)          # paper trades before real orders worked
+    a.filled("mnq-6m", "MNQ", 3)
+    a.closed("mnq-6m", "MNQ", -286.0)          # the one trade that really happened
+    assert a.check(0.0) and a.halted.startswith("daily stop")
+    a.sync("evaluation", 49_714.0, 48_000.0, day_pnl=-286.0)
+    assert a.halted == "" and a.day_pnl == -286.0 and a.check(0.0) is None and a.can_trade
+    a.filled("mnq-3m", "MNQ", 3)
+    a.closed("mnq-3m", "MNQ", -320.0)          # the real day reaches -$606: the stop applies again
+    assert a.check(0.0) and a.halted.startswith("daily stop")
+    b = PropAccount()                          # without day_pnl a sync keeps the paper day, as before
+    b.closed("x", "MNQ", -100.0)
+    b.sync("evaluation", 49_900.0, 48_000.0)
+    assert b.day_realized == -100.0
+
+
+def test_engine_brings_stopped_bots_back_after_a_sync():
+    from backend.engine import Engine
+    e = Engine()
+    e.account.closed("x", "MNQ", -700.0)
+    e._risk_check()
+    stopped = [b for b in e.bots.values() if b.status == "stopped"]
+    assert stopped and e.account.halted
+    walked = stopped[0]
+    walked.status = "walked"                                  # the strategy's own decision stays
+    e.account.sync("evaluation", 49_714.0, 48_000.0, day_pnl=-286.0)
+    back = e.resume_after_sync()
+    assert walked.cfg.id not in back and all(e.bots[i].status == "scanning" for i in back) and len(back) == len(stopped) - 1
+    assert e.events[-1]["type"] == "account_resumed"

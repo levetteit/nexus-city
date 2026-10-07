@@ -878,7 +878,10 @@ async function accountAction(action, id) {
       payouts = ask("Payouts taken so far:", a?.payouts ?? 0); if (payouts === null) return;
       cycle = ask("Days this payout cycle with $150+ profit:", a?.cycle_days ?? 0); if (cycle === null) return;
     }
-    const body = { name, phase: phase.trim(), balance: +balance, mll: +mll, payouts: +payouts, cycle_days: +cycle };
+    const day = ask("Today's CLOSED P&L on this account, from Tradovate ($, e.g. -286):", a ? Math.round(a.day_pnl) : 0);
+    if (day === null) return;
+    const body = { name, phase: phase.trim(), balance: +balance, mll: +mll, payouts: +payouts, cycle_days: +cycle,
+                   day_pnl: day === "" ? null : +day };
     if (action === "add") body.webhook = ask("Optional: this account's own TradersPost webhook URL (leave empty if it copies the main strategy):", "") || "";
     await post(action === "add" ? "/api/accounts" : `/api/accounts/${id}/sync`, body);
   } else if (action === "payout") {
@@ -1037,6 +1040,7 @@ function feedEvents(events) {
       feed(`${who} closed ${money(whole)}${whole !== ev.pnl ? ` (runner ${money(ev.pnl)})` : ""} · ${ev.reason}`, whole >= 0 ? "win" : "loss");
     }
     else if (ev.type === "account_halt") feed(`<b>Account</b> ${ev.reason}`, /cap|target/.test(ev.reason) ? "win" : "loss");
+    else if (ev.type === "account_resumed") feed(`<b>Account</b> synced with Lucid: back to work (${ev.bots.length} bot${ev.bots.length === 1 ? "" : "s"}, today ${money(ev.day_pnl)})`, "win");
     else if (ev.type === "tv_signal") feed(`${who} TradingView: ${ev.action}`);
     else if (ev.type === "new_session") feed(`<b>New trading day</b>`, "muted2");
     else if (ev.type === "acct_event") feed(`👥 ${esc(ev.text)}`, { passed: "win", payout: "win", failed: "loss", halt: "think" }[ev.what] || "");
@@ -1179,9 +1183,12 @@ document.addEventListener("click", async (e) => {
       const mll = balance && prompt("Max Loss Limit / MLL ($):", Math.round(a.mll));
       const extra = mll && phase.trim() === "funded"
         ? [prompt("Payouts taken so far:", a.payouts), prompt("Days this payout cycle with $150+ profit:", a.cycle_days)] : [0, 0];
-      if (mll && extra[0] !== null && extra[1] !== null) {
+      const day = mll && extra[0] !== null && extra[1] !== null
+        && prompt("Today's CLOSED P&L on the real account, from Tradovate ($, e.g. -286).\nThis replaces the app's count for today, so trades that never reached your account stop counting toward the daily stop:", Math.round(a.day_pnl - (a.day_open || 0)));
+      if (mll && extra[0] !== null && extra[1] !== null && day !== null && day !== false) {
         const r = await fetch("/api/account/sync", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phase: phase.trim(), balance: +balance, mll: +mll, payouts: +extra[0], cycle_days: +extra[1] }) });
+          body: JSON.stringify({ phase: phase.trim(), balance: +balance, mll: +mll, payouts: +extra[0], cycle_days: +extra[1],
+            day_pnl: day === "" ? null : +day }) });
         alert(r.ok ? "Synced. The bots now trade with your real account's numbers." : (await r.json()).detail);
       }
     }

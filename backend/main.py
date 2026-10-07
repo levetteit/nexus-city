@@ -682,7 +682,8 @@ async def accounts_action(acc_id: str, action: str, request: Request) -> dict:
     try:
         acc = _book().get(acc_id)
         if action == "sync":
-            acc.account.sync(b["phase"], float(b["balance"]), float(b["mll"]), int(b.get("payouts") or 0), int(b.get("cycle_days") or 0))
+            acc.account.sync(b["phase"], float(b["balance"]), float(b["mll"]), int(b.get("payouts") or 0), int(b.get("cycle_days") or 0),
+                             _day_pnl(b))
         elif action == "payout":
             acc.account.take_payout(float(b["amount"]))
         elif action == "webhook":
@@ -708,14 +709,22 @@ async def account_payout(request: Request) -> dict:
     return engine.account.snapshot()
 
 
+def _day_pnl(b: dict):
+    """Today's closed P&L on the real account, if the owner gave it (None keeps the paper day)."""
+    v = b.get("day_pnl")
+    return None if v in (None, "") else float(v)
+
+
 @app.post("/api/account/sync")
 async def account_sync(request: Request) -> dict:
     """Match the paper account to the real one: phase, balance, MLL, payouts taken, cycle days."""
     b = await request.json()
     try:
-        engine.account.sync(b["phase"], float(b["balance"]), float(b["mll"]), int(b.get("payouts", 0)), int(b.get("cycle_days", 0)))
+        engine.account.sync(b["phase"], float(b["balance"]), float(b["mll"]), int(b.get("payouts", 0)), int(b.get("cycle_days", 0)),
+                            _day_pnl(b))
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(400, str(exc))
+    engine.resume_after_sync()
     _save_account()
     return engine.account.snapshot()
 
