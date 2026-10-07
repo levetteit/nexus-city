@@ -600,7 +600,7 @@ class ProcBot(Bot):
         if kind == "exit" and self.position:
             self._close("TradingView exit", market)
             return "exit"
-        if kind in ("long", "short") and not self.position and market.minutes_to_close > 10:
+        if kind in ("long", "short") and not self.position and market.minutes_to_flat > 10:
             u = market.underlyings[self.cfg.underlying]
             self._open(Entry(kind, None, "TradingView alert"), u, market)
             return f"{kind} order" if self.position else None

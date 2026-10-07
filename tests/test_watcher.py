@@ -51,3 +51,18 @@ def test_full_size_chart_wins_over_the_micro_chart(monkeypatch):
     assert m.push("MNQ", t + 60, 1, 2, 0.5, 1.5, "MNQ") is False   # while NQ1! feeds, the MNQ1! alert is ignored
     assert m._pending[live.datetime.fromtimestamp(t + 60, tz=live.timezone.utc).astimezone(live.ET)]["MNQ"][1] == 10
     assert m.charts["MNQ"] == "NQ"
+
+
+def test_no_entries_after_1550_and_flat_by_1555():
+    from backend.bots.base import Entry
+    from backend.market import FLAT_BY_MIN
+    e = Engine()
+    bot = e.bots["mnq-3m"]
+    e.market.clock_min = FLAT_BY_MIN - 12
+    bot._open(Entry("long", None), e.market.underlyings["MNQ"], e.market)
+    assert bot.position
+    e.market.clock_min = FLAT_BY_MIN - 9
+    assert not bot.add(e.market, "test")                     # no adds in the last 10 minutes
+    e.market.clock_min = FLAT_BY_MIN - 5
+    bot._manage_tick(e.market.underlyings["MNQ"], e.market)
+    assert bot.position is None and "16:00" in bot.trades[-1].reason

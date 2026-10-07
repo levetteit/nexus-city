@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 
 from .account import PropAccount
 from .engine import Engine
-from .market import SESSION_CLOSE_MIN, Bar, Market, Underlying, session_at
+from .market import FLAT_BY_MIN, SESSION_CLOSE_MIN, Bar, Market, Underlying, session_at
 
 ET = ZoneInfo("America/New_York")
 SYMBOLS = {"MNQ": 0.25, "MES": 0.25, "M2K": 0.10, "MYM": 1.0}   # tick sizes
@@ -134,6 +134,10 @@ class ReplayMarket:
     @property
     def minutes_to_close(self) -> float:
         return SESSION_CLOSE_MIN - self.clock_min
+
+    @property
+    def minutes_to_flat(self) -> float:
+        return FLAT_BY_MIN - self.clock_min
 
     @property
     def session(self) -> str:

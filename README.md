@@ -178,7 +178,10 @@ The simulated day matches the futures day under Lucid's flat rule: **18:00 ET
 open → Asia → London (03:00) → New York (09:30) → flat by 16:45 ET**. Bots track
 market structure the whole time but only open trades in the killzones London
 02:00–05:00, NY AM 09:30–11:00 and NY PM 14:00–16:00 ET (open trades run on
-until a PROC against them), and flatten at 16:40.
+until a PROC against them). **Tradovate's session for the micros ends at 16:00 ET**, so no new entries or adds
+after 15:50 and every trade is flattened at 15:55 (`market.FLAT_BY_MIN`); the real-order router also refuses a
+new entry after 15:50. The day still rolls at 16:45. On the 22 days of history this changed nothing: no trade
+was ever open past 15:55.
 
 ### Real-data results (Sep 8 – Oct 5 2026, 21 days of 1m NQ/ES/RTY)
 
@@ -321,7 +324,7 @@ All bots trade one shared account with LucidFlex 50K rules:
 | Consistency | evaluation: best day ≤ 50% of profit; funded: none | the $1,200 cap keeps the best day under half the $3,000 target |
 | Daily loss limit | none | our own −$600 daily stop |
 | Max size | 40 micros | at most 12 micros open, 3–6 per trade |
-| Flat rule | flat by 16:45 ET, no overnight/weekend holds | flatten at 16:40 |
+| Flat rule | flat by 16:45 ET, no overnight/weekend holds (Tradovate's micro session ends 16:00) | no entries after 15:50, flatten at 15:55 |
 
 `LUCIDPRO_50K` is also included (no evaluation consistency rule; 40% funded
 consistency and a $2,100 payout buffer). Use it with
@@ -943,7 +946,7 @@ Safety built in:
 - Adds and exits are only sent for positions the router opened itself.
 - After a restart, any position left open is closed immediately (the bots restart flat).
 - Your Lucid account still enforces its own rules (drawdown, position limits,
-  4:45 PM ET flat); the bots' daily goal / cap / stop and 16:40 flatten sit inside those.
+  4:45 PM ET flat); the bots' daily goal / cap / stop and 15:55 flatten sit inside those.
 
 The city's account panel still tracks paper P&L from the bots' fills. Your real
 fills (slippage, commissions) are in TradersPost and Tradovate. Run paper for a

@@ -138,7 +138,7 @@ class Bot:
             reason = self.exit_on_bar(htf, u.bars, market)
             if reason:
                 self._close(reason, market)
-        elif market.minutes_to_close > 10:
+        elif market.minutes_to_flat > 10:
             entry = self.on_bar(htf, u.bars, market)
             if entry and self.status not in DONE_FOR_DAY:
                 self._open(entry, u, market)
@@ -222,7 +222,7 @@ class Bot:
     def add(self, market: Market, why: str) -> bool:
         """Size up the open position by `contracts`, up to `max_contracts`."""
         pos = self.position
-        if self._news_blocked("add", adding=True):
+        if market.minutes_to_flat <= 10 or self._news_blocked("add", adding=True):
             return False
         want = min(self.cfg.contracts, self.cfg.max_contracts - pos.qty)
         qty = self.account.request(self.cfg.id, self.cfg.underlying, want, adding=True) if want > 0 else 0
@@ -237,10 +237,10 @@ class Bot:
 
     def _manage_tick(self, u: Underlying, market: Market) -> None:
         # No stop loss, target or time stop: exits come from the strategy
-        # (exit_on_bar / on_signal). The one forced exit is just before the
-        # 16:45 ET flat deadline: prop firms don't allow overnight holds.
-        if market.minutes_to_close <= 5:
-            self._close("end of day", market)
+        # (exit_on_bar / on_signal). The one forced exit is at 15:55 ET: Tradovate's
+        # session for the micros ends at 16:00, and prop firms don't allow overnight holds.
+        if market.minutes_to_flat <= 5:
+            self._close("end of day (session ends 16:00)", market)
 
     def _record(self, qty: int, exit_px: float, reason: str, market: Market) -> TradeRecord:
         pos = self.position

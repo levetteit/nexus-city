@@ -13,6 +13,7 @@ Safety, in order of importance:
   * New entries are blocked whenever the price data is more than
     MAX_DATA_DELAY_MIN minutes old: the free Yahoo feed is ~10 minutes late, so
     real orders need the real-time TradingView feed (see tradingview/starnet_feed.pine).
+  * No new entries from 15:50 ET: Tradovate's session for the micros ends at 16:00 (the bots are flat by 15:55).
   * Adds and exits are only sent for positions this router actually opened.
     Exits are always sent, even on stale data: getting flat is never blocked.
   * "Flatten all" sends an exit for every symbol and disarms.
@@ -147,6 +148,10 @@ class TradersPostRouter:
             except (AttributeError, KeyError, TypeError):
                 pass
             if ev["type"] == "trade_open":
+                if getattr(engine.market, "minutes_to_flat", 99) <= 10:   # the broker's session ends at 16:00 ET
+                    self.blocked += 1
+                    self._log(symbol, {"action": "skip-open"}, "after 15:50 ET: Tradovate's session ends at 16:00", 0)
+                    continue
                 if delay_min > MAX_DATA_DELAY_MIN:
                     self.blocked += 1
                     self._log(symbol, {"action": "skip-open"}, f"data {delay_min:.1f} min old", 0)
