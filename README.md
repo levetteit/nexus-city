@@ -712,6 +712,32 @@ A research routine is roughly $0.30-$1.00 of Claude usage; a drafting task, a QA
 roughly $0.05-$0.30; an outreach batch or a War Room session roughly $0.30-$0.80. With marketing running
 daily, one active venture uses most of the default $50 cap: raise it once ventures are earning.
 
+## Strategy Forge (`backend/forge.py`)
+
+New setups are found, tested honestly, shadow-traded on paper, and go live only when you approve. Open it with
+**⚒️ STRATEGY FORGE** in the account panel.
+
+1. **Forge, every Saturday.** It runs in its own low-priority process, so trading never slows down. It builds 40
+   setups from the strategy's tested filters: confirmation mode and window, killzones, sweep requirement, trims,
+   chop and bias filters, and walk-away count. It writes no new code, and it never touches the PROC zone settings
+   (pivot length, IFFVGs, proximity), which match your TradingView chart.
+2. **Test.** Each setup is backtested on the saved 1-minute candles: TradingView's own once 15+ days are saved,
+   otherwise the Yahoo history. To pass, a setup must beat the live settings on the first half of the training
+   days, the second half, and the newest 30% it never saw while being chosen. Its worst day can be no worse by more
+   than $200, and it can't fail more evaluations.
+3. **Shadow.** The best setup that passes is replayed with each real trading day after the close, next to the live
+   settings. This is paper only: no orders.
+4. **Vote.** After 10 shadow days, the desk's rules decide. If the shadow beat the live settings by $100+, with at
+   least as many green days and a comparable worst day, a "Promote?" card goes to your approvals. If not, it's
+   retired.
+5. **Promote.** Only you can promote. The new settings switch in at the next session roll (18:00 ET, bots flat).
+   They're saved in `data/strategy.json` and survive restarts, and every promotion is logged. The daily
+   paper-vs-replay scorecard uses the same settings.
+
+The first run on 22 real days (Sep 8 – Oct 7 2026) tried 40 setups. One beat the live settings on the training
+days, none passed every check, and the live settings stayed. You can also run the forge from the panel while the
+market is shut.
+
 ## Candle history (`backend/history.py`)
 
 Yahoo only keeps about 30 days of 1-minute candles, so live mode saves them as they come in:

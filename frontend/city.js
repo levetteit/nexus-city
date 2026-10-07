@@ -626,6 +626,7 @@ function renderAccount(a) {
     ${state.mode === "live" ? `<button class="reports-btn" data-reports>📒 DAILY REPORTS</button>` : ""}
     ${state.accounts ? `<button class="desk-btn" data-accounts>👥 MY LUCID ACCOUNTS (${state.accounts.count})${state.accounts.payouts_ready ? ` · ${fmt(state.accounts.payouts_ready)} READY` : ""}</button>` : ""}
     <button class="desk-btn" data-scale>📈 SCALE PLAN: NEXT PAYOUTS & ACCOUNTS</button>
+    ${state.mode === "live" ? `<button class="desk-btn" data-forge>⚒️ STRATEGY FORGE: NEW SETUPS, TESTED & SHADOWED</button>` : ""}
     ${state.mode === "live" ? `<button class="desk-btn" data-signals>🎯 SIGNAL CHECK VS. YOUR INDICATOR</button>` : ""}
     ${deskRow(state)}
     ${scoreRows(state)}
@@ -805,6 +806,40 @@ async function openAccounts() {
       <div><b>${fmt(d.paid_out * 0.9)}</b><small>you've kept (90%)</small></div></div>
     ${cards || `<p class="note">Add each Lucid account you buy. The bots' trades are applied to every account, so you can see each one's drawdown room, evaluation progress and payouts. Give an account its own TradersPost webhook and accounts that must stop (target reached, daily stop, close to the MLL) are left out of new trades automatically.</p>`}
     <button class="add" data-acct="add">＋ ADD A LUCID ACCOUNT</button>`;
+}
+
+// ---------------------------------------------------------------- strategy forge (backend/forge.py)
+const showSet = (p) => Object.entries(p || {}).map(([k, v]) => `<code>${esc(k)}</code> → <b>${esc(Array.isArray(v) ? v.join(" + ") : v === null ? "off" : String(v))}</b>`).join(" · ") || "the original tested settings";
+async function openForge() {
+  const panel = document.getElementById("forge"), body = document.getElementById("forge-body");
+  panel.classList.remove("hidden");
+  body.innerHTML = `<p class="note">loading…</p>`;
+  let f;
+  try { f = await (await fetch("/api/forge")).json(); } catch { body.innerHTML = `<p class="note">the forge runs in live mode</p>`; return; }
+  if (f.detail) { body.innerHTML = `<p class="note">${esc(f.detail)}</p>`; return; }
+  const r = f.last_run, sh = f.shadow, p = f.proposal, s = sh?.summary;
+  const res = (x) => x ? `${money(x.total)} · ${x.profitable_day_pct}% green · worst ${money(x.worst_day)}` : "—";
+  body.innerHTML = `
+    <p class="note">Every Saturday the forge builds ~40 setups from the strategy's tested filters and backtests them on the saved candles. A setup must beat the live settings on both halves of the data and on days it never saw. The best then shadow-trades on paper for ${f.rules.shadow_days} days. Only if it holds up do you get a "Promote?" card, and nothing changes until you approve.</p>
+    <div class="card funded"><h5>🟢 Live settings</h5><div class="row"><span>${showSet(f.live)}</span></div></div>
+    <div class="card"><h5>🔨 Last forge run</h5>${r ? (r.ok ? `
+      <div class="row"><span>${esc(r.week)} · ${r.days} days of ${esc(r.source)} candles (${esc(r.first)} → ${esc(r.last)})</span></div>
+      <div class="row"><span>Setups tried</span><span>${r.tried} · ${r.beat_on_training} beat live on training</span></div>
+      <div class="row"><span>Live settings</span><span>${res(r.baseline?.test)} <small>(held-out days)</small></span></div>
+      <div class="row"><span>Winner</span><span>${r.winner ? showSet(r.winner.change) : "none passed every check: live settings stay"}</span></div>
+      ${r.winner ? `<div class="row"><span>Winner on held-out days</span><span class="pos">${res(r.winner.test)}</span></div>` : ""}`
+      : `<div class="row"><span>${esc(r.why)}</span></div>`) : `<div class="row"><span>Not run yet. First run: Saturday${f.market_closed ? ", or run it now" : ""}.</span></div>`}
+      ${f.market_closed ? `<button class="desk-btn" data-forge-run ${f.running ? "disabled" : ""}>${f.running ? "FORGING…" : "⚒️ RUN THE FORGE NOW"}</button>` : ""}</div>
+    <div class="card"><h5>👻 Shadow on paper</h5>${sh ? `
+      <div class="row"><span>${showSet(sh.change)}</span></div>
+      <div class="row"><span>Day ${s.days} of ${f.rules.shadow_days} (since ${esc(sh.since)})</span></div>
+      <div class="row"><span>Shadow</span><span class="${s.shadow_total >= s.live_total ? "pos" : "neg"}">${money(s.shadow_total)} · ${s.shadow_green} green · worst ${money(s.shadow_worst)}</span></div>
+      <div class="row"><span>Live settings, same days</span><span>${money(s.live_total)} · ${s.live_green} green · worst ${money(s.live_worst)}</span></div>`
+      : `<div class="row"><span>No shadow right now.</span></div>`}</div>
+    ${p ? `<div class="card funded"><h5>🗳️ The desk recommends a promotion</h5><div class="row"><span>${showSet(p.params)}</span></div>
+      <div class="row"><span>It's in your approvals: <a href="/station.html#/approvals" style="color:var(--cyan)">open the board</a>. It switches in at the next session roll if you approve.</span></div></div>` : ""}
+    ${f.promotions.length ? `<h5>📜 Promotions</h5>${f.promotions.map((x) => `<div class="row"><span>${esc(x.at.slice(0, 10))}: ${showSet(x.params)}</span></div>`).join("")}` : ""}
+    ${f.retired.length ? `<h5>🪦 Retired shadows</h5>${f.retired.map((x) => `<div class="row"><span>${showSet(x.change)}</span><span>${money(x.shadow_total)} vs ${money(x.live_total)}</span></div>`).join("")}` : ""}`;
 }
 
 // ---------------------------------------------------------------- real-order log (execution.py → data/orders.csv)
@@ -1040,6 +1075,7 @@ function feedEvents(events) {
       feed(`${who} closed ${money(whole)}${whole !== ev.pnl ? ` (runner ${money(ev.pnl)})` : ""} · ${ev.reason}`, whole >= 0 ? "win" : "loss");
     }
     else if (ev.type === "account_halt") feed(`<b>Account</b> ${ev.reason}`, /cap|target/.test(ev.reason) ? "win" : "loss");
+    else if (ev.type === "strategy_promoted") feed(`<b>⚒️ Strategy Forge</b> promoted settings are live from this session: ${showSet(ev.params)}`, "win");
     else if (ev.type === "account_resumed") feed(`<b>Account</b> synced with Lucid: back to work (${ev.bots.length} bot${ev.bots.length === 1 ? "" : "s"}, today ${money(ev.day_pnl)})`, "win");
     else if (ev.type === "tv_signal") feed(`${who} TradingView: ${ev.action}`);
     else if (ev.type === "new_session") feed(`<b>New trading day</b>`, "muted2");
@@ -1197,6 +1233,12 @@ document.addEventListener("click", async (e) => {
   if (e.target.closest("[data-accounts]")) openAccounts();
   if (e.target.closest("[data-scale]")) openScale();
   if (e.target.closest("[data-orderlog]")) openOrderLog();
+  if (e.target.closest("[data-forge]")) openForge();
+  if (e.target.closest("[data-forge-run]")) {
+    if (!confirm("Run the Strategy Forge now? It tests about 40 setups on the saved candles (a few minutes). Nothing goes live without your approval.")) return;
+    const r = await fetch("/api/forge/run", { method: "POST" });
+    if (!r.ok) alert((await r.json()).detail); else openForge();
+  }
   if (e.target.closest("[data-scale-set]")) {
     const p = prompt("What Lucid charges you for one LucidFlex 50K evaluation ($):", scaleData?.eval_price ?? "");
     if (p !== null) {

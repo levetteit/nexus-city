@@ -170,6 +170,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #accounts .sum div { background: rgba(255, 255, 255, .05); border-radius: 8px; padding: 8px; text-align: center; }
 #accounts .sum b { display: block; font-size: 15px; }
 #accounts .sum small { color: var(--muted); font-size: 10px; }
+#forge { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(620px, calc(100vw - 24px)); max-height: 82vh; overflow: auto; z-index: 9; font-size: 12.5px; }
+#forge .row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; flex-wrap: wrap; }
+#forge .card { background: rgba(255, 255, 255, .04); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; border-left: 3px solid #7c5cff; }
+#forge .card.funded { border-left-color: var(--green); } #forge h5 { margin: 6px 0; font-size: 12px; }
+#forge code { font-size: 11px; color: var(--muted); }
 #orderlog { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(600px, calc(100vw - 24px)); max-height: 82vh; overflow: auto; z-index: 9; font-size: 12.5px; }
 #orderlog .row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; }
 #orderlog .card { background: rgba(255, 255, 255, .04); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; border-left: 3px solid #7c5cff; }

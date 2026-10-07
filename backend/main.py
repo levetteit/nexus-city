@@ -12,8 +12,9 @@ import hmac
 import json
 import os
 import re
+import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -73,8 +74,11 @@ async def run_live() -> None:
     calendar = news.NewsCalendar(data_dir=live.DATA_DIR)
     await asyncio.to_thread(calendar.refresh, True)
     market = await asyncio.to_thread(live.LiveMarket)
-    engine = Engine(market=market, account=live.load_account(), news=calendar)
+    from . import forge
+    engine = Engine(market=market, account=live.load_account(), news=calendar,
+                    params=forge.live_params(live.DATA_DIR) or None)   # settings you promoted from the Strategy Forge
     live.load_careers(engine)
+    asyncio.create_task(run_forge())
     router = execution.TradersPostRouter(live.DATA_DIR)
     from .accounts import AccountBook
     book = AccountBook(live.DATA_DIR)
@@ -220,6 +224,96 @@ def state() -> dict:
         if notifier:
             snap["push"] = {"web_push": notifier.web_push, "devices": len(notifier.subs), "ntfy": bool(notifier.ntfy_topic)}
     return snap
+
+
+FORGE_CHECK = 300   # seconds
+
+
+def _market_closed(now: datetime) -> bool:
+    """CME equity futures are shut Saturday, Sunday before 18:00 ET, Friday after 16:45 ET and 16:45-18:00 ET daily."""
+    wd, hm = now.weekday(), (now.hour, now.minute)
+    return wd == 5 or (wd == 6 and hm < (18, 0)) or (wd == 4 and hm >= (16, 45)) or ((16, 45) <= hm < (18, 0))
+
+
+def _forge_week(now: datetime) -> str:
+    return str(now.date() - timedelta(days=(now.weekday() - 5) % 7))   # this week's Saturday (ET)
+
+
+async def _forge_process() -> str:
+    """The weekly forge runs in its own low-priority process: the live bots never wait for it."""
+    from . import live
+    proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "backend.forge", live.DATA_DIR, _forge_week(datetime.now(ET)),
+                                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                                                preexec_fn=lambda: os.nice(10))
+    out, _ = await proc.communicate()
+    return out.decode(errors="replace")[-400:]
+
+
+async def run_forge() -> None:
+    """Saturday: the forge. After each trading day, while the market is shut: score the shadow. Proposals go to approvals."""
+    from . import forge, live
+    while True:
+        try:
+            now = datetime.now(ET)
+            st = forge.state(live.DATA_DIR)
+            week = _forge_week(now)
+            if now.weekday() == 5 and now.hour >= 10 and not FORGE_RUNNING["on"] \
+                    and not any(r.get("week") == week for r in st.get("runs", [])):
+                FORGE_RUNNING["on"] = True
+                try:
+                    await _forge_process()
+                finally:
+                    FORGE_RUNNING["on"] = False
+            if st.get("shadow") and _market_closed(now):
+                done = now.date() if (now.hour, now.minute) >= (16, 50) and now.weekday() < 5 else now.date() - timedelta(days=1)
+                since = date.fromisoformat(st["shadow"]["since"])
+                day = since + timedelta(days=1)
+                while day <= done:
+                    if day.weekday() < 5:
+                        await asyncio.to_thread(forge.score_shadow_day, live.DATA_DIR, day)
+                    day += timedelta(days=1)
+            _forge_proposal(forge.state(live.DATA_DIR))
+        except Exception as exc:   # the forge must never take trading down
+            print(f"forge loop: {exc}")
+        await asyncio.sleep(FORGE_CHECK)
+
+
+def _forge_proposal(st: dict) -> None:
+    """A shadow that held up becomes a 'Promote?' card in the owner's approvals (once)."""
+    p = st.get("proposal")
+    if not p or not station or p.get("approval"):
+        return
+    s = p["shadow"]
+    change = ", ".join(f"{k} → {v}" for k, v in p["params"].items())
+    a = station.request("strategy_promote", "A-001", f"Promote a Strategy Forge setup: {change}",
+                        f"Shadow-traded on paper for {s['days']} days since {p['since']}: ${s['shadow_total']:,.0f} vs the live "
+                        f"settings' ${s['live_total']:,.0f} ({s['shadow_green']} vs {s['live_green']} green days, worst day "
+                        f"${s['shadow_worst']:,.0f} vs ${s['live_worst']:,.0f}). It also beat them on both halves of its backtest "
+                        f"and on days it never saw. Approve to switch it in at the next session roll (18:00 ET); reject to retire it.",
+                        cost=0, reversible=True, risk="Past results don't guarantee future ones. You can change back any time.",
+                        payload={"forge": p})
+    from . import forge, live
+    st2 = forge.state(live.DATA_DIR)
+    if st2.get("proposal"):
+        st2["proposal"]["approval"] = a["id"]
+        forge.save_state(live.DATA_DIR, st2)
+
+
+def _forge_decided(a: dict) -> None:
+    """The owner decided on a Forge proposal: promote it (switches in at the next session roll) or retire it."""
+    from . import forge, live
+    p = (a.get("payload") or {}).get("forge") or {}
+    if a["status"] == "approved":
+        forge.promote(live.DATA_DIR, p.get("params", {}), f"approved {a['id']}")
+        if engine is not None:
+            engine.pending_params = dict(p.get("params", {}))
+    elif a["status"] in ("rejected", "changes_requested"):
+        st = forge.state(live.DATA_DIR)
+        if st.get("shadow"):
+            st.setdefault("retired", []).append({**forge.summary(st["shadow"]), "change": st["shadow"]["change"],
+                                                 "since": st["shadow"]["since"], "ended": "rejected by the owner"})
+        st["shadow"], st["proposal"] = None, None
+        forge.save_state(live.DATA_DIR, st)
 
 
 async def run_station() -> None:
@@ -561,6 +655,38 @@ async def execution_arm(request: Request) -> dict:
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return r.status(engine.market.delay_minutes)
+
+
+@app.get("/api/forge")
+def forge_status() -> dict:
+    """The Strategy Forge: live settings, last weekly run, the shadow on paper, any proposal, recent promotions."""
+    from . import forge, live
+    if MODE != "live":
+        raise HTTPException(503, "the Strategy Forge runs in live mode (it tests on saved real candles)")
+    out = forge.status(live.DATA_DIR)
+    out["running"] = FORGE_RUNNING["on"]
+    out["market_closed"] = _market_closed(datetime.now(ET))
+    return out
+
+
+FORGE_RUNNING = {"on": False}
+
+
+@app.post("/api/forge/run")
+async def forge_run_now() -> dict:
+    """Run the forge now (only while the market is shut, so it never competes with live trading)."""
+    if MODE != "live":
+        raise HTTPException(503, "the Strategy Forge runs in live mode")
+    if not _market_closed(datetime.now(ET)):
+        raise HTTPException(409, "the market is open: the forge runs while it's shut (daily 16:45-18:00 ET and weekends)")
+    if FORGE_RUNNING["on"]:
+        raise HTTPException(409, "the forge is already running")
+    FORGE_RUNNING["on"] = True
+    try:
+        out = await _forge_process()
+    finally:
+        FORGE_RUNNING["on"] = False
+    return {"output": out}
 
 
 @app.get("/api/execution/orders")
@@ -914,7 +1040,10 @@ async def station_decide(rid: str, request: Request) -> dict:
     """The owner's decision: `{"decision": "approve" | "reject" | "changes", "note": "..."}`."""
     b = await request.json()
     try:
-        return _station().decide(rid, b.get("decision", ""), str(b.get("note", ""))[:500])
+        a = _station().decide(rid, b.get("decision", ""), str(b.get("note", ""))[:500])
+        if a.get("kind") == "strategy_promote" and MODE == "live":
+            _forge_decided(a)
+        return a
     except KeyError:
         raise HTTPException(404)
     except ValueError as exc:
