@@ -6,7 +6,7 @@
   QA        Compliance & QA checks every word, like any post
   publish   a Stripe payment link that sends the buyer back to a verified download, the product's page on
             the station storefront (/shop/<slug>), an Etsy digital listing when Etsy is connected, and a
-            pin when Pinterest is connected. STARNET_DIGITAL_PER_DAY caps new products a day
+            pin when Pinterest is connected. NEXUS_DIGITAL_PER_DAY caps new products a day
   deliver   /shop/<slug>/thanks checks the Checkout Session with Stripe (paid, and from this product's
             link) before the download appears. The sale books itself into the treasury (and the webhook
             books it too; each sale is booked once)
@@ -24,16 +24,17 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from ..env import env
 from . import connectors, media
 from .brain import Brain
 from .store import Store, now_iso
 
-PER_DAY = int(os.getenv("STARNET_DIGITAL_PER_DAY", "3"))
-PRODUCT_EVERY = timedelta(hours=float(os.getenv("STARNET_DIGITAL_EVERY_HOURS", "24")))   # per venture
-MAX_PER_VENTURE = int(os.getenv("STARNET_DIGITAL_MAX_PER_VENTURE", "6"))
+PER_DAY = int(env("DIGITAL_PER_DAY", "3"))
+PRODUCT_EVERY = timedelta(hours=float(env("DIGITAL_EVERY_HOURS", "24")))   # per venture
+MAX_PER_VENTURE = int(env("DIGITAL_MAX_PER_VENTURE", "6"))
 OPEN = ("qa", "revise", "ready", "manual", "waiting_owner")
 FORMATS = ["guide", "checklist", "planner", "workbook", "template_pack", "printable"]
-STORE_NAME = os.getenv("STARNET_STORE_NAME", "StarNet Studio")
+STORE_NAME = env("STORE_NAME", "Nexus City Studio")
 PAGE_W, PAGE_H = 1275, 1650   # US letter at 150 dpi
 COVER = (1000, 1500)          # 2:3, the shape Pinterest and Etsy show best
 FILE_RE = re.compile(r"^[a-f0-9]{32}\.pdf$")
@@ -321,7 +322,7 @@ def publish(store: Store, action: dict) -> dict:
     slug = slugify(p["title"])
     url = store_url(slug)
     link = connectors.stripe_payment_link(p["title"], p["subtitle"], p["price_usd"], action["venture"],
-                                          redirect=f"{url}/thanks?session_id={{CHECKOUT_SESSION_ID}}", extra={"starnet_product": slug})
+                                          redirect=f"{url}/thanks?session_id={{CHECKOUT_SESSION_ID}}", extra={"nexus_product": slug})
     rec = store.create("products", {"venture": action["venture"], "slug": slug, "title": p["title"], "subtitle": p["subtitle"],
                                     "format": p["format"], "price_usd": p["price_usd"], "pdf": p["pdf"], "pages": p["pages"],
                                     "cover": p["cover_image"], "sales_page": p["sales"], "checkout_url": link["url"],
@@ -442,7 +443,7 @@ def _page(title: str, body: str) -> str:
 
 
 def page_privacy() -> str:
-    contact = os.getenv("STARNET_STORE_EMAIL", "").strip()
+    contact = env("STORE_EMAIL", "").strip()
     reach = (f"email <a href='mailto:{html.escape(contact)}'>{html.escape(contact)}</a>" if contact
              else "reply to the receipt Stripe emails you after a purchase")
     return _page(f"Privacy policy · {STORE_NAME}", f"""<h1>Privacy policy</h1><p class='small'>{html.escape(STORE_NAME)} · last updated October 6, 2026</p>

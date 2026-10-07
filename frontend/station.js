@@ -1,4 +1,4 @@
-// StarNet Space Station: the 2D Command Board. Same data as the 3D station; every workflow lives here.
+// Nexus City Space Station: the 2D Command Board. Same data as the 3D station; every workflow lives here.
 "use strict";
 
 const $ = (s) => document.querySelector(s);
@@ -322,7 +322,7 @@ function kitCard(k) {
     : `<div class="actions"><input id="kit-price-${esc(k.id)}" type="number" step="0.01" min="3" max="97" placeholder="Price, e.g. 12.99" style="width:150px" />
       ${k.venture ? "" : `<input id="kit-venture-${esc(k.id)}" placeholder="Venture id, e.g. V-006" style="width:150px" />`}
       <button class="btn primary" data-kit="${esc(k.id)}">Publish</button></div>
-      <p class="muted small">Publishing is the go decision. It puts the product on the storefront (Stripe checkout, both PDFs delivered after payment)${r.etsy_digital ? ", lists it on Etsy with all ${k.images.length} images and both files (Etsy charges its listing fee)" : ""}${r.pinterest ? " and posts the first pin" : ""}. ${r.storefront ? "" : "<b>Needs Stripe and STARNET_PUBLIC_URL first.</b>"}</p>`;
+      <p class="muted small">Publishing is the go decision. It puts the product on the storefront (Stripe checkout, both PDFs delivered after payment)${r.etsy_digital ? ", lists it on Etsy with all ${k.images.length} images and both files (Etsy charges its listing fee)" : ""}${r.pinterest ? " and posts the first pin" : ""}. ${r.storefront ? "" : "<b>Needs Stripe and NEXUS_PUBLIC_URL first.</b>"}</p>`;
   return `<div class="item" style="display:block"><div class="t"><span><b>${esc(k.name)}</b></span><span class="pill ${p && p.active ? "green" : k.shelved ? "" : "gold"}">${p && p.active ? "ON SALE" : k.shelved ? "SHELVED" : "READY"}</span></div>
     <p class="muted small">${k.pages} pages · ${k.files.join(" + ")} · ${k.images.length} listing images · ${k.pins} pins · venture ${esc(k.venture || "not set")}</p>
     <p class="small">Etsy title: ${esc(k.etsy_title)}</p><div style="overflow-x:auto;white-space:nowrap">${gallery}</div>${live}${form}</div>`;
@@ -338,7 +338,7 @@ function renderMarketing() {
     row("Instagram", c.social.includes("instagram"), "not connected") + row("LinkedIn", c.social.includes("linkedin"), "off") +
     row("TikTok", c.tiktok) +
     row("Fiverr", c.fiverr) + row("Etsy (via Printify)", c.printify === true ? true : c.etsy) +
-    row("Storefront (/shop)", c.rails && c.rails.storefront ? true : "needs Stripe + STARNET_PUBLIC_URL") +
+    row("Storefront (/shop)", c.rails && c.rails.storefront ? true : "needs Stripe + NEXUS_PUBLIC_URL") +
     connectRow("Etsy digital downloads", "etsy", c.etsy_digital) + connectRow("Pinterest", "pinterest", c.pinterest);
   if ($("#kits")) $("#kits").innerHTML = (S.kits || []).map(kitCard).join("") || `<div class="empty">No finished products waiting.</div>`;
   $("#ob-manual").innerHTML = S.outbox.manual.map(actionRow).join("") || `<div class="empty">Nothing to post by hand.</div>`;

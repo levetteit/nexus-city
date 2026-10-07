@@ -11,7 +11,7 @@ per account), new entries only go to accounts allowed to trade right now:
 an evaluation that reached its target, an account that hit its daily stop or is
 too close to its drawdown is skipped while the others keep trading. Adds, trims
 and exits always follow the accounts that entered. Accounts without their own
-webhook are assumed to copy every trade through STARNET_TRADERSPOST_WEBHOOKS, and
+webhook are assumed to copy every trade through NEXUS_TRADERSPOST_WEBHOOKS, and
 the book only warns you when one of them should stop.
 
 Saved to data/accounts.json (webhook URLs stay on the server, never sent to the app).

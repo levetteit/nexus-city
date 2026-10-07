@@ -1,6 +1,6 @@
 """Live paper trading: the city runs on real MNQ / MES candles as they print.
 
-Start it with:  STARNET_MODE=live uvicorn backend.main:app
+Start it with:  NEXUS_MODE=live uvicorn backend.main:app
 
 * Candles come from Yahoo Finance (NQ=F / ES=F, the full-size contracts, stand in for the micros).
   Yahoo's CME futures feed runs about 10 minutes behind, so the bots act on
@@ -21,11 +21,12 @@ import json
 import os
 from datetime import datetime, timezone
 
+from .env import env
 from .account import PropAccount
 from .backtest import ET, ReplayMarket
 from .fetch_data import SOURCES, fetch_recent
 
-DATA_DIR = os.getenv("STARNET_DATA_DIR", "data")
+DATA_DIR = env("DATA_DIR", "data")
 ACCOUNT_FIELDS = ("phase", "balance", "eod_high", "mll", "mll_locked", "best_day", "days",
                   "profitable_days", "day_realized", "day_history", "cycle_days", "cycle_start", "payouts")
 

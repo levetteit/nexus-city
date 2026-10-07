@@ -20,9 +20,10 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from ..env import env
 from .store import Store, now_iso
 
-LOW = float(os.getenv("STARNET_CREDITS_LOW", "5"))   # warn below this many dollars
+LOW = float(env("CREDITS_LOW", "5"))   # warn below this many dollars
 RECONCILE_EVERY = timedelta(hours=1)
 PROBE_EVERY = timedelta(minutes=20)   # while empty, how often one Claude job tries anyway
 DOC = "credits.json"

@@ -1,4 +1,6 @@
-# Starnet City
+# Nexus City
+
+> Formerly **StarNet / Starnet City**. Every `NEXUS_*` setting below also accepts its old `STARNET_*` name; see [docs/MIGRATION_FROM_STARNET.md](docs/MIGRATION_FROM_STARNET.md).
 
 A live 3D "trading city": each Python bot is a **worker** living in its own
 building and trading micro futures (**MNQ, MES, M2K**) with the **Andrew Macre
@@ -96,7 +98,7 @@ uvicorn backend.main:app --reload
 # open http://localhost:8000
 ```
 
-`STARNET_TICK_SECONDS=0.1 uvicorn backend.main:app` runs the market 10× faster.
+`NEXUS_TICK_SECONDS=0.1 uvicorn backend.main:app` runs the market 10× faster.
 
 - **Click a building** to open that worker's card: strategy, open position, recent trades, and a button to send it home or put it back on shift.
 - **Click the vault** for today's payroll.
@@ -346,7 +348,7 @@ there are still **no per-trade stops**.
 
 When the evaluation passes, the account switches to the funded rules with its own
 guards (`funded_guards()`: the same goal, cap and stop by default, with overrides
-through `STARNET_FUNDED_DAILY_GOAL` / `_CAP` / `_STOP` / `_KEEP_ROOM`).
+through `NEXUS_FUNDED_DAILY_GOAL` / `_CAP` / `_STOP` / `_KEEP_ROOM`).
 
 **Lucid's funded rules, built in:**
 
@@ -414,7 +416,7 @@ account its own TradersPost strategy and paste that strategy's webhook into
   the trade.
 
 Accounts without their own webhook copy everything sent to
-`STARNET_TRADERSPOST_WEBHOOKS`. For those the app can only tell you to pause the
+`NEXUS_TRADERSPOST_WEBHOOKS`. For those the app can only tell you to pause the
 subscription. Webhook URLs stay in `data/accounts.json` on the server and are
 never sent to the app.
 
@@ -436,7 +438,7 @@ The city lays itself out automatically for however many workers you register.
 Run the city on real markets with paper money:
 
 ```bash
-STARNET_MODE=live uvicorn backend.main:app
+NEXUS_MODE=live uvicorn backend.main:app
 ```
 
 - Real MNQ / MES / M2K candles (via NQ=F / ES=F / RTY=F on Yahoo) step the
@@ -471,10 +473,10 @@ Settings (environment variables):
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `STARNET_NEWS_BEFORE` | 10 | Minutes before a release with no new trades |
-| `STARNET_NEWS_AFTER` | 15 | Minutes after a release with no new trades |
-| `STARNET_NEWS_AFTER_FOMC` | 45 | Minutes after an FOMC release with no new trades |
-| `STARNET_NEWS_FLATTEN` | 2 | Minutes before a release to close open trades; `0` holds them instead |
+| `NEXUS_NEWS_BEFORE` | 10 | Minutes before a release with no new trades |
+| `NEXUS_NEWS_AFTER` | 15 | Minutes after a release with no new trades |
+| `NEXUS_NEWS_AFTER_FOMC` | 45 | Minutes after an FOMC release with no new trades |
+| `NEXUS_NEWS_FLATTEN` | 2 | Minutes before a release to close open trades; `0` holds them instead |
 
 To backtest with a calendar: `--news data/news_calendar.json`.
 
@@ -555,7 +557,7 @@ City; they don't count against the station's $50 cap). With `ANTHROPIC_ADMIN_KEY
 `sk-ant-admin...`) it also reads Anthropic's own cost report every hour and uses the larger number, so usage
 outside the station comes off too. When Anthropic answers "credit balance is too low", the counter shows
 empty, ULTRON stops starting Claude jobs (they wait, they aren't failed) and tries one every 20 minutes, so
-credits added without being recorded are picked up on their own. Below `STARNET_CREDITS_LOW` ($5) you get
+credits added without being recorded are picked up on their own. Below `NEXUS_CREDITS_LOW` ($5) you get
 one warning per top-up. The Jarvis brief carries the same numbers.
 
  (`backend/station/digital.py`). The
@@ -567,17 +569,17 @@ what format the crew will make.
 - **Launch rule** (your call, Oct 6 2026): an autonomous idea scoring 60+ launches on its own, at most one
   a day and at most 3 live experiments; the approval is recorded as approved by your standing rule, and
   you get a notification. Kill it any time from its venture card. It **closes itself after 21 days with no
-  sale** and its products come off sale (`STARNET_AUTO_LAUNCH=0` turns the rule off;
-  `STARNET_AUTO_KILL_DAYS` changes the 21). Owner-assisted ideas still wait for your approval.
+  sale** and its products come off sale (`NEXUS_AUTO_LAUNCH=0` turns the rule off;
+  `NEXUS_AUTO_KILL_DAYS` changes the 21). Owner-assisted ideas still wait for your approval.
 - **Products:** the Product Designer writes one complete product a day per venture (up to 6 on the shelf),
   rendered as a letter-size PDF plus a 2:3 cover; Compliance & QA checks every word; then it goes on sale:
   a Stripe payment link that returns the buyer to a verified download, a page on the storefront
   (`/shop/<slug>`, public), an Etsy digital listing when Etsy is connected, and a pin when Pinterest is.
-  `STARNET_DIGITAL_PER_DAY` (default 3) caps new products a day.
+  `NEXUS_DIGITAL_PER_DAY` (default 3) caps new products a day.
 - **Delivery:** `/shop/<slug>/thanks` asks Stripe whether the Checkout Session is paid and came from this
   product's link before the download appears; the PDFs aren't served any other way. The sale books itself
   into the treasury (the webhook books it too; each sale once). The storefront's name is
-  `STARNET_STORE_NAME` (default "StarNet Studio").
+  `NEXUS_STORE_NAME` (default "Nexus City Studio").
 - If research has never produced an opportunity (the first runs failed), it tries again every 3 hours
   instead of waiting for the next day's slot.
 
@@ -597,7 +599,7 @@ Printify, end to end without you.
 4. The Shop Manager creates the product in Printify (dark ink on light colors, light ink on dark, sizes
    S-2XL), raises the price if it wouldn't cover the product cost, Etsy's fees and $4 of profit, adds Etsy's
    AI-assisted design disclosure, and publishes. Printify puts it on the Etsy shop. At most
-   `STARNET_SHOP_LISTINGS_PER_DAY` (default 2) new listings a day, $0.20 each on Etsy.
+   `NEXUS_SHOP_LISTINGS_PER_DAY` (default 2) new listings a day, $0.20 each on Etsy.
 5. Every 6 hours it reads Printify's orders: which listing sold, units, retail and product cost. The War
    Room sees per-listing sales. Etsy deposits aren't booked automatically: record them in Finance.
 
@@ -652,13 +654,13 @@ the same address or to anyone who opted out, and every contact comes with the pa
 |---|---|---|
 | Stripe | `STRIPE_API_KEY` (a restricted key: Products, Prices, Payment Links write; Checkout Sessions read) | Agents create the checkout link for a venture on their own |
 | Stripe sales | `STRIPE_WEBHOOK_SECRET` from a webhook to `https://<your app>/api/station/stripe/webhook` (event `checkout.session.completed`) | Every paid checkout books itself into the treasury with Stripe's fee; the Auditor books any the webhook missed |
-| Email | `STARNET_SMTP_HOST`, `STARNET_SMTP_PORT`, `STARNET_SMTP_USER`, `STARNET_SMTP_PASSWORD`, `STARNET_MAIL_FROM`, `STARNET_MAIL_ADDRESS` | Outreach sends itself, with your postal address and an opt-out line (CAN-SPAM) |
-| Facebook Page | `STARNET_FB_PAGE_ID`, `STARNET_FB_PAGE_TOKEN` (a Page access token with `pages_manage_posts`); `STARNET_FB_PAGE_VENTURE` (default `V-PPS`) | The Page belongs to one venture, Padilla Property Solutions: its posts go out on their own, in Spanish, written after reading the Page's latest posts. Other ventures never post there |
-| LinkedIn | `STARNET_LINKEDIN_TOKEN` (scopes `openid profile w_member_social`; expires every 60 days) | Posts go out on your profile. When the token expires, posts fail with a note to renew it |
-| Instagram | `STARNET_IG_USER_ID` (the Instagram professional account linked to the Page); the Page token must also have `instagram_basic` and `instagram_content_publish` | Padilla's posts go to Instagram too, each with its image card |
+| Email | `NEXUS_SMTP_HOST`, `NEXUS_SMTP_PORT`, `NEXUS_SMTP_USER`, `NEXUS_SMTP_PASSWORD`, `NEXUS_MAIL_FROM`, `NEXUS_MAIL_ADDRESS` | Outreach sends itself, with your postal address and an opt-out line (CAN-SPAM) |
+| Facebook Page | `NEXUS_FB_PAGE_ID`, `NEXUS_FB_PAGE_TOKEN` (a Page access token with `pages_manage_posts`); `NEXUS_FB_PAGE_VENTURE` (default `V-PPS`) | The Page belongs to one venture, Padilla Property Solutions: its posts go out on their own, in Spanish, written after reading the Page's latest posts. Other ventures never post there |
+| LinkedIn | `NEXUS_LINKEDIN_TOKEN` (scopes `openid profile w_member_social`; expires every 60 days) | Posts go out on your profile. When the token expires, posts fail with a note to renew it |
+| Instagram | `NEXUS_IG_USER_ID` (the Instagram professional account linked to the Page); the Page token must also have `instagram_basic` and `instagram_content_publish` | Padilla's posts go to Instagram too, each with its image card |
 | TikTok | not yet: every post needs a video, and TikTok's API needs their audit | Its posts wait in your queue |
 | Etsy (via Printify) | `PRINTIFY_API_TOKEN` (Printify → My profile → Connections → Generate token; scopes: shops, catalog, products, orders, uploads); optional `PRINTIFY_SHOP_ID`. Your Etsy shop must be connected in Printify (My stores → Add new store → Etsy) | The crew lists its products on Etsy and reads the orders. Printify charges your card for each order's production when the order comes in |
-| Storefront | Stripe (above) and `STARNET_PUBLIC_URL` (or Render's own `RENDER_EXTERNAL_URL`) | Autonomous ventures sell their PDFs at `/shop` with automatic delivery |
+| Storefront | Stripe (above) and `NEXUS_PUBLIC_URL` (or Render's own `RENDER_EXTERNAL_URL`) | Autonomous ventures sell their PDFs at `/shop` with automatic delivery |
 | Etsy digital downloads | `ETSY_KEYSTRING`, `ETSY_SHARED_SECRET` from a free app at etsy.com/developers (callback `https://<your app>/api/station/connect/etsy/callback`), then **Connect** on the board's Marketing tab | Each product is also listed on your Etsy shop as a download ($0.20 per listing; auto-renew off) |
 | Pinterest | `PINTEREST_APP_ID`, `PINTEREST_APP_SECRET` from developers.pinterest.com (callback `https://<your app>/api/station/connect/pinterest/callback`), then **Connect**. Pinterest's Trial access only makes sandbox pins nobody else sees (set `PINTEREST_SANDBOX=1` to test); public pins need its Standard access (Pinterest asks for a short screen recording of the Connect flow and a pin being made) | Every new product gets a pin linking to its storefront page |
 | Fiverr | none: no seller API, and bots break its terms | The crew prepares; you publish and reply there |
@@ -669,7 +671,7 @@ Refunds and payouts aren't wired at all: they stay in your Stripe dashboard.
 (headline, up to 3 points, call to action) drawn with Pillow and the bundled Inter font, in the venture's
 colors. The card's words go through QA with the post. Cards are served at `/media/<random name>` without the
 password, because Instagram downloads the image itself; on Render the public address comes from
-`RENDER_EXTERNAL_URL` automatically (elsewhere set `STARNET_PUBLIC_URL`).
+`RENDER_EXTERNAL_URL` automatically (elsewhere set `NEXUS_PUBLIC_URL`).
 
 **Outreach is off for every venture** until you press **Allow outreach** on that venture's card.
 
@@ -680,7 +682,7 @@ it emailed, and reads without marking anything as read:
   do-not-contact list;
 - any other reply becomes a lead on that venture, and you get a push to answer it.
 
-The inbox host comes from the SMTP host (Gmail and Outlook are known). For other providers, set `STARNET_IMAP_HOST`.
+The inbox host comes from the SMTP host (Gmail and Outlook are known). For other providers, set `NEXUS_IMAP_HOST`.
 
 **Results** (`backend/station/results.py`): every 6 hours the Auditor reads each recent post's reactions,
 comments and shares (Facebook) and likes and comments (Instagram). On a venture's card you log each lead in
@@ -692,7 +694,7 @@ What the station can't do: move money out, refund, sign anything, run a marketpl
 trading bots' orders and risk. The **Stop all outbound** button on the Command tab stops every outgoing post,
 email and Stripe change at once.
 
-**Jarvis's morning check-in:** set `STARNET_JARVIS_TOKEN` (a long random string, at least 24 characters)
+**Jarvis's morning check-in:** set `NEXUS_JARVIS_TOKEN` (a long random string, at least 24 characters)
 on Render and the same value in the Claude cloud environment. A scheduled session reads
 `GET /api/jarvis/brief` (Bearer token; read-only: ULTRON's latest report, money, ventures, what's waiting
 for you, and `blockers`: what holds each venture up) every weekday at 8:45 ET and briefs you. Without the token
@@ -712,14 +714,14 @@ same key as the trading desk). Without it, records, approvals and the treasury s
 
 | Setting | Default | |
 |---|---|---|
-| `STARNET_STATION_AI_BUDGET` | `50` | $/month cap on the station's Claude usage. At the cap, research and drafting pause until next month. |
-| `STARNET_STATION_EXPERIMENTS` | `3` | Live ventures at once, besides the trading desk |
-| `STARNET_STATION_TASKS_PER_DAY` | `25` | Agent drafting runs per day |
-| `STARNET_PAYOUT_SPLIT` | `0.9` | Your share of a Lucid payout |
-| `STARNET_STATION_MODEL` | `claude-opus-5-5` | |
-| `STARNET_POSTS_PER_DAY` / `STARNET_OUTREACH_PER_DAY` | `6` / `15` | Daily caps on what goes out |
-| `STARNET_POLICY_SOCIAL` / `_OUTREACH` / `_STRIPE` | `auto` | `owner` makes that kind wait for your OK even after QA |
-| `STARNET_TAX_RATE` | `0.25` | The Accountant's tax set-aside estimate |
+| `NEXUS_STATION_AI_BUDGET` | `50` | $/month cap on the station's Claude usage. At the cap, research and drafting pause until next month. |
+| `NEXUS_STATION_EXPERIMENTS` | `3` | Live ventures at once, besides the trading desk |
+| `NEXUS_STATION_TASKS_PER_DAY` | `25` | Agent drafting runs per day |
+| `NEXUS_PAYOUT_SPLIT` | `0.9` | Your share of a Lucid payout |
+| `NEXUS_STATION_MODEL` | `claude-opus-5-5` | |
+| `NEXUS_POSTS_PER_DAY` / `NEXUS_OUTREACH_PER_DAY` | `6` / `15` | Daily caps on what goes out |
+| `NEXUS_POLICY_SOCIAL` / `_OUTREACH` / `_STRIPE` | `auto` | `owner` makes that kind wait for your OK even after QA |
+| `NEXUS_TAX_RATE` | `0.25` | The Accountant's tax set-aside estimate |
 
 A research routine is roughly $0.30-$1.00 of Claude usage; a drafting task, a QA check or a day's posts
 roughly $0.05-$0.30; an outreach batch or a War Room session roughly $0.30-$0.80. With marketing running
@@ -844,7 +846,7 @@ summary to your phone, for example:
 Tap the push, or 📒 Daily reports in the account panel, to see each trade's
 entry reason, adds, exit reason and prices. The panel also shows news pauses and
 daily stops. Reports are saved in `data/reports/` and served at `/api/reports`.
-For ntfy, set `STARNET_PUBLIC_URL` (Render sets `RENDER_EXTERNAL_URL` for you)
+For ntfy, set `NEXUS_PUBLIC_URL` (Render sets `RENDER_EXTERNAL_URL` for you)
 so that tapping the notification opens the report.
 
 ## Full-screen chart
@@ -868,12 +870,12 @@ paper mode with a password and a disk for the paper-trading logs.
 
 1. **Merge PR #1** into `main` on GitHub (Render deploys the default branch).
 2. Sign up at **render.com** with your GitHub account.
-3. Dashboard → **New → Blueprint** → pick `levetteit/starnet` → **Apply**.
-4. When asked for **`STARNET_PASSWORD`**, pick a strong password. That's what
-   you'll type on your phone. (`STARNET_WEBHOOK_SECRET` is generated for you.)
+3. Dashboard → **New → Blueprint** → pick `levetteit/nexus-city` → **Apply**.
+4. When asked for **`NEXUS_PASSWORD`**, pick a strong password. That's what
+   you'll type on your phone. (`NEXUS_WEBHOOK_SECRET` is generated for you.)
 5. It uses the **Starter plan (~$7/month) + a 1 GB disk (~$0.25/month)**. The free
    plan sleeps after 15 minutes without visitors, which would stop the bots.
-6. When the deploy is green, open the `https://starnet-city-….onrender.com` URL
+6. When the deploy is green, open the `https://starnet-city-….onrender.com` URL (the Render service keeps its original name, so the address doesn't change: see docs/MIGRATION_FROM_STARNET.md)
    on your phone, log in with any username + your password, then
    **Share → Add to Home Screen** (iPhone) or **⋮ → Add to Home screen /
    Install app** (Android). It opens full screen like an app.
@@ -885,20 +887,20 @@ for MES, entries, adds, exits, account stops. Tap a building for its card.
 Every push to `main` redeploys automatically. Paper results stay on the disk
 (`/app/data/paper_trades.csv`, `paper_days.csv`); download them from Render's
 Shell tab. The same Docker image runs on Fly.io, Railway or any VPS: set
-`STARNET_PASSWORD`, mount a volume at `/app/data`, expose port 8000.
+`NEXUS_PASSWORD`, mount a volume at `/app/data`, expose port 8000.
 
 ## Trade alerts on your phone (`backend/notify.py`)
 
 Get a notification every time a bot enters, adds to or exits a trade (with the
 P&L), when the account stops for the day, and if a real order ever fails.
 
-**iPhone / Android (no extra app):** open Starnet from its **home-screen icon**
+**iPhone / Android (no extra app):** open Nexus City from its **home-screen icon**
 (on iPhone, web push only works from there), tap the account bar to expand it →
 **🔔 TURN ON ALERTS** → **Allow**. You'll get a confirmation buzz; **SEND TEST**
 sends another. Turn it on separately on each device you want alerts on.
 
 **Backup: ntfy.** Install the free **ntfy** app, subscribe to a long random topic
-name (e.g. `starnet-7f3k9q2x`), and set `STARNET_NTFY_TOPIC` to the same name in
+name (e.g. `nexus-7f3k9q2x`), and set `NEXUS_NTFY_TOPIC` to the same name in
 Render → Environment.
 
 Alerts only fire in live mode. Real-order alerts are marked **· REAL**.
@@ -911,13 +913,13 @@ Tradovate → your Lucid account(s)**. Two pieces, both one-time setup:
 
 **1. Real-time prices (required).** The free Yahoo data is ~10 minutes late, and
 real orders are blocked whenever prices are more than 2.5 minutes old. The
-`tradingview/starnet_feed.pine` script streams each 1-minute candle the moment
+`tradingview/nexus_city_feed.pine` script streams each 1-minute candle the moment
 it closes (needs a paid TradingView plan with webhooks and CME real-time data):
 
-1. In Render → your service → **Environment**, copy `STARNET_FEED_SECRET`.
+1. In Render → your service → **Environment**, copy `NEXUS_FEED_SECRET`.
 2. TradingView → open **NQ1!** on the **1-minute** chart → Pine Editor → paste
    the script → **Add to chart** → settings → paste the secret.
-3. **Create Alert** → Condition **Starnet feed → Any alert() function call** →
+3. **Create Alert** → Condition **Nexus City feed → Any alert() function call** →
    Notifications: **Webhook URL** `https://<your-render-url>/api/feed` → Create.
 4. Repeat 2–3 on **ES1!** (ES confirms every entry).
 
@@ -941,7 +943,7 @@ version in an existing alert.
 4. **Subscribe** each Lucid account to the strategy. In the subscription
    settings: allow **shorting**, allow **add to position**, use the **signal's
    quantity**, market orders. No stop loss or take profit (the bots manage exits).
-5. Render → **Environment** → set `STARNET_TRADERSPOST_WEBHOOKS` to that URL →
+5. Render → **Environment** → set `NEXUS_TRADERSPOST_WEBHOOKS` to that URL →
    Save (it redeploys).
 6. In the city, the account panel shows **Real orders: off**. Tap
    **ARM REAL ORDERS** and type `ARM`. The header turns to **● REAL ORDERS**.
@@ -1046,7 +1048,7 @@ conditions, so they can't send webhooks. That's why the bots rebuild PROC
 themselves from price data. The webhook still accepts direct orders from any
 other alert you set up:
 
-1. Start the server with a secret: `STARNET_WEBHOOK_SECRET=<long random string> uvicorn backend.main:app --host 0.0.0.0`
+1. Start the server with a secret: `NEXUS_WEBHOOK_SECRET=<long random string> uvicorn backend.main:app --host 0.0.0.0`
 2. Give it a public HTTPS address (`ngrok http 8000`, or a cloud server).
 3. In the TradingView alert, tick **Webhook URL** → `https://<address>/api/tradingview`, message:
    ```json

@@ -117,12 +117,12 @@ def publish(store: Store, kit_id: str, price: float, venture: Optional[str] = No
     if store.get("ventures", v_id)["stage"] == "killed":
         raise ValueError(f"{v_id} was killed, so this kit is shelved: move the venture back first to sell it")
     if not connectors.rails()["storefront"]:
-        raise ValueError("the storefront needs Stripe and STARNET_PUBLIC_URL first")
+        raise ValueError("the storefront needs Stripe and NEXUS_PUBLIC_URL first")
     c, dd, price = k["copy"], digital._data_dir(store), round(float(price), 2)
     slug = digital.slugify(c["title"])
     url = digital.store_url(slug)
     link = connectors.stripe_payment_link(c["title"], c["subtitle"], price, v_id,
-                                          redirect=f"{url}/thanks?session_id={{CHECKOUT_SESSION_ID}}", extra={"starnet_product": slug})
+                                          redirect=f"{url}/thanks?session_id={{CHECKOUT_SESSION_ID}}", extra={"nexus_product": slug})
     rec = store.create("products", {"venture": v_id, "slug": slug, "title": c["title"], "subtitle": c["subtitle"], "format": "printable",
                                     "price_usd": price, "pdf": k["files"][0]["pdf"], "files": k["files"], "pages": k.get("pages"),
                                     "cover": k["cover"], "sales_page": {"headline": c["title"], "subheadline": c["subtitle"],

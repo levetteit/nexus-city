@@ -343,9 +343,9 @@ def test_daily_report_for_jarvis(ultron):
 def test_api(tmp_path, monkeypatch):
     import importlib
     from fastapi.testclient import TestClient
-    monkeypatch.setenv("STARNET_MODE", "sim")
-    monkeypatch.setenv("STARNET_PASSWORD", "pw")
-    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NEXUS_MODE", "sim")
+    monkeypatch.setenv("NEXUS_PASSWORD", "pw")
+    monkeypatch.setenv("NEXUS_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     import backend.main as main
     importlib.reload(main)
@@ -501,9 +501,9 @@ def test_war_room_cuts_what_does_not_work_and_teaches_the_crew(ultron):
 def test_api_outbound_webhook_and_links(tmp_path, monkeypatch):
     import hashlib, hmac, importlib, time
     from fastapi.testclient import TestClient
-    monkeypatch.setenv("STARNET_MODE", "sim")
-    monkeypatch.setenv("STARNET_PASSWORD", "pw")
-    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NEXUS_MODE", "sim")
+    monkeypatch.setenv("NEXUS_PASSWORD", "pw")
+    monkeypatch.setenv("NEXUS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_x")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     import backend.main as main
@@ -511,7 +511,7 @@ def test_api_outbound_webhook_and_links(tmp_path, monkeypatch):
     with TestClient(main.app) as c:
         # the webhook needs no password, only Stripe's signature
         body = json.dumps({"type": "checkout.session.completed", "data": {"object": {
-            "id": "cs_1", "payment_status": "paid", "amount_total": 2500, "metadata": {"starnet_venture": "V-001"}}}}).encode()
+            "id": "cs_1", "payment_status": "paid", "amount_total": 2500, "metadata": {"starnet_venture": "V-001"}}}}).encode()   # a link made before the rename
         t = str(int(time.time()))
         sig = hmac.new(b"whsec_x", f"{t}.".encode() + body, hashlib.sha256).hexdigest()
         assert c.post("/api/station/stripe/webhook", content=body, headers={"stripe-signature": f"t={t},v1=bad"}).status_code == 400
@@ -541,24 +541,24 @@ def test_facebook_and_linkedin_connectors(monkeypatch):
             raise connectors.ConnectorError("HTTP 401: expired")
         return {"id": "post_1"}
     monkeypatch.setattr(connectors, "_http_json", fake)
-    for k in ("STARNET_FB_PAGE_ID", "STARNET_FB_PAGE_TOKEN", "STARNET_LINKEDIN_TOKEN", "STARNET_LINKEDIN_PERSON"):
+    for k in ("NEXUS_FB_PAGE_ID", "NEXUS_FB_PAGE_TOKEN", "NEXUS_LINKEDIN_TOKEN", "NEXUS_LINKEDIN_PERSON"):
         monkeypatch.delenv(k, raising=False)
     assert not connectors.social_configured("facebook") and not connectors.social_configured("linkedin")
     with pytest.raises(connectors.ConnectorError):
         connectors.post_social("facebook", "hi")
-    monkeypatch.setenv("STARNET_FB_PAGE_ID", "123")
-    monkeypatch.setenv("STARNET_FB_PAGE_TOKEN", "pagetok")
+    monkeypatch.setenv("NEXUS_FB_PAGE_ID", "123")
+    monkeypatch.setenv("NEXUS_FB_PAGE_TOKEN", "pagetok")
     assert connectors.post_social("Facebook", "Resume tips", "https://buy.stripe.com/x") == {"platform": "facebook", "id": "post_1"}
     method, url, _, form, _ = calls[-1]
     assert url == "https://graph.facebook.com/123/feed" and form == {"message": "Resume tips", "access_token": "pagetok",
                                                                     "link": "https://buy.stripe.com/x"}
-    monkeypatch.setenv("STARNET_LINKEDIN_TOKEN", "lt")
+    monkeypatch.setenv("NEXUS_LINKEDIN_TOKEN", "lt")
     assert connectors.post_social("linkedin", "Resume tips", "https://buy.stripe.com/x")["id"] == "post_1"
     body = calls[-1][4]
     assert body["author"] == "urn:li:person:abc123" and calls[-2][1].endswith("/userinfo")
     share = body["specificContent"]["com.linkedin.ugc.ShareContent"]
     assert share["shareCommentary"]["text"] == "Resume tips" and share["media"][0]["originalUrl"] == "https://buy.stripe.com/x"
-    monkeypatch.setenv("STARNET_LINKEDIN_TOKEN", "expired")
+    monkeypatch.setenv("NEXUS_LINKEDIN_TOKEN", "expired")
     with pytest.raises(connectors.ConnectorError, match="expired"):
         connectors.post_social("linkedin", "x")
     assert connectors.status()["social"] == ["facebook", "linkedin"]
@@ -568,8 +568,8 @@ def test_solar_venture_owns_the_page_writes_spanish_and_studies_its_posts(tmp_pa
     from backend.station import actions, connectors
     fake = FakeClaude([opp("x")])
     u = Ultron(str(tmp_path), client=fake)
-    monkeypatch.setenv("STARNET_FB_PAGE_ID", "1150312211499349")
-    monkeypatch.setenv("STARNET_FB_PAGE_TOKEN", "pagetok")
+    monkeypatch.setenv("NEXUS_FB_PAGE_ID", "123456789012345")
+    monkeypatch.setenv("NEXUS_FB_PAGE_TOKEN", "pagetok")
     monkeypatch.setattr(connectors, "facebook_recent_posts",
                         lambda limit=12: [{"at": "2026-10-01", "text": "¡Instala tus placas solares con nosotros!", "url": ""}])
     u.cfg.update({"audited": MON_0900.date().isoformat(), "kicked_off": True})
@@ -597,16 +597,16 @@ def test_solar_venture_owns_the_page_writes_spanish_and_studies_its_posts(tmp_pa
     actions.qa(u.store, u.brain, post)
     assert "compliance" in fake.calls[-1]["messages"][0]["content"]
     monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
-    monkeypatch.delenv("STARNET_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("NEXUS_PUBLIC_URL", raising=False)
     assert actions.dispatch(u.store, u.store.get("actions", post["id"]), True)["status"] == "manual"   # no public address yet
     u.store.update("actions", post["id"], {"status": "ready"}, "test")
-    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://starnet-city.onrender.com")
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://nexus-city.example.com")
     sent_fb = []
     monkeypatch.setitem(connectors.SOCIAL["facebook"], "post", lambda text, link, image_url="": sent_fb.append((text, image_url)) or {"id": "fb1"})
     assert actions.dispatch(u.store, u.store.get("actions", post["id"]), True)["status"] == "sent"
-    assert sent_fb == [("Energía solar para tu hogar", f"https://starnet-city.onrender.com/media/{post['payload']['image']}")]
+    assert sent_fb == [("Energía solar para tu hogar", f"https://nexus-city.example.com/media/{post['payload']['image']}")]
     # Instagram: the same Page's account, with the card
-    monkeypatch.setenv("STARNET_IG_USER_ID", "1784")
+    monkeypatch.setenv("NEXUS_IG_USER_ID", "1784")
     calls = []
 
     def graph(method, url, headers=None, form=None, body=None):
@@ -632,9 +632,9 @@ def test_media_route_is_public_but_unguessable(tmp_path, monkeypatch):
     import importlib
     from fastapi.testclient import TestClient
     from backend.station import media
-    monkeypatch.setenv("STARNET_MODE", "sim")
-    monkeypatch.setenv("STARNET_PASSWORD", "pw")
-    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NEXUS_MODE", "sim")
+    monkeypatch.setenv("NEXUS_PASSWORD", "pw")
+    monkeypatch.setenv("NEXUS_DATA_DIR", str(tmp_path))
     import backend.main as main
     importlib.reload(main)
     name = media.render_card(str(tmp_path), "Padilla Property Solutions", "Energía solar", ["Toda la isla"], "DM", "solar")
@@ -656,7 +656,7 @@ def test_post_engagement_and_leads_feed_the_war_room(tmp_path, monkeypatch):
     now = datetime.now(ZoneInfo("America/New_York"))
     # two Padilla posts went out: one on Facebook, one on Instagram
     ids = []
-    for plat, pid in (("facebook", "1150_99"), ("instagram", "1789")):
+    for plat, pid in (("facebook", "1234_99"), ("instagram", "1789")):
         a = actions.create(u.store, "social.post", "A-006", "V-PPS", {"platform": plat, "text": f"{plat} post", "link": ""}, "post")
         u.store.update("actions", a["id"], {"status": "sent", "sent_at": now_iso(), "result": {"platform": plat, "id": pid}}, "test")
         ids.append(a["id"])
@@ -693,9 +693,9 @@ def test_post_engagement_and_leads_feed_the_war_room(tmp_path, monkeypatch):
 def test_lead_api(tmp_path, monkeypatch):
     import importlib
     from fastapi.testclient import TestClient
-    monkeypatch.setenv("STARNET_MODE", "sim")
-    monkeypatch.setenv("STARNET_PASSWORD", "pw")
-    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NEXUS_MODE", "sim")
+    monkeypatch.setenv("NEXUS_PASSWORD", "pw")
+    monkeypatch.setenv("NEXUS_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     import backend.main as main
     importlib.reload(main)
@@ -716,15 +716,15 @@ def test_lead_api(tmp_path, monkeypatch):
 def test_jarvis_brief_is_read_only_and_token_gated(tmp_path, monkeypatch):
     import importlib
     from fastapi.testclient import TestClient
-    monkeypatch.setenv("STARNET_MODE", "sim")
-    monkeypatch.setenv("STARNET_PASSWORD", "pw")
-    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("STARNET_JARVIS_TOKEN", raising=False)
+    monkeypatch.setenv("NEXUS_MODE", "sim")
+    monkeypatch.setenv("NEXUS_PASSWORD", "pw")
+    monkeypatch.setenv("NEXUS_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("NEXUS_JARVIS_TOKEN", raising=False)
     import backend.main as main
     importlib.reload(main)
     with TestClient(main.app) as c:
         assert c.get("/api/jarvis/brief").status_code == 404                     # off until the token is set
-        monkeypatch.setenv("STARNET_JARVIS_TOKEN", "j" * 40)
+        monkeypatch.setenv("NEXUS_JARVIS_TOKEN", "j" * 40)
         assert c.get("/api/jarvis/brief").status_code == 401
         assert c.get("/api/jarvis/brief", headers={"Authorization": "Bearer wrong"}).status_code == 401
         b = c.get("/api/jarvis/brief", headers={"Authorization": "Bearer " + "j" * 40}).json()
@@ -740,7 +740,7 @@ def test_jarvis_brief_is_read_only_and_token_gated(tmp_path, monkeypatch):
         assert "secret-hook" not in json.dumps(cb)
         assert c.post("/api/jarvis/brief", headers={"Authorization": "Bearer " + "j" * 40}).status_code == 405   # read only
         assert c.get("/api/station", headers={"Authorization": "Bearer " + "j" * 40}).status_code == 401      # token opens nothing else
-        monkeypatch.setenv("STARNET_JARVIS_TOKEN", "short")
+        monkeypatch.setenv("NEXUS_JARVIS_TOKEN", "short")
         assert c.get("/api/jarvis/brief", headers={"Authorization": "Bearer short"}).status_code == 401       # weak tokens refused
 
 
@@ -884,7 +884,7 @@ def test_the_crew_runs_the_etsy_shop_end_to_end(ultron, monkeypatch):
     put = next(b for m, p, b in api.calls if m == "PUT")
     assert {v["price"] for v in put["variants"]} == {shop.min_price(1200)} == {1899}   # $9 brief < cost + fees + profit
     assert any(p.endswith("/publish.json") for _, p, _ in api.calls)
-    # the cap: STARNET_SHOP_LISTINGS_PER_DAY a day
+    # the cap: NEXUS_SHOP_LISTINGS_PER_DAY a day
     monkeypatch.setitem(actions.CAPS, "shop.listing", 1)
     assert actions.dispatch(u.store, u.store.get("actions", mug["id"]), True)["status"] == "ready"
     # orders come back as results, once each
@@ -964,7 +964,7 @@ def test_autonomous_venture_launches_sells_and_closes_on_its_own(tmp_path, monke
     from datetime import timedelta
     from backend.station import actions, connectors, digital
     monkeypatch.setenv("STRIPE_API_KEY", "sk_test_x")
-    monkeypatch.setenv("STARNET_PUBLIC_URL", "https://city.example.com")
+    monkeypatch.setenv("NEXUS_PUBLIC_URL", "https://city.example.com")
     stripe_calls, etsy_calls, pins, vid = [], [], [], [None]
 
     def fake_stripe(method, path, params=None):
@@ -977,7 +977,7 @@ def test_autonomous_venture_launches_sells_and_closes_on_its_own(tmp_path, monke
             return {"id": "plink_1", "url": "https://buy.stripe.com/test_1"}
         if path.startswith("/checkout/sessions/"):
             return {"id": path.rsplit("/", 1)[1], "payment_status": "paid", "status": "complete", "payment_link": "plink_1",
-                    "amount_total": 650, "metadata": {"starnet_venture": vid[0], "starnet_product": slug[0]}}
+                    "amount_total": 650, "metadata": {"nexus_venture": vid[0], "nexus_product": slug[0]}}
         return {}
     monkeypatch.setattr(connectors, "stripe_request", fake_stripe)
     notes = []
@@ -1022,7 +1022,7 @@ def test_autonomous_venture_launches_sells_and_closes_on_its_own(tmp_path, monke
     assert link["after_completion"]["redirect"]["url"].endswith("/thanks?session_id={CHECKOUT_SESSION_ID}")
     prod = u.store.all("products")[0]
     slug = [prod["slug"]]
-    assert link["metadata"] == {"starnet_venture": v["id"], "starnet_product": prod["slug"]}
+    assert link["metadata"] == {"nexus_venture": v["id"], "nexus_product": prod["slug"]}
     assert prod["url"] == f"https://city.example.com/shop/{prod['slug']}" and prod["etsy"]["listing_id"] == 99
     assert etsy_calls[0][3] == 6.5 and etsy_calls[0][4][:5] == b"%PDF-"                 # price and the PDF itself
     assert pins[0][3] == prod["url"] and pins[0][4].startswith("https://city.example.com/media/")
@@ -1051,7 +1051,7 @@ def test_autonomous_venture_launches_sells_and_closes_on_its_own(tmp_path, monke
 
 def test_owner_assisted_ideas_still_wait_for_the_owner(tmp_path, monkeypatch):
     monkeypatch.setenv("STRIPE_API_KEY", "sk_test_x")
-    monkeypatch.setenv("STARNET_PUBLIC_URL", "https://city.example.com")
+    monkeypatch.setenv("NEXUS_PUBLIC_URL", "https://city.example.com")
     u = Ultron(str(tmp_path), client=FakeClaude([opp("Resume gig on Fiverr"), auto_opp(score=50)]))
     u.run_job({"kind": "routine", "routine": "R-001"}, now=MON_0900)
     u.tick(now=MON_0900)
@@ -1121,12 +1121,12 @@ def test_connect_buttons_reach_their_route(tmp_path, monkeypatch):
     """/api/station/connect/<service> must not be swallowed by /api/station/{collection}/{rid}."""
     import importlib
     from fastapi.testclient import TestClient
-    monkeypatch.setenv("STARNET_MODE", "sim")
-    monkeypatch.delenv("STARNET_PASSWORD", raising=False)
-    monkeypatch.setenv("STARNET_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NEXUS_MODE", "sim")
+    monkeypatch.delenv("NEXUS_PASSWORD", raising=False)
+    monkeypatch.setenv("NEXUS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ETSY_KEYSTRING", "key")
     monkeypatch.setenv("ETSY_SHARED_SECRET", "secret")
-    monkeypatch.setenv("STARNET_PUBLIC_URL", "https://city.example.com")
+    monkeypatch.setenv("NEXUS_PUBLIC_URL", "https://city.example.com")
     import backend.main as main
     from backend.station import connectors
     importlib.reload(main)
@@ -1315,9 +1315,9 @@ def test_outreach_inbox_honors_opt_outs_and_turns_replies_into_leads(ultron, mon
     for who in ("ann@roofco.com", "bob@solarpro.com", "cat@homes.com"):
         c["contacted"][who] = {"at": "2026-10-07T10:00:00+00:00", "venture": v["id"], "action": None}
     s.save_doc("contacts.json", c)
-    for k, val in {"STARNET_SMTP_HOST": "smtp.gmail.com", "STARNET_SMTP_USER": "hello.starnetstudio@gmail.com",
-                   "STARNET_SMTP_PASSWORD": "app-pass", "STARNET_MAIL_FROM": "Alex at StarNet Studio <hello.starnetstudio@gmail.com>",
-                   "STARNET_MAIL_ADDRESS": "PO Box 1, Town"}.items():
+    for k, val in {"NEXUS_SMTP_HOST": "smtp.gmail.com", "NEXUS_SMTP_USER": "hello@studio.example.com",
+                   "NEXUS_SMTP_PASSWORD": "app-pass", "NEXUS_MAIL_FROM": "Alex at Nexus City Studio <hello@studio.example.com>",
+                   "NEXUS_MAIL_ADDRESS": "PO Box 1, Town"}.items():
         monkeypatch.setenv(k, val)
     assert mailbox.imap_host() == "imap.gmail.com" and mailbox.due(s, MON_0900)
     msgs = [
@@ -1342,9 +1342,9 @@ def test_outreach_inbox_honors_opt_outs_and_turns_replies_into_leads(ultron, mon
 
 def test_mail_login_cleans_a_pasted_app_password(monkeypatch):
     from backend.station import connectors
-    monkeypatch.setenv("STARNET_SMTP_USER", " starnetstudio.team@gmail.com ")
-    monkeypatch.setenv("STARNET_SMTP_PASSWORD", '"abcd efgh ijkl mnop"')
-    assert connectors.mail_login() == ("starnetstudio.team@gmail.com", "abcdefghijklmnop")
+    monkeypatch.setenv("NEXUS_SMTP_USER", " team@studio.example.com ")
+    monkeypatch.setenv("NEXUS_SMTP_PASSWORD", '"abcd efgh ijkl mnop"')
+    assert connectors.mail_login() == ("team@studio.example.com", "abcdefghijklmnop")
     msg = connectors.mail_error(Exception("b'[AUTHENTICATIONFAILED] Invalid credentials (Failure)'"))
     assert "app password" in msg and "AUTHENTICATIONFAILED" in msg
 

@@ -19,22 +19,23 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
+from ..env import env
 from . import connectors
 from .brain import Brain
 from .crew import AGENT_RULES, lessons_text
 from .store import Store, now_iso
 
-CAPS = {"social.post": int(os.getenv("STARNET_POSTS_PER_DAY", "6")),
-        "outreach.email": int(os.getenv("STARNET_OUTREACH_PER_DAY", "15")),
+CAPS = {"social.post": int(env("POSTS_PER_DAY", "6")),
+        "outreach.email": int(env("OUTREACH_PER_DAY", "15")),
         "stripe.payment_link": 5,
-        "shop.listing": int(os.getenv("STARNET_SHOP_LISTINGS_PER_DAY", "2")),
-        "digital.publish": int(os.getenv("STARNET_DIGITAL_PER_DAY", "3"))}
+        "shop.listing": int(env("SHOP_LISTINGS_PER_DAY", "2")),
+        "digital.publish": int(env("DIGITAL_PER_DAY", "3"))}
 POLICY = {   # auto: sends once QA passes; owner: waits for the owner's OK even after QA
-    "social.post": os.getenv("STARNET_POLICY_SOCIAL", "auto"),
-    "outreach.email": os.getenv("STARNET_POLICY_OUTREACH", "auto"),
-    "stripe.payment_link": os.getenv("STARNET_POLICY_STRIPE", "auto"),
-    "shop.listing": os.getenv("STARNET_POLICY_SHOP", "auto"),
-    "digital.publish": os.getenv("STARNET_POLICY_DIGITAL", "auto"),
+    "social.post": env("POLICY_SOCIAL", "auto"),
+    "outreach.email": env("POLICY_OUTREACH", "auto"),
+    "stripe.payment_link": env("POLICY_STRIPE", "auto"),
+    "shop.listing": env("POLICY_SHOP", "auto"),
+    "digital.publish": env("POLICY_DIGITAL", "auto"),
 }
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.I)
 
@@ -163,7 +164,7 @@ def dispatch(store: Store, action: dict, outbound_on: bool) -> dict:
             from .media import public_url
             image_url = public_url(p["image"]) if p.get("image") else ""
             if p.get("image") and not image_url:
-                return _manual(store, action, "the card has no public address (set STARNET_PUBLIC_URL)")
+                return _manual(store, action, "the card has no public address (set NEXUS_PUBLIC_URL)")
             res = connectors.post_social(p["platform"], p["text"], p.get("link", ""), image_url)
         elif kind == "shop.listing":
             if not connectors.printify_configured():
@@ -172,7 +173,7 @@ def dispatch(store: Store, action: dict, outbound_on: bool) -> dict:
             res = shop.publish(store, action)
         elif kind == "digital.publish":
             if not connectors.rails()["storefront"]:
-                return _manual(store, action, "the storefront needs Stripe and STARNET_PUBLIC_URL")
+                return _manual(store, action, "the storefront needs Stripe and NEXUS_PUBLIC_URL")
             from . import digital
             res = digital.publish(store, action)
         else:

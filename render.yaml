@@ -1,4 +1,10 @@
 # Render Blueprint: dashboard → New → Blueprint → pick this repo.
+# Nexus City was called StarNet. The service name, the disk name and these STARNET_* keys are kept ON PURPOSE:
+#  - the service name sets the public address (OAuth redirect URIs, the Stripe webhook, TradingView alerts and
+#    push subscriptions all point at it), and a new disk name would mean a new, empty disk;
+#  - renaming a generateValue key would make Render generate a NEW secret, and since NEXUS_* names take priority,
+#    the TradingView alerts holding the old secret would stop working.
+# The app reads NEXUS_<name> first and falls back to STARNET_<name>. See docs/MIGRATION_FROM_STARNET.md.
 services:
   - type: web
     name: starnet-city
@@ -13,7 +19,7 @@ services:
         sync: false        # Render asks you for this when you create the Blueprint
       - key: STARNET_WEBHOOK_SECRET
         generateValue: true
-      - key: STARNET_FEED_SECRET          # paste into the Starnet feed script on TradingView
+      - key: STARNET_FEED_SECRET          # paste into the Nexus City feed script on TradingView
         generateValue: true
       - key: STARNET_TRADERSPOST_WEBHOOKS # your TradersPost strategy webhook URL (real orders)
         sync: false

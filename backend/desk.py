@@ -25,12 +25,13 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from .env import env
 from .backtest import ET
 
-MODEL = os.getenv("STARNET_DESK_MODEL", "claude-opus-5-5")
+MODEL = env("DESK_MODEL", "claude-opus-5-5")
 MODES = ("normal", "cautious", "sit_out")
 
-CONSTITUTION = """You run the trading desk of Starnet City: a team of trading bots that trade \
+CONSTITUTION = """You run the trading desk of Nexus City: a team of trading bots that trade \
 MNQ (micro Nasdaq futures) on one LucidFlex 50K prop account, with MES as confirmation. \
 The desk's money pays for everything. If the account fails, the desk stops existing. \
 So every bot is here to win: to be the best trader on the floor, to beat yesterday's version of itself, \

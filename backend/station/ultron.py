@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
+from ..env import env
 from . import actions, connectors, credits, crew, digital, finance, kits, mailbox, marketing, recognition, research, results, shop, warroom
 from .brain import Brain
 from .economy import AI_BUDGET, Treasury
@@ -38,8 +39,8 @@ def _is_connection(exc) -> bool:
         return True
     return isinstance(exc, anthropic.APIStatusError) and (exc.status_code in (401, 403)
                                                           or "credit balance" in str(getattr(exc, "message", "")).lower())
-MAX_EXPERIMENTS = int(os.getenv("STARNET_STATION_EXPERIMENTS", "3"))      # live ventures besides the trading desk
-TASKS_PER_DAY = int(os.getenv("STARNET_STATION_TASKS_PER_DAY", "25"))     # agent drafting runs per ET day
+MAX_EXPERIMENTS = int(env("STATION_EXPERIMENTS", "3"))      # live ventures besides the trading desk
+TASKS_PER_DAY = int(env("STATION_TASKS_PER_DAY", "25"))     # agent drafting runs per ET day
 STALL_MINUTES = 30
 KICKOFF_RETRY = timedelta(hours=3)   # no opportunities on file: research again this soon instead of tomorrow
 AI_BACKOFF = timedelta(minutes=20)   # after a connection failure, wait this long instead of burning the day's slots
@@ -50,8 +51,8 @@ AUDIT_AT = (7, 0)     # ET, daily
 APPROVAL_KINDS = ("launch_venture", "fund_goal", "venture_decision", "spend", "strategy_promote")
 # The owner's rule (Oct 6 2026): a $0 venture the crew can run end to end on its own rails launches without
 # waiting; the owner is told and can kill it. It closes itself after KILL_AFTER days with no sale.
-AUTO_LAUNCH = os.getenv("STARNET_AUTO_LAUNCH", "1") not in ("0", "false", "off")
-KILL_AFTER = timedelta(days=int(os.getenv("STARNET_AUTO_KILL_DAYS", "21")))
+AUTO_LAUNCH = env("AUTO_LAUNCH", "1") not in ("0", "false", "off")
+KILL_AFTER = timedelta(days=int(env("AUTO_KILL_DAYS", "21")))
 
 
 def offer_of(o: dict) -> str:
@@ -94,7 +95,7 @@ class Ultron:
                                       "at": r["at"], "output_type": "opportunities", "last_run": None,
                                       "status": "active", "runs": 0}, "A-001", "routine scheduled")
         if not s.get("ventures", "V-001"):
-            s.create("ventures", {"id": "V-001", "name": "Starnet City Trading Desk", "category": "trading",
+            s.create("ventures", {"id": "V-001", "name": "Nexus City Trading Desk", "category": "trading",
                                   "stage": "operate", "owner": "owner", "unit": "city", "agents": [],
                                   "offer": "MNQ micro futures on a LucidFlex 50K prop account (PROC strategy)",
                                   "objective": "Pass the evaluation, then take funded payouts",
@@ -153,6 +154,9 @@ class Ultron:
                                                    "the crew-run Etsy shop and the first launched venture.",
                                            "success_criteria": "First owner-recorded income from a station venture"},
                      "owner", "the Etsy shop is already open: the mission is earning, not funding it")
+        if (s.get("ventures", "V-001") or {}).get("name") == "Starnet City Trading Desk":   # the project's former name
+            s.update("ventures", "V-001", {"name": "Nexus City Trading Desk"}, "A-001", "renamed: StarNet is now Nexus City",
+                     kind="venture.renamed")
         for v in s.all("ventures"):   # ventures launched before offers were set: QA blocked every product
             o = s.get("opportunities", v.get("opportunity") or "")
             if v.get("autonomous") and not v.get("offer") and o:

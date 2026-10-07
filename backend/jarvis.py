@@ -22,7 +22,7 @@ trading desk or a live order is refused here (it stays the owner's):
   directive         tell ULTRON and the crew something: becomes a standing lesson and War Room input
   notify            push a message to the owner's phone (for what involves money or an account)
 
-Auth: the same STARNET_JARVIS_TOKEN as the briefing (Bearer header).
+Auth: the same NEXUS_JARVIS_TOKEN as the briefing (Bearer header).
 """
 from __future__ import annotations
 

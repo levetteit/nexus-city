@@ -5,17 +5,17 @@
            STRIPE_WEBHOOK_SECRET (the signing secret of a webhook to /api/station/stripe/webhook)
            Agents create products and payment links; paid checkouts book themselves into the treasury.
            Refunds and payouts are not wired at all: those stay in your Stripe dashboard.
-  Email    STARNET_SMTP_HOST, STARNET_SMTP_PORT (587), STARNET_SMTP_USER, STARNET_SMTP_PASSWORD,
-           STARNET_MAIL_FROM ("Name <you@yourdomain.com>"), STARNET_MAIL_ADDRESS (your postal address,
+  Email    NEXUS_SMTP_HOST, NEXUS_SMTP_PORT (587), NEXUS_SMTP_USER, NEXUS_SMTP_PASSWORD,
+           NEXUS_MAIL_FROM ("Name <you@yourdomain.com>"), NEXUS_MAIL_ADDRESS (your postal address,
            required by CAN-SPAM in every commercial email)
            Outreach email, after QA, within the daily cap, never twice to the same address.
-  Facebook STARNET_FB_PAGE_ID, STARNET_FB_PAGE_TOKEN: posts to your Page
-  LinkedIn STARNET_LINKEDIN_TOKEN: posts to your profile (the token lasts 60 days)
+  Facebook NEXUS_FB_PAGE_ID, NEXUS_FB_PAGE_TOKEN: posts to your Page
+  LinkedIn NEXUS_LINKEDIN_TOKEN: posts to your profile (the token lasts 60 days)
 
   Printify PRINTIFY_API_TOKEN (Printify → My profile → Connections → Personal access token), optional
            PRINTIFY_SHOP_ID (else the Printify shop connected to Etsy). The crew's print-on-demand products
            are created in Printify and published to the Etsy shop through Printify's own Etsy connection.
-           Each new Etsy listing costs $0.20; STARNET_SHOP_LISTINGS_PER_DAY caps how many go up a day.
+           Each new Etsy listing costs $0.20; NEXUS_SHOP_LISTINGS_PER_DAY caps how many go up a day.
 
   Etsy     ETSY_KEYSTRING, ETSY_SHARED_SECRET (a free app at etsy.com/developers, callback
            <your app>/api/station/connect/etsy/callback), then Connect on the board (OAuth, once). Digital
@@ -42,6 +42,7 @@ import urllib.parse
 import urllib.request
 from email.message import EmailMessage
 from typing import Optional
+from ..env import env, set_env
 
 STRIPE_API = "https://api.stripe.com/v1"
 STRIPE_FEE = (0.029, 0.30)   # standard US card pricing, used only to estimate fees on booked sales
@@ -91,7 +92,7 @@ def stripe_payment_link(name: str, description: str, price_usd: float, venture: 
                         extra: Optional[dict] = None) -> dict:
     """A product, a price and a payment link. redirect: where the buyer lands after paying ({CHECKOUT_SESSION_ID}
     is filled in by Stripe). The link's metadata is copied onto every Checkout Session it creates."""
-    meta = {"starnet_venture": venture, **(extra or {})}
+    meta = {"nexus_venture": venture, **(extra or {})}
     product = stripe_request("POST", "/products", {"name": name[:250], "description": description[:500], "metadata": meta})
     price = stripe_request("POST", "/prices", {"product": product["id"], "currency": "usd",
                                                "unit_amount": int(round(price_usd * 100))})
@@ -130,15 +131,14 @@ def stripe_paid_sessions(limit: int = 50) -> list[dict]:
 
 # ---------------------------------------------------------------------------- Email (SMTP)
 def email_configured() -> bool:
-    return all(os.getenv(k) for k in ("STARNET_SMTP_HOST", "STARNET_SMTP_USER", "STARNET_SMTP_PASSWORD",
-                                      "STARNET_MAIL_FROM", "STARNET_MAIL_ADDRESS"))
+    return all(env(k) for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "MAIL_FROM", "MAIL_ADDRESS"))
 
 
 def mail_login() -> tuple[str, str]:
     """The mailbox login, cleaned: Google shows app passwords in groups of four ("abcd efgh ijkl mnop") and a
     paste often keeps the spaces or quotes; an app password never contains either."""
-    user = (os.getenv("STARNET_SMTP_USER") or "").strip().strip("'\"")
-    pw = "".join((os.getenv("STARNET_SMTP_PASSWORD") or "").split()).strip("'\"")
+    user = (env("SMTP_USER") or "").strip().strip("'\"")
+    pw = "".join((env("SMTP_PASSWORD") or "").split()).strip("'\"")
     return user, pw
 
 
@@ -147,21 +147,21 @@ def mail_error(exc: Exception) -> str:
     msg = str(exc)
     if any(k in msg for k in ("535", "AUTHENTICATIONFAILED", "Invalid credentials", "Username and Password not accepted",
                               "Application-specific password required")):
-        return ("the mailbox refused the login: STARNET_SMTP_USER must be the full address of the account the app password "
-                "was made in, and STARNET_SMTP_PASSWORD the 16-letter app password (not the Gmail password). "
+        return ("the mailbox refused the login: NEXUS_SMTP_USER must be the full address of the account the app password "
+                "was made in, and NEXUS_SMTP_PASSWORD the 16-letter app password (not the Gmail password). "
                 f"Server said: {msg[:120]}")
     return msg[:200]
 
 
 def send_email(to: str, subject: str, body: str) -> dict:
     if not email_configured():
-        raise ConnectorError("email isn't connected (STARNET_SMTP_* settings)")
-    footer = (f"\n\n--\n{os.getenv('STARNET_MAIL_FROM')}\n{os.getenv('STARNET_MAIL_ADDRESS')}\n"
+        raise ConnectorError("email isn't connected (NEXUS_SMTP_* settings)")
+    footer = (f"\n\n--\n{env('MAIL_FROM')}\n{env('MAIL_ADDRESS')}\n"
               "Not interested? Reply \"unsubscribe\" and you won't hear from us again.")
     msg = EmailMessage()
-    msg["From"], msg["To"], msg["Subject"] = os.getenv("STARNET_MAIL_FROM"), to, subject
+    msg["From"], msg["To"], msg["Subject"] = env("MAIL_FROM"), to, subject
     msg.set_content(body + footer)
-    host, port = os.getenv("STARNET_SMTP_HOST"), int(os.getenv("STARNET_SMTP_PORT", "587"))
+    host, port = env("SMTP_HOST"), int(env("SMTP_PORT", "587"))
     try:
         with smtplib.SMTP(host, port, timeout=30) as smtp:
             smtp.starttls()
@@ -173,10 +173,10 @@ def send_email(to: str, subject: str, body: str) -> dict:
 
 
 # ---------------------------------------------------------------------------- Social
-# Facebook Page   STARNET_FB_PAGE_ID, STARNET_FB_PAGE_TOKEN (a Page access token with pages_manage_posts); the Page
-#                 belongs to one venture (STARNET_FB_PAGE_VENTURE, default V-PPS): other ventures never post there
-# LinkedIn        STARNET_LINKEDIN_TOKEN (w_member_social; expires every 60 days), optional STARNET_LINKEDIN_PERSON
-# Instagram       STARNET_IG_USER_ID (the Instagram professional account linked to the Page; same Page token,
+# Facebook Page   NEXUS_FB_PAGE_ID, NEXUS_FB_PAGE_TOKEN (a Page access token with pages_manage_posts); the Page
+#                 belongs to one venture (NEXUS_FB_PAGE_VENTURE, default V-PPS): other ventures never post there
+# LinkedIn        NEXUS_LINKEDIN_TOKEN (w_member_social; expires every 60 days), optional NEXUS_LINKEDIN_PERSON
+# Instagram       NEXUS_IG_USER_ID (the Instagram professional account linked to the Page; same Page token,
 #                 which also needs instagram_basic + instagram_content_publish). Every post carries a card (media.py).
 # TikTok needs a video with every post and an audited app: its posts wait in the posting queue.
 def _http_json(method: str, url: str, headers: Optional[dict] = None, form: Optional[dict] = None,
@@ -206,12 +206,12 @@ def _http_json(method: str, url: str, headers: Optional[dict] = None, form: Opti
 
 
 def _graph_base() -> str:
-    version = os.getenv("STARNET_META_GRAPH_VERSION", "")   # empty: the app's default Graph API version
+    version = env("META_GRAPH_VERSION", "")   # empty: the app's default Graph API version
     return "https://graph.facebook.com/" + (f"{version}/" if version else "")
 
 
 def _facebook_post(text: str, link: str, image_url: str = "") -> dict:
-    page, token = os.getenv("STARNET_FB_PAGE_ID"), os.getenv("STARNET_FB_PAGE_TOKEN")
+    page, token = env("FB_PAGE_ID"), env("FB_PAGE_TOKEN")
     try:
         if image_url:   # a photo post: the card, with the text (and link) as its caption
             res = _http_json("POST", f"{_graph_base()}{page}/photos", form={
@@ -228,7 +228,7 @@ def _facebook_post(text: str, link: str, image_url: str = "") -> dict:
 
 def _instagram_post(text: str, link: str, image_url: str = "") -> dict:
     """Instagram only takes posts with an image: create the media container, wait for it, publish it."""
-    ig, token = os.getenv("STARNET_IG_USER_ID"), os.getenv("STARNET_FB_PAGE_TOKEN")
+    ig, token = env("IG_USER_ID"), env("FB_PAGE_TOKEN")
     if not image_url:
         raise ConnectorError("Instagram needs an image with every post")
     try:
@@ -247,19 +247,19 @@ def _instagram_post(text: str, link: str, image_url: str = "") -> dict:
 
 
 def _linkedin_person() -> str:
-    person = os.getenv("STARNET_LINKEDIN_PERSON", "")
+    person = env("LINKEDIN_PERSON", "")
     if not person:
         me = _http_json("GET", "https://api.linkedin.com/v2/userinfo",
-                        headers={"Authorization": f"Bearer {os.getenv('STARNET_LINKEDIN_TOKEN')}"})
+                        headers={"Authorization": f"Bearer {env('LINKEDIN_TOKEN')}"})
         person = me.get("sub", "")
         if not person:
             raise ConnectorError("LinkedIn: couldn't read your member id (add the openid and profile scopes)")
-        os.environ["STARNET_LINKEDIN_PERSON"] = person   # cache for this run
+        set_env("LINKEDIN_PERSON", person)   # cache for this run
     return person if person.startswith("urn:li:") else f"urn:li:person:{person}"
 
 
 def _linkedin_post(text: str, link: str) -> dict:
-    token = os.getenv("STARNET_LINKEDIN_TOKEN")
+    token = env("LINKEDIN_TOKEN")
     try:
         author = _linkedin_person()
         share = {"shareCommentary": {"text": text}, "shareMediaCategory": "NONE"}
@@ -271,14 +271,14 @@ def _linkedin_post(text: str, link: str) -> dict:
                                "specificContent": {"com.linkedin.ugc.ShareContent": share},
                                "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"}})
     except ConnectorError as exc:
-        hint = " (the token has probably expired: make a new one and update STARNET_LINKEDIN_TOKEN)" if "401" in str(exc) else ""
+        hint = " (the token has probably expired: make a new one and update NEXUS_LINKEDIN_TOKEN)" if "401" in str(exc) else ""
         raise ConnectorError(f"LinkedIn: {exc}{hint}")
     return {"platform": "linkedin", "id": res.get("id")}
 
 
 def page_venture() -> str:
     """The Facebook Page is Padilla Property Solutions' Page: only that venture posts there."""
-    return os.getenv("STARNET_FB_PAGE_VENTURE", "V-PPS")
+    return env("FB_PAGE_VENTURE", "V-PPS")
 
 
 def platform_allowed(platform: str, venture: Optional[str]) -> bool:
@@ -289,7 +289,7 @@ def platform_allowed(platform: str, venture: Optional[str]) -> bool:
 
 def facebook_recent_posts(limit: int = 12) -> list[dict]:
     """The Page's own latest posts, so the crew writes in its voice and doesn't repeat itself."""
-    page, token = os.getenv("STARNET_FB_PAGE_ID"), os.getenv("STARNET_FB_PAGE_TOKEN")
+    page, token = env("FB_PAGE_ID"), env("FB_PAGE_TOKEN")
     if not (page and token):
         return []
     base = _graph_base()
@@ -302,7 +302,7 @@ def facebook_recent_posts(limit: int = 12) -> list[dict]:
 def facebook_post_metrics(post_id: str) -> dict:
     """Reactions, comments and shares on one of the Page's posts (pages_read_engagement)."""
     q = urllib.parse.urlencode({"fields": "reactions.summary(total_count),comments.summary(total_count),shares",
-                                "access_token": os.getenv("STARNET_FB_PAGE_TOKEN", "")})
+                                "access_token": env("FB_PAGE_TOKEN", "")})
     r = _http_json("GET", f"{_graph_base()}{post_id}?{q}")
     total = lambda k: ((r.get(k) or {}).get("summary") or {}).get("total_count", 0)
     return {"reactions": total("reactions"), "comments": total("comments"), "shares": (r.get("shares") or {}).get("count", 0)}
@@ -310,17 +310,17 @@ def facebook_post_metrics(post_id: str) -> dict:
 
 def instagram_media_metrics(media_id: str) -> dict:
     """Likes and comments on one Instagram post (instagram_basic)."""
-    q = urllib.parse.urlencode({"fields": "like_count,comments_count", "access_token": os.getenv("STARNET_FB_PAGE_TOKEN", "")})
+    q = urllib.parse.urlencode({"fields": "like_count,comments_count", "access_token": env("FB_PAGE_TOKEN", "")})
     r = _http_json("GET", f"{_graph_base()}{media_id}?{q}")
     return {"likes": r.get("like_count", 0), "comments": r.get("comments_count", 0)}
 
 
 SOCIAL: dict = {
-    "facebook": {"configured": lambda: bool(os.getenv("STARNET_FB_PAGE_ID") and os.getenv("STARNET_FB_PAGE_TOKEN")),
+    "facebook": {"configured": lambda: bool(env("FB_PAGE_ID") and env("FB_PAGE_TOKEN")),
                  "post": _facebook_post},
-    "instagram": {"configured": lambda: bool(os.getenv("STARNET_IG_USER_ID") and os.getenv("STARNET_FB_PAGE_TOKEN")),
+    "instagram": {"configured": lambda: bool(env("IG_USER_ID") and env("FB_PAGE_TOKEN")),
                   "post": _instagram_post},
-    "linkedin": {"configured": lambda: bool(os.getenv("STARNET_LINKEDIN_TOKEN")), "post": _linkedin_post},
+    "linkedin": {"configured": lambda: bool(env("LINKEDIN_TOKEN")), "post": _linkedin_post},
 }
 
 
@@ -347,7 +347,7 @@ def _printify(method: str, path: str, body: Optional[dict] = None) -> dict:
     token = os.getenv("PRINTIFY_API_TOKEN", "").strip()
     if not token:
         raise ConnectorError("Printify isn't connected (PRINTIFY_API_TOKEN)")
-    return _http_json(method, PRINTIFY_API + path, {"Authorization": f"Bearer {token}", "User-Agent": "StarNet-Station"},
+    return _http_json(method, PRINTIFY_API + path, {"Authorization": f"Bearer {token}", "User-Agent": "NexusCity-Station"},
                       body=body)
 
 
@@ -473,7 +473,7 @@ def _http_form(url: str, form: dict, headers: Optional[dict] = None) -> dict:
 
 def _multipart(fields: dict, files: dict) -> tuple[bytes, str]:
     import secrets as _s
-    boundary = "----starnet" + _s.token_hex(12)
+    boundary = "----nexuscity" + _s.token_hex(12)
     out = b""
     for k, v in fields.items():
         out += f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
@@ -487,7 +487,7 @@ def _redirect_uri(service: str) -> str:
     from .media import public_url
     base = public_url("x").rsplit("/media/", 1)[0]
     if not base:
-        raise ConnectorError("set STARNET_PUBLIC_URL (your app's address) first")
+        raise ConnectorError("set NEXUS_PUBLIC_URL (your app's address) first")
     return f"{base}/api/station/connect/{service}/callback"
 
 

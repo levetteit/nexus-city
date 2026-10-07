@@ -12,6 +12,7 @@ import re
 import secrets
 import textwrap
 from typing import Optional
+from ..env import env
 
 W, H = 1080, 1350
 NAME_RE = re.compile(r"^[a-f0-9]{32}\.(jpg|png)$")
@@ -28,7 +29,7 @@ def media_dir(data_dir: str) -> str:
 
 
 def public_url(name: str) -> str:
-    base = (os.getenv("STARNET_PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").rstrip("/")
+    base = (env("PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").rstrip("/")
     return f"{base}/media/{name}" if base else ""
 
 

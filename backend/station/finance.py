@@ -2,7 +2,7 @@
 
   Treasurer (Finance Agent)  the pool, bills, runway, AI budget, funding goals (economy.py)
   Accountant                 statements per month for the city, the station and each venture, with a
-                             tax set-aside estimate (STARNET_TAX_RATE, default 25%: an estimate, not tax
+                             tax set-aside estimate (NEXUS_TAX_RATE, default 25%: an estimate, not tax
                              advice; check it with a tax professional)
   Auditor                    daily: the ledger's hash chain is intact; every Stripe payment is booked
                              (missed webhooks get booked from Stripe's own records); every agent's cost
@@ -15,11 +15,12 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
+from ..env import env
 from . import connectors
 from .economy import Treasury
 from .store import Store
 
-TAX_RATE = float(os.getenv("STARNET_TAX_RATE", "0.25"))
+TAX_RATE = float(env("TAX_RATE", "0.25"))
 COSTLY_AGENT = 5.0   # $ of AI spend with nothing delivered → flagged
 
 

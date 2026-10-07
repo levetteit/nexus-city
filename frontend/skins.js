@@ -1,4 +1,4 @@
-// Skins and apparel for every robot in StarNet: the trading bots (city + streamer rooms) and the
+// Skins and apparel for every robot in Nexus City: the trading bots (city + streamer rooms) and the
 // station's crew (3D station). Each robot has a signature look that matches its persona; more apparel
 // is earned from real results and never taken back:
 //   bots    lifetime P&L high-water mark (career_best), and the account getting funded

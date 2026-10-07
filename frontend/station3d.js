@@ -1,4 +1,4 @@
-// StarNet Orbital Station: the 3D view of ULTRON's station. Every module, agent, pet and planet here is live
+// Nexus City Orbital Station: the 3D view of ULTRON's station. Every module, agent, pet and planet here is live
 // data from /api/station (the same as the 2D board); nothing on screen is decoration-only state.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";

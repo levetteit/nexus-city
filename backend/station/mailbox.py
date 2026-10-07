@@ -8,7 +8,7 @@ addresses it emailed; everything else in the inbox is ignored. Mail is read with
     list at once: the law asks for it within 10 business days, this does it within the hour
   * any other reply is a lead: it's added to the venture's leads and the owner gets a push to answer it
 
-  STARNET_IMAP_HOST   optional; worked out from the SMTP host when it's Gmail, Outlook or smtp.<domain>
+  NEXUS_IMAP_HOST   optional; worked out from the SMTP host when it's Gmail, Outlook or smtp.<domain>
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from email.utils import parseaddr
 from typing import Optional
 
+from ..env import env
 from . import actions, connectors
 from .store import Store
 
@@ -31,9 +32,9 @@ QUOTE_START = re.compile(r"^(on .+ wrote:|-----original message-----|from: .+|se
 
 
 def imap_host() -> Optional[str]:
-    if os.getenv("STARNET_IMAP_HOST"):
-        return os.environ["STARNET_IMAP_HOST"].strip()
-    smtp = (os.getenv("STARNET_SMTP_HOST") or "").strip().lower()
+    if env("IMAP_HOST"):
+        return env("IMAP_HOST").strip()
+    smtp = (env("SMTP_HOST") or "").strip().lower()
     known = {"smtp.gmail.com": "imap.gmail.com", "smtp.office365.com": "outlook.office365.com",
              "smtp-mail.outlook.com": "outlook.office365.com"}
     if smtp in known:
@@ -142,7 +143,7 @@ def test(store: Store) -> dict:
     """The owner's check: send a test email to the outreach inbox itself, then log in to read it."""
     out = {}
     try:
-        connectors.send_email(connectors.mail_login()[0], "StarNet test email",
+        connectors.send_email(connectors.mail_login()[0], "Nexus City test email",
                               "This is a test from your Space Station: sending works.")
         out["send"] = "ok: a test email is in the outreach inbox"
     except connectors.ConnectorError as exc:
