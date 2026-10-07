@@ -250,6 +250,8 @@ Severity scale:
   - make the repository private and publish a sanitized portfolio copy; or
   - move kits and business details out of the repository and rewrite history (`git filter-repo`);
     this is destructive, so it is not done here.
+- **Owner decision (2026-10-07):** keep the repository public for now; the owner will make it private later.
+  No history rewrite.
 
 **O-H2. Every merge to `main` redeploys and restarts the trading process.**
 - **Where:** `render.yaml` sets `autoDeploy: true`. A restart closes real positions (by design, `execution.py:19`),
