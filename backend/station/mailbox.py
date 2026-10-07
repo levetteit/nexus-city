@@ -76,7 +76,7 @@ def fetch(since_uid: int, limit: int = 200) -> list[dict]:
     """New messages after `since_uid`, read-only (nothing gets marked as read)."""
     try:
         with imaplib.IMAP4_SSL(imap_host(), 993, timeout=30) as m:
-            m.login(os.getenv("STARNET_SMTP_USER"), os.getenv("STARNET_SMTP_PASSWORD"))
+            m.login(*connectors.mail_login())
             m.select("INBOX", readonly=True)
             _, data = m.uid("search", None, f"UID {since_uid + 1}:*")
             uids = [int(u) for u in (data[0] or b"").split() if int(u) > since_uid][-limit:]
@@ -91,7 +91,7 @@ def fetch(since_uid: int, limit: int = 200) -> list[dict]:
                             "text": _text(msg)})
             return out
     except (imaplib.IMAP4.error, OSError) as exc:
-        raise connectors.ConnectorError(f"inbox check failed: {exc}"[:200])
+        raise connectors.ConnectorError(f"inbox check failed: {connectors.mail_error(exc)}"[:300])
 
 
 def process(store: Store, messages: list[dict], notify=None) -> dict:
@@ -135,6 +135,29 @@ def check(store: Store, now: datetime, notify=None, fetcher=None) -> dict:
         doc["last_uid"] = max(m["uid"] for m in msgs)
     doc.update(checked_at=now.isoformat(), error="", last=out)
     store.save_doc(DOC, doc)
+    return out
+
+
+def test(store: Store) -> dict:
+    """The owner's check: send a test email to the outreach inbox itself, then log in to read it."""
+    out = {}
+    try:
+        connectors.send_email(connectors.mail_login()[0], "StarNet test email",
+                              "This is a test from your Space Station: sending works.")
+        out["send"] = "ok: a test email is in the outreach inbox"
+    except connectors.ConnectorError as exc:
+        out["send"] = str(exc)
+    try:
+        with imaplib.IMAP4_SSL(imap_host(), 993, timeout=30) as m:
+            m.login(*connectors.mail_login())
+            m.select("INBOX", readonly=True)
+        out["read"] = "ok: the station can read replies"
+        doc = store.load_doc(DOC) or {}
+        if doc.get("error"):
+            doc["error"] = ""
+            store.save_doc(DOC, doc)
+    except (imaplib.IMAP4.error, OSError) as exc:
+        out["read"] = f"inbox login failed: {connectors.mail_error(exc)}"
     return out
 
 
