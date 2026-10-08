@@ -104,10 +104,10 @@ Pick the ones that fit the role. Each is backed by code in this repository.
 2. Built human-in-the-loop safeguards for LLM agents: a schema-validated output → QA → send-policy → daily-cap → emergency-stop pipeline that agents cannot bypass, plus an allowlisted operations API that refuses money, trading and account actions.
 3. Integrated about 10 external APIs: Stripe (signed webhooks, idempotent writes), Etsy and Pinterest (OAuth 2.0 with PKCE and refresh), Meta Graph, Printify, TradersPost, TradingView webhooks and SMTP/IMAP. Each adapter has typed errors and secret redaction.
 4. Built a pre-trade risk layer for automated order routing: explicit arming, stale-data blocks, session cutoffs, position-ownership checks, and flatten-on-restart. Strategy changes are tested walk-forward on recorded market data before shadow trading and owner approval.
-5. Raised test coverage from 72% to 76% across 186 pytest cases, with a network-blocking fixture that guarantees tests have no real side effects. Set up CI with a secret scan over the full history, a dependency vulnerability audit and a container smoke test.
+5. Grew the test suite from 118 to 187 cases and raised backend coverage from 69% to 76%, with a network-blocking fixture that guarantees tests have no real side effects. Set up CI with a secret scan over the full history, a dependency vulnerability audit and a container smoke test.
 
-Bullet 5's numbers describe this project as it stands: Phase 7 raised coverage from 72% to 76%, and the full
-suite now runs 186 cases (pytest, October 2026). Re-check them before using the bullet. Avoid "fully autonomous",
+Bullet 5's numbers come from [MODERNIZATION_REPORT.md](MODERNIZATION_REPORT.md): 117 passed and 69% coverage at the
+baseline, against 186 passed, 1 skipped and 76% after the modernization. Re-check them before using the bullet. Avoid "fully autonomous",
 "production-grade" or claims of trading profit. The trading results are a 21-day backtest and ongoing paper trading.
 
 ## Technical interview talking points

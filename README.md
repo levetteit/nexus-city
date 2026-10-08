@@ -186,7 +186,6 @@ Step-by-step hosting, phone alerts and monitoring are in [docs/OPERATIONS.md](do
 1. **Trading reliability:** supervise the trading loop and make `/healthz` detect a stall. Send exits while disarmed, use wall-clock flatten timing, keep account halts across restarts, and retry orders safely.
 2. **Persistence:** move from JSON files to PostgreSQL along the schema already designed in [docs/PERSISTENCE.md](docs/PERSISTENCE.md), once the data outgrows one disk.
 3. **Station:** reconnect the expired social tokens, finish the Pinterest app review, and test channels with real traffic.
-4. **Docs:** a modernization report.
 
 ## Documentation
 
@@ -202,6 +201,7 @@ Step-by-step hosting, phone alerts and monitoring are in [docs/OPERATIONS.md](do
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, authentication, secrets, agent boundaries, safeguards |
 | [docs/PERSISTENCE.md](docs/PERSISTENCE.md) | Storage, durability, recovery, the PostgreSQL design |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Setup, tests, CI, dependencies |
+| [docs/MODERNIZATION_REPORT.md](docs/MODERNIZATION_REPORT.md) | The 14-phase modernization: before and after, validation, remaining debt |
 | [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md) | The engineering audit: findings and their status |
 | [docs/MIGRATION_FROM_STARNET.md](docs/MIGRATION_FROM_STARNET.md) | The StarNet → Nexus City rename |
 
