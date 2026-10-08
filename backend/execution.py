@@ -9,7 +9,12 @@ every Lucid (Tradovate) account subscribed to that strategy.
 
 Safety, in order of importance:
   * Off until you arm it from the account panel. The armed state is saved, so a
-    restart keeps whatever you chose.
+    restart keeps whatever you chose. Disarming stops new entries and adds; a position
+    already open for real keeps getting its trims and exit until it's flat ("Flatten all"
+    closes everything at once).
+  * From 15:55 ET by the wall clock, and in the news-flatten window, open real positions are
+    exited even if no candle has arrived (live loop, `flatten_open`): a late feed can't hold
+    a position past Tradovate's 16:00 session end.
   * New entries are blocked whenever the price data is more than
     MAX_DATA_DELAY_MIN minutes old: the free Yahoo feed is ~10 minutes late, so
     real orders need the real-time TradingView feed (see tradingview/nexus_city_feed.pine).
@@ -37,12 +42,24 @@ import urllib.request
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 from .persist import write_json_atomic
 from .env import env
 from .redact import redact
 
 MAX_DATA_DELAY_MIN = 2.5
 SAFE_TO_REPEAT = ("exit", "resize")   # only reduce a position: sending one twice can't add risk
+ET = ZoneInfo("America/New_York")
+
+
+def wall_clock_et() -> datetime:
+    """Now, in New York. Tests replace this with a fixed time."""
+    return datetime.now(timezone.utc).astimezone(ET)
+
+
+def in_session_end(now: datetime, start: tuple[int, int]) -> bool:
+    """Weekday, from `start` (h, m) to the 18:00 ET reopen: no new risk, and from 15:55 everything goes flat."""
+    return now.weekday() < 5 and start <= (now.hour, now.minute) < (18, 0)
 
 
 def never_delivered(exc: BaseException) -> bool:
@@ -164,7 +181,7 @@ class TradersPostRouter:
         """Turn the bots' trade events into real orders. The shared webhooks follow the bots exactly;
         per-account webhooks follow `book` (accounts.py): which accounts join a trade, take an add,
         and how many contracts each holds."""
-        if not (self.armed and self.queue):
+        if not self.queue:
             return
         for ev in events:
             if ev["type"] not in ("trade_open", "trade_add", "trade_trim", "trade_close"):
@@ -173,26 +190,26 @@ class TradersPostRouter:
             if bot is None or bot.cfg.instrument != "future":
                 continue
             symbol = bot.cfg.underlying
+            if not self.armed and not (ev["type"] in ("trade_trim", "trade_close") and symbol in self.open):
+                continue   # disarmed: nothing new goes out, but a real position already open is still managed to flat
             try:
                 self.last_px[symbol] = round(engine.market.underlyings[symbol].price, 2)
             except (AttributeError, KeyError, TypeError):
                 pass
             if ev["type"] == "trade_open":
-                if getattr(engine.market, "minutes_to_flat", 99) <= 10:   # the broker's session ends at 16:00 ET
-                    self.blocked += 1
-                    self._log(symbol, {"action": "skip-open"}, "after 15:50 ET: Tradovate's session ends at 16:00", 0)
+                if getattr(engine.market, "minutes_to_flat", 99) <= 10 or in_session_end(wall_clock_et(), (15, 50)):
+                    # by the candle's time or the real clock (a late feed): Tradovate's session ends at 16:00 ET
+                    self._skip_open(symbol, ev["bot"], book, "after 15:50 ET: Tradovate's session ends at 16:00")
                     continue
                 if delay_min > MAX_DATA_DELAY_MIN:
-                    self.blocked += 1
-                    self._log(symbol, {"action": "skip-open"}, f"data {delay_min:.1f} min old", 0)
+                    self._skip_open(symbol, ev["bot"], book, f"data {delay_min:.1f} min old")
                     continue
                 side = "buy" if ev["contract"].endswith("LONG") else "sell"
                 contract = front_month(symbol)
                 urls = list(dict.fromkeys(self.webhooks + (book.entry_targets(ev["bot"]) if book else self.account_urls())))
                 targets = {u: ev["qty"] for u in urls}
                 if not targets:
-                    self.blocked += 1
-                    self._log(symbol, {"action": "skip-open"}, "no account may take new trades now", 0)
+                    self._skip_open(symbol, ev["bot"], book, "no account may take new trades now")
                     continue
                 self.open[symbol] = {"side": side, "qty": ev["qty"], "contract": contract, "targets": targets}
                 self._enqueue(symbol, {"action": side, "quantity": ev["qty"], "orderType": "market",
@@ -200,6 +217,8 @@ class TradersPostRouter:
             elif ev["type"] == "trade_add" and symbol in self.open:
                 if delay_min > MAX_DATA_DELAY_MIN:
                     self.blocked += 1
+                    if book:
+                        book.add_skipped(ev["bot"], ev["qty"])   # the accounts never got these contracts
                     continue
                 pos = self.open[symbol]
                 pos["qty"] += ev["qty"]
@@ -215,7 +234,9 @@ class TradersPostRouter:
                 # resize = "end at this many contracts": TradersPost only sends the difference,
                 # so a repeat or a missed fill can't over-trim. Never blocked: it only reduces risk.
                 pos = self.open[symbol]
-                pos["qty"] = left = max(1, pos["qty"] - ev["qty"])
+                # end at what the bot keeps, never above what we actually hold (an add we skipped isn't there)
+                left = min(pos["qty"], ev["left"]) if ev.get("left") else pos["qty"] - ev["qty"]
+                pos["qty"] = left = max(1, left)
                 own = book.target_qty(ev["bot"]) if book else {}
                 targets = _targets(pos)
                 for u, q in targets.items():
@@ -228,6 +249,23 @@ class TradersPostRouter:
                 pos = self.open.pop(symbol)
                 self._enqueue(symbol, {"action": "exit", "cancel": True}, ev["bot"], pos["contract"], list(_targets(pos)) or None)
         self._save()
+
+    def _skip_open(self, symbol: str, bot: str, book, why: str) -> None:
+        self.blocked += 1
+        self._log(symbol, {"action": "skip-open"}, why, 0)
+        if book:
+            book.entry_skipped(bot)   # the accounts are not in this trade: don't book its P&L to them
+
+    def flatten_open(self, reason: str) -> list[str]:
+        """Exit every position open for real now, without disarming (the wall-clock session end, a news flatten).
+        The bots' own closes for these symbols later find nothing open and send nothing."""
+        closed = list(self.open)
+        for symbol in closed:
+            pos = self.open.pop(symbol)
+            self._enqueue(symbol, {"action": "exit", "cancel": True}, reason, pos["contract"], list(_targets(pos)) or None)
+        if closed:
+            self._save()
+        return closed
 
     def flatten_all(self, symbols: list[str]) -> None:
         for symbol in set(symbols) | set(self.open):

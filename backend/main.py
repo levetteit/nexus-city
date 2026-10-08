@@ -103,7 +103,8 @@ async def run_live() -> None:
     await asyncio.to_thread(calendar.refresh, True)
     market = await asyncio.to_thread(live.LiveMarket)
     from . import forge
-    engine = Engine(market=market, account=live.load_account(), news=calendar,
+    # the newest candle decides the trading day, as it does for the engine's own day roll (no double roll)
+    engine = Engine(market=market, account=live.load_account(now=market.timeline[-1][0]), news=calendar,
                     params=forge.live_params(live.DATA_DIR) or None)   # settings you promoted from the Strategy Forge
     live.load_careers(engine)
     asyncio.create_task(run_forge())
@@ -139,6 +140,7 @@ async def run_live() -> None:
                 print(redact(f"live poll failed: {exc}"))
         market.release()   # candles pushed by the real-time TradingView feed
         et = datetime.now(timezone.utc).astimezone(ET)
+        _guarded("wall-clock flatten", _wallclock_flatten, router, calendar, et)   # before any candle (audit T-H4)
         if desk.enabled and et.weekday() < 5 and (8, 40) <= (et.hour, et.minute) < (9, 25) and morning_done != et.date().isoformat():
             morning_done = et.date().isoformat()
             asyncio.create_task(run_desk("morning"))
@@ -174,6 +176,27 @@ async def run_live() -> None:
         except Exception as exc:
             _loop_error("watchdog / broadcast", exc)
         await asyncio.sleep(1)
+
+
+def _wallclock_flatten(router, calendar, now) -> list[str]:
+    """Exit real positions on time even when candles are late or stopped (audit T-H4): from 15:55 ET, and inside a
+    news-flatten window. The bots close their paper positions when their own candle comes; the router has
+    nothing left to send for them by then."""
+    from .execution import in_session_end
+    if not router.open:
+        return []
+    if in_session_end(now, (15, 55)):
+        why = "15:55 ET by the clock: flat before Tradovate's 16:00 session end"
+    else:
+        event = calendar.flatten_for(now) if calendar else None
+        if not event:
+            return []
+        why = f"news by the clock: {event.label}"
+    closed = router.flatten_open(why)
+    if closed and notifier:
+        notifier.send("⏱️ Real positions closed on time", f"{', '.join(closed)}: {why}. The bots' candles were late.",
+                      "trade")
+    return closed
 
 
 # ---------------------------------------------------------------- supervising the trading loop (audit C-1)
@@ -915,7 +938,7 @@ async def account_sync(request: Request) -> dict:
 def _save_account() -> None:
     if MODE == "live":
         from . import live
-        live.save_account(engine.account)
+        live.save_account(engine.account, now=engine.market.now)
 
 
 @app.post("/api/account/reset")

@@ -65,3 +65,14 @@ def _guarded_getaddrinfo(host, *args, **kwargs):
         raise RuntimeError(f"tests must not use the network (tried to resolve {host}); fake the connector "
                            "or mark the test @pytest.mark.live")
     return _real_getaddrinfo(host, *args, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _fixed_wall_clock(monkeypatch):
+    """The order router also checks the real clock (no new entries after 15:50 ET). Pin it to a Wednesday at
+    11:00 ET so no test depends on what time CI runs. Tests about the clock set their own time."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from backend import execution
+    monkeypatch.setattr(execution, "wall_clock_et",
+                        lambda: datetime(2026, 10, 7, 11, 0, tzinfo=ZoneInfo("America/New_York")), raising=False)

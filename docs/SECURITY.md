@@ -143,9 +143,11 @@ puts an offer in front of buyers. Set `NEXUS_POLICY_STRIPE=owner` (or any other 
 
 | Safeguard | Behaviour |
 |---|---|
-| Arming | Real orders are off until the owner arms them with an explicit `ARM` confirmation. Flatten-all also disarms |
+| Arming | Real orders are off until the owner arms them with an explicit `ARM` confirmation. Disarming stops new entries and adds, but a position already open for real still gets its trims and exit until it's flat. Flatten-all exits everything and disarms |
 | Data freshness | New entries and adds are blocked when prices are more than 2.5 minutes old |
-| Session cutoffs | No entries or adds from 15:50 ET; positions are flattened at 15:55 ET (Tradovate's micro session ends at 16:00) |
+| Session cutoffs | No entries or adds from 15:50 ET, by the candle's time or the real clock. From 15:55 ET by the real clock, and inside a news-flatten window, open real positions are exited even if no candle has arrived (Tradovate's micro session ends at 16:00) |
+| Restart and the trading day | Today's halt, losing streak and day peak survive a restart on the same trading day; a restart across the 18:00 ET open rolls the day once |
+| Accounts follow real orders | An entry or add the router skips is taken back from the account book, so its P&L isn't booked to accounts that never had it; trims never resize below what is really held |
 | Account rules | Daily goal, cap and stop; maximum loss limit; losing-streak stop; contract limits; news blackouts (`backend/account.py`, `backend/news.py`) |
 | Exits | Sent as TradersPost `exit` / `resize`, which can only reduce a position, never reverse it |
 | Restart | Positions the router had open, and exits that were still queued, are closed on startup before any market download, because the bots restart flat |
@@ -157,10 +159,9 @@ puts an offer in front of buyers. Set `NEXUS_POLICY_STRIPE=owner` (or any other 
 **Fixed in the trading-reliability work:** C-1 (loop supervision), T-H2 (duplicate entries), T-H3 (order worker),
 T-H5 (engine changes from worker threads) and T-H6 (restart flatten waited for Yahoo).
 
-**Known gaps, approved, not yet implemented** (they change trading behaviour; see `docs/ENGINEERING_AUDIT.md`):
-- **T-H1:** exits are not sent while disarmed.
-- **T-H4:** time-based exits depend on candle arrival.
-- **T-H7:** a restart clears account halts.
+**Also fixed, changing trading behaviour as approved by the owner:** T-H1 (exits while disarmed), T-H4 (wall-clock
+flatten), T-H7 (halts survive a restart), M-4 (account book follows skipped orders) and M-11 (late candles
+applied). See `docs/ENGINEERING_AUDIT.md` §14.
 
 ## 8. Financial safeguards
 

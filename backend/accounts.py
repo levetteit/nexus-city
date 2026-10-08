@@ -61,6 +61,7 @@ class AccountBook:
         self.bot_qty: dict[str, int] = {}                # bot id -> contracts the bot itself holds
         self.trade_pnl: dict[str, dict[str, float]] = {} # bot id -> {account id: P&L already banked by trims}
         self.last_add: dict[str, list[str]] = {}         # bot id -> webhooks that took its latest add
+        self.last_add_ids: dict[str, list[str]] = {}     # bot id -> account ids that took its latest add
         if os.path.exists(self.path):
             with open(self.path) as f:
                 self.accounts = [Linked.from_json(d) for d in json.load(f)]
@@ -115,10 +116,11 @@ class AccountBook:
                 self.bot_qty[bot], self.trade_pnl[bot], self.last_add[bot] = q, {}, []
             elif kind == "trade_add":
                 add, members = ev["qty"], self.in_trade.get(bot, {})
-                self.last_add[bot] = []
+                self.last_add[bot], self.last_add_ids[bot] = [], []
                 for a in self._members(bot):
                     if not a.webhook or (a.account.can_trade and self._open_qty(a) + add <= a.account.max_micros):
                         members[a.id] += add
+                        self.last_add_ids[bot].append(a.id)
                         if a.webhook:
                             self.last_add[bot].append(a.webhook)
                 self.bot_qty[bot] = ev["total"]
@@ -192,6 +194,21 @@ class AccountBook:
     @staticmethod
     def _alert(a: Linked, what: str, text: str) -> dict:
         return {"type": "acct_event", "account": a.id, "name": a.name, "what": what, "text": text}
+
+    # ---------------------------------------------------------------- the router's corrections (audit M-4)
+    def entry_skipped(self, bot: str) -> None:
+        """The router didn't send this bot's entry (stale data, after 15:50, nobody allowed): no account is in the
+        trade, so none of its P&L is booked to them."""
+        self.in_trade[bot] = {}
+        self.last_add[bot], self.last_add_ids[bot] = [], []
+
+    def add_skipped(self, bot: str, qty: int) -> None:
+        """The router didn't send this bot's add: take it back from the accounts that were counted in."""
+        members = self.in_trade.get(bot, {})
+        for aid in self.last_add_ids.get(bot, []):
+            if aid in members:
+                members[aid] = max(0, members[aid] - qty)
+        self.last_add[bot], self.last_add_ids[bot] = [], []
 
     # ---------------------------------------------------------------- routing (execution.py asks these)
     def entry_targets(self, bot: str) -> list[str]:

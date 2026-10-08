@@ -20,6 +20,9 @@ class Book:
     def entry_targets(self, bot): return [A, B]
     def add_targets(self, bot): return [A]
     def target_qty(self, bot): return {A: 4, B: 3}
+    skipped: list = []
+    def entry_skipped(self, bot): self.skipped.append(("entry", bot))
+    def add_skipped(self, bot, qty): self.skipped.append(("add", bot, qty))
 
 
 def router(tmp_path, shared=()):

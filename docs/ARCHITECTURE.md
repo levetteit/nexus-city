@@ -210,13 +210,13 @@ flowchart TD
    |---|---|
    | Armed | Off until the owner sends `ARM`; flatten-all also disarms |
    | Data freshness | Entries and adds are refused when prices are more than 2.5 minutes old; exits always go |
-   | Session cutoff | No entries from 15:50 ET; the bots flatten by 15:55 (Tradovate's micro session ends at 16:00) |
+   | Session cutoff | No entries from 15:50 ET (candle time or real clock); real positions flattened from 15:55 by the real clock, and in news-flatten windows (Tradovate's micro session ends at 16:00) |
    | Ownership | Adds and exits only for positions this router opened |
 
    Allowed orders go onto a queue. A worker posts them to TradersPost, retries failures and logs every attempt to `orders.csv` with the URLs masked.
 6. **Restart.** `router.start()` sends exits for any position the previous process left open, because the bots restart flat.
 
-The remaining approved gaps in this flow (audit **T-H1, T-H4, T-H7**) are listed in [SECURITY.md](SECURITY.md#7-trading-safeguards).
+When disarmed, the router still sends trims and exits for positions it already holds (no new entries or adds). The live loop also runs `_wallclock_flatten` before each batch of candles, so a late or stopped feed can't hold a real position past 15:55 ET. All trading safeguards are listed in [SECURITY.md](SECURITY.md#7-trading-safeguards).
 
 ### 4.2 Changing the strategy safely
 
