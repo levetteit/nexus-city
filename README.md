@@ -43,6 +43,8 @@ flowchart LR
 - **One process.** The trading loop, the station scheduler and the web server are asyncio tasks in one process.
 - **No database.** State lives in JSON and JSONL files on a mounted disk, written atomically. See [docs/PERSISTENCE.md](docs/PERSISTENCE.md).
 
+The full design, with the AI workflow, the trading flow and the order safety checks, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Key capabilities
 
 **Trading (City)**
@@ -163,12 +165,13 @@ Step-by-step hosting, phone alerts and monitoring are in [docs/OPERATIONS.md](do
 1. **Trading reliability:** supervise the trading loop and make `/healthz` detect a stall. Send exits while disarmed, use wall-clock flatten timing, keep account halts across restarts, and retry orders safely.
 2. **Persistence:** move from JSON files to PostgreSQL along the schema already designed in [docs/PERSISTENCE.md](docs/PERSISTENCE.md), once the data outgrows one disk.
 3. **Station:** reconnect the expired social tokens, finish the Pinterest app review, and test channels with real traffic.
-4. **Docs:** an architecture document with diagrams, and a modernization report.
+4. **Docs:** a modernization report.
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, runtime model, the AI workflow, the trading flow, persistence, design decisions |
 | [docs/CITY.md](docs/CITY.md) | The 3D city: weather, streamer rooms, skins, shuttles, the shared world |
 | [docs/TRADING.md](docs/TRADING.md) | The strategy, sizing, sessions, prop account rules, real-data results, backtesting, Strategy Forge |
 | [docs/LIVE_TRADING.md](docs/LIVE_TRADING.md) | Live paper trading, the news filter, the AI trading desk, reports, real orders, TradingView setup |
