@@ -1,0 +1,4 @@
+# Only for rebuilding a kit's PDFs and images from kits/<kit>/source (not needed to run the app).
+reportlab>=4,<6
+fonttools>=4.40,<5
+Pillow>=10.1,<13

@@ -1,8 +1,9 @@
 # Nexus City: trading city + AI operations station. Works on Render, Fly.io, Railway or any Docker host.
 FROM python:3.12-slim
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# exact versions from the lockfile (requirements.txt holds the ranges it was resolved from)
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 COPY backend backend
 COPY frontend frontend
 COPY kits kits
