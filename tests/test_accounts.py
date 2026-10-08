@@ -39,7 +39,7 @@ def test_stopped_accounts_skip_new_entries(tmp_path):
     book = AccountBook(str(tmp_path))
     done = book.add("Done", "evaluation", 50_000, 48_000, webhook="https://tp/done")
     done.account.halted = "profit target reached"
-    live = book.add("Live", "evaluation", 50_000, 48_000, webhook="https://tp/live")
+    book.add("Live", "evaluation", 50_000, 48_000, webhook="https://tp/live")
     book.observe(engine(), [{"type": "trade_open", "bot": "b", "contract": "MNQ LONG", "qty": 3}])
     assert book.entry_targets("b") == ["https://tp/live"]
 

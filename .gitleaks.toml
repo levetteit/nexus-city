@@ -1,0 +1,12 @@
+# Secret scanning (gitleaks), run in CI on every push and pull request.
+# The default rules apply everywhere. The only exceptions are two test files that contain deliberately FAKE
+# credentials, used to prove that secrets are masked out of errors and logs. Nothing else is allowlisted.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "fake credentials in the redaction tests"
+paths = [
+  '''^tests/test_secrets\.py$''',
+  '''^tests/test_reliability\.py$''',
+]

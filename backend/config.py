@@ -15,7 +15,6 @@ set params={"signals": "tradingview"} to trade only your indicator's alerts.
 Account-level risk (prop firm rules, daily stop, contract budget) lives in
 `account.py`. Pass strategy settings through `params` (see `proc.DEFAULTS`).
 """
-import os
 
 from .env import env
 from .bots.base import BotConfig

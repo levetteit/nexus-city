@@ -14,7 +14,6 @@ touch the trading bots' orders and risk. Each of those is an approval that waits
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo

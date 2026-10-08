@@ -1,7 +1,6 @@
 """Failure paths: what happens when Claude, a connector, OAuth or a webhook misbehaves, and that repeated events have
 no repeated effect. Everything outside is faked; nothing here reaches a real service."""
 import asyncio
-import json
 import time
 import urllib.error
 from types import SimpleNamespace

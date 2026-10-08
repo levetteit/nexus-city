@@ -61,6 +61,23 @@ The suite has three kinds of tests:
 - `test_twenty_one_day_baseline` needs 21 days of candle files in `data/` and is skipped without them.
 - `test_web_push_drops_phones_that_unsubscribed` needs `py-vapid` from `requirements.lock`.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and on every pull request. It has four jobs:
+
+| Job | What it checks |
+|---|---|
+| `lint` | Every Python file byte-compiles; `pyflakes` finds no undefined names, unused imports or shadowing |
+| `pytest` | The full suite on Python 3.12 with the exact locked dependencies, plus a coverage summary |
+| `security` | `gitleaks` over the **whole git history** (config: `.gitleaks.toml`); `pip-audit` of `requirements.lock` against known vulnerabilities |
+| `docker` | Builds the production image, starts it in simulation mode, and checks `/healthz`, the page and the API |
+
+Before you push, you can run the same checks locally:
+
+```bash
+python -m compileall -q backend tests kits && python -m pyflakes backend tests && python -m pytest -q
+```
+
 ## Dependencies
 
 | File | What it is |

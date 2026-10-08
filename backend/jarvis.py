@@ -26,7 +26,6 @@ Auth: the same NEXUS_JARVIS_TOKEN as the briefing (Bearer header).
 """
 from __future__ import annotations
 
-import os
 
 from .station.store import now_iso
 

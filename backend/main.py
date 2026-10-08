@@ -1161,7 +1161,7 @@ def station_connect_callback(service: str, code: str = "", state: str = "", erro
     except connectors.ConnectorError as exc:
         return f"<p>{service.title()} wasn't connected: {html.escape(str(exc))}. <a href='/station.html#/marketing'>Back</a></p>"
     _station().store.event("connector.connected", "owner", f"{service.title()} connected")
-    return RedirectResponse(f"/station.html#/marketing")
+    return RedirectResponse("/station.html#/marketing")
 
 
 @app.post("/api/station/actions/{rid}/{what}")
