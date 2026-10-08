@@ -109,5 +109,5 @@ frontend/           the 3D city, the station board, rooms and charts (vanilla JS
 tests/              pytest suite (fixtures/ holds 5 days of real 1-minute candles)
 kits/               owner-made products the station can publish
 tradingview/        Pine script that streams 1-minute candles to the app
-docs/               architecture, security, persistence, migration and audit documents
+docs/               the deep documentation: city, trading, live trading, station, operations, security, persistence, audit
 ```

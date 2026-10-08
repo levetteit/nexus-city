@@ -2,1068 +2,184 @@
 
 [![CI](https://github.com/levetteit/nexus-city/actions/workflows/ci.yml/badge.svg)](https://github.com/levetteit/nexus-city/actions/workflows/ci.yml)
 
-> Formerly **StarNet / Starnet City**. Every `NEXUS_*` setting below also accepts its old `STARNET_*` name; see [docs/MIGRATION_FROM_STARNET.md](docs/MIGRATION_FROM_STARNET.md).
+**A 3D operations dashboard where trading bots and AI agents work under human-set rules.**
 
-A live 3D "trading city": each Python bot is a **worker** living in its own
-building and trading micro futures (**MNQ, MES, M2K**) with the **Andrew Macre
-pointer strategy**. All workers share **one prop firm account** whose rules
-(Lucid Trading, LucidFlex 50K by default) they're built to pass: first the
-evaluation, then the funded stage. They watch every session from the 18:00 ET
-open to the 16:45 ET flat deadline and take new entries in the **London,
-NY AM and NY PM killzones**, aiming for **$600–$1,200 a day**. When a worker is in a trade its
-building fires a light beam into the sky. When it closes a trade, gold coins (or
-red ones) roll down its road to **The Vault** in the middle of town.
+Nexus City is a single FastAPI application with two sides:
+- **The City.** Python bots trade micro futures for a prop firm account. The MNQ bots are on by default, and the MES bots can be switched on. Each bot lives in its own building in a Three.js city.
+- **The Space Station.** ULTRON, a scheduler built on the Claude API, runs a crew of AI agents. They research, draft and operate small online ventures: digital products, an Etsy shop, social content and outreach.
 
-![city](docs/city.png)
+The two sides share one treasury and one audit log. Both run inside limits that code enforces: AI agents draft and propose; checks, caps, approvals and an emergency stop decide what actually reaches the outside world.
 
-## Market weather and skyline
+> Formerly **StarNet**. Old `STARNET_*` settings still work; see [docs/MIGRATION_FROM_STARNET.md](docs/MIGRATION_FROM_STARNET.md).
 
-The city's sky follows the market. Day and night follow the ET clock (dawn at 6, bright through the New York
-session, golden hour at 4:30, night after 9). The weather follows volatility: the last 30 minutes of MNQ range
-against the last day's — **storm** (lightning, heavy rain) at 1.8x or during a news hold, **rain** at 1.25x,
-**fog** when the tape is dead (0.55x or less), clear otherwise. The chip next to the fuel gauge names it.
-Each district's towers grow with its bot's best-ever profit (up to 1.8x at $16k), and the background skyline
-grows with the account's profit. Preview any sky with `/?weather=storm&hour=13`.
+## Screenshots
 
-## Owner-made products (`kits/`, `backend/station/kits.py`)
-
-A finished product you (or Jarvis) made outside the crew ships with the app as a kit. A kit is a folder in
-`kits/` holding the PDFs, the listing images, a 2:3 cover, the pins and a `kit.json` with compliance-checked
-listing copy. On startup the station imports it: PDFs go to the private products folder (served only after a
-verified payment) and images go to `media/`. The kit is then attached to its venture.
-
-It shows under **Marketing → Your finished products** and on the venture's page. **Publish**, with a price, is
-the go decision. It does three things:
-- creates a Stripe checkout and a storefront page, delivering every PDF after payment;
-- lists it on Etsy with all its images and files, when Etsy is connected (Etsy charges its listing fee);
-- posts the first pin, when Pinterest is connected. The remaining pins go out one a day.
-
-Nothing is listed until you press Publish. The first kit is the Caregiver Care Binder (V-006): 35 pages,
-US Letter + A4, 5 listing images, 10 pins. Its layout scripts are in `kits/caregiver-care-binder/source/`.
-
-## Payout shuttles (`frontend/shuttle.js`)
-
-Real money in flies. The Space Station now hangs over the city (tap it to go aboard). When you record a Lucid
-payout, a green shuttle lifts off from the vault and docks at the station's treasury; a store sale (Stripe,
-Etsy) comes in as a gold shuttle. On the station the same flights run from the City Dock or the shop to the
-Finance Observatory, whose panel keeps a shuttle log. Every flight is a ledger entry (`Treasury.flights()`):
-costs and paper profit never fly. Preview with `?shuttle=payout` or `?shuttle=sale`.
-
-## Skins and apparel (`frontend/skins.js`)
-
-Every robot has its own look, in the city (standing in front of its building), in its streamer room and on
-the space station: OG_Pointer in a backwards cap and chain, SixMinuteSage in a beanie and prayer beads,
-SPX_Scout in glasses and a bow tie, SweepQueen with cat ears and neon shades, TheLookout in a visor and goggles;
-ULTRON wears a commander's crest, QA a hard hat, the Auditor a monocle, and so on.
-
-More apparel is **earned from real results and never taken back**:
-
-| Trading bots (lifetime P&L high-water mark) | Station crew (milestones from the audit log) |
+| The City | A bot's streamer room |
 |---|---|
-| $100 star pin · $1,000 gold shades · $5,000 gold chain + $ pendant · funded account: funded wings · $10,000 cape · $25,000 gold crown (and a gold chassis) · $50,000 gold jetpack | First delivery: star pin · Reliable: station scarf · Veteran: gold shades · Legend: cape · Hall of Fame: gold crown |
+| ![The city: one building per bot, beams for open trades](docs/city.png) | ![A bot's room: live chart, P&L and stream chat](docs/room.png) |
 
-An earned item replaces the signature one in the same slot when it ranks higher. Tap **STATS** in a room (or
-a crew member on the station) for its wardrobe: what it wears and what it can still earn.
+To try it locally, run the simulation (see [Local setup](#local-setup)). It needs no keys or accounts.
 
-## Streamer rooms
+## Architecture overview
 
-Tap any building to go inside: its bot is a little robot streamer at a desk,
-with three monitors:
+```mermaid
+flowchart LR
+    TV[TradingView 1m candles] --> API
+    Y[Yahoo delayed candles] --> API
+    subgraph App[FastAPI app]
+        API[REST + WebSocket + password gate] --> Engine[Trading engine: bots + prop account rules]
+        Engine --> Router[Order router: armed by the owner]
+        API --> Ultron[ULTRON scheduler]
+        Ultron --> Crew[AI agents via Claude API]
+        Crew --> Outbox[Outbox: QA, policy, caps, E-STOP]
+        Engine --> Store[(JSON / JSONL store + audit log)]
+        Ultron --> Store
+    end
+    Router --> TP[TradersPost → Tradovate]
+    Outbox --> Ext[Stripe · Etsy · Meta · Pinterest · email]
+    API --> UI[Browser: 3D city, station, boards]
+```
 
-- **Chart**: its live 1m candles with the untapped FFVG/IFFVG zones it's
-  watching, the current PROC box, its entry and the next-zone target.
-- **P&L**: today, the open position, recent wins/losses, career earnings and
-  progress to its next gadget.
-- **Stream chat**: viewers reacting to every entry, add, win and loss.
+- **One process.** The trading loop, the station scheduler and the web server are asyncio tasks in one process.
+- **No database.** State lives in JSON and JSONL files on a mounted disk, written atomically. See [docs/PERSISTENCE.md](docs/PERSISTENCE.md).
 
-Each bot has its own persona (handle, vibe, props and catchphrases in
-`persona` in `config.py`) and shows how it feels: typing while it scans, a
-"?" while it waits for MES to confirm, sweating in a losing trade, jumping with
-arms up and coins flying on a win, hands on head under a rain cloud on a loss,
-sunglasses when the day is locked in, slumped when the account stops it,
-asleep when it's switched off. Its face is a little screen.
+## Key capabilities
 
-**The more a bot makes, the fancier its setup.** Gadgets unlock from its
-best-ever lifetime earnings and are never taken back: RGB racing chair ($500),
-4th monitor ($1k), hexagon LED wall ($2.5k), gold trophy + neon $ ($5k), wall
-of screens ($10k), aquarium ($25k), gold-plated chassis ($50k), penthouse view
-($100k). 💎 on a building's label shows how upgraded it is. In live mode,
-lifetime earnings are saved in `data/paper_bots.json`.
+**Trading (City)**
+- **The strategy:** a rules-based intraday strategy (PROC: fair-value-gap taps plus multi-timeframe pointers), read on NQ/ES and executed on the micros.
+- **Account rules:** prop firm rules are modelled in code: drawdown, daily goal, cap and stop, consistency limits and payouts.
+- **Backtesting:** a backtester and walk-forward optimizer that replay real 1-minute candles. Strategy Forge tests candidate changes, runs the survivors as shadow paper bots, and leaves promotion to the owner.
+- **Live paper trading:** runs on real candles, with a news blackout filter, daily reports and a check of live trading against a replay.
+- **Real orders (optional):** sent through TradersPost, guarded by an explicit `ARM`, stale-data blocks, session cutoffs and a flatten-and-disarm.
 
-![room](docs/room.png)
+**AI operations (Space Station)**
+- **The crew:** ULTRON schedules a crew of agents: research, validation, marketing, content, outreach, QA and an auditor. Every agent call uses structured outputs.
+- **The board:** ventures move through stages on a Command Board, with approvals, tasks, a War Room review and lessons the agents carry forward.
+- **The outbox:** every outbound action (post, email, listing, payment link) is a draft first. It passes a compliance check, a per-kind send policy and daily caps, and it stops at an emergency stop.
+- **Money:** one treasury with per-venture P&L, AI spend caps and a hash-chained ledger. Only real, verified money counts.
+- **Jarvis API:** a token-protected endpoint lets an outside operator act on the board within a fixed allowlist. It is refused for anything that touches money, trading or accounts.
 
-## Run it
+## Technology stack
+
+| Area | Tools |
+|---|---|
+| Backend | Python 3.12, FastAPI, Uvicorn, asyncio, WebSockets |
+| AI | Anthropic Claude API (structured outputs, web search tool) |
+| Frontend | Vanilla ES modules, Three.js, a hand-written canvas chart; installable as a phone app (manifest and service worker) |
+| Integrations | TradersPost, TradingView (Pine script webhook), Yahoo Finance, Stripe, Etsy, Printify, Meta Graph API, Pinterest, SMTP/IMAP, ntfy and Web Push |
+| Storage | JSON and JSONL files with atomic writes and a hash-chained ledger |
+| Delivery | Docker, Render (blueprint in `render.yaml`), GitHub Actions |
+| Quality | pytest (unit and integration), coverage, pyflakes, gitleaks, pip-audit |
+
+## Safety and human-in-the-loop model
+
+| Area | What a human must do | What code enforces regardless |
+|---|---|---|
+| Real orders | Arm execution with an explicit `ARM`; promote any strategy change | Stale-data blocks, 15:50 ET entry cutoff, 15:55 ET flatten, account loss limits, exits that can only reduce a position |
+| Money | Approve spending, funding and goals; record payouts | No code path moves money; income is booked only from the owner or signed Stripe events; AI budget caps |
+| Outbound actions | Optionally require approval per kind (`NEXUS_POLICY_*=owner`) | Compliance check, daily caps, emergency stop, connector checks, idempotent Stripe calls |
+| Ventures | Kill a venture; open accounts | Auto-launch limits (score, one a day, 3 live) and an automatic close after 21 days with no sale |
+| Everything | | An append-only audit log of who changed what and why |
+
+> By default, outbound actions that pass the compliance check are sent automatically
+> (`NEXUS_POLICY_*=auto`). Set the policy to `owner` for any kind that should wait for a person.
+
+Full details: [docs/SECURITY.md](docs/SECURITY.md), including its threat model and known limitations.
+
+## Project structure
+
+```text
+backend/            FastAPI app (main.py), trading engine, bots, prop account, order router, backtester, Strategy Forge
+backend/station/    ULTRON, agents, connectors, outbox, store, treasury
+frontend/           the 3D city and station, the Command Board, rooms and charts
+tests/              pytest suite (fixtures/ holds 5 days of real 1-minute candles)
+kits/               finished products the station can publish
+tradingview/        Pine script that streams 1-minute candles to the app
+docs/               the deep documentation (index below)
+```
+
+## Local setup
 
 ```bash
-pip install -r requirements.txt
-uvicorn backend.main:app --reload
-# open http://localhost:8000
+git clone https://github.com/levetteit/nexus-city.git && cd nexus-city
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.lock -r requirements-dev.txt
+uvicorn backend.main:app --reload        # http://localhost:8000, simulated market, no keys needed
 ```
 
-`NEXUS_TICK_SECONDS=0.1 uvicorn backend.main:app` runs the market 10× faster.
+`NEXUS_TICK_SECONDS=0.1` runs the simulated market 10× faster. More detail is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-- **Click a building** to open that worker's card: strategy, open position, recent trades, and a button to send it home or put it back on shift.
-- **Click the vault** for today's payroll.
+## Environment configuration
 
-## How it's built
+Every setting is listed in [`.env.example`](.env.example), grouped by area and with placeholders only. Copy it to `.env`, which git ignores, and run with `--env-file .env`.
 
-```
-backend/
-  market.py      simulated MNQ / MES / M2K prices with 1-minute OHLC candles
-  broker.py      PaperBroker: micro futures (tick slippage + fees; options still supported). Implement open/close/mark to go live
-  account.py     the shared prop firm account: LucidFlex / LucidPro 50K rules, EOD drawdown, daily goal / cap / stop, contract budget
-  bots/base.py   the worker lifecycle: scanning → in_trade → off_duty / stopped / walked; 3 → 6 contract sizing
-  bots/proc.py   the Macre PROC strategy (FFVG/IFFVG taps + 3-6m pointers)
-  config.py      who lives in the city
-  backtest.py    replay real 1m candles through the bots; walk-forward optimizer
-  fetch_data.py  download free 1m NQ / ES / RTY futures history (Yahoo, ~30 days)
-  live.py        live paper trading on real candles (Yahoo, or real-time via TradingView), with trade logs
-  scale.py       the Lucid scale plan: accounts by stage, next payouts, when to buy the next evaluation
-  execution.py   real orders to your Lucid accounts via TradersPost (armed from the city, with safety checks)
-  notify.py      phone notifications for every trade (web push to the home-screen app, or ntfy)
-station/       the Space Station: ULTRON, the Research Station, ventures, approvals, the shared treasury
-frontend/station3d.html  the 3D orbital station: ULTRON's core, every module, the crew at work, pets, ventures as planets
-frontend/station.html  the station's Command Board (Command, Approvals, Ventures, Research, Treasury, Crew, Log)
-frontend/room.js  the bots' streamer rooms: robot, monitors, emotions, gadgets
-Dockerfile, render.yaml   one-click hosting (password-protected) so you can watch from your phone
-  engine.py      ticks the market and every bot, builds the snapshot
-  main.py        FastAPI: WebSocket /ws, REST /api/state, /api/bots/{id}/{on|off}
-frontend/
-  city.js        Three.js scene: buildings, beams, halos, roads, coins, bloom, labels
-```
-
-### The strategy: PROC (`backend/bots/proc.py`)
-
-A rebuild of the indicators on your TradingView chart (PROC – Pointer Range of
-Control, Untapped FFVGs & IFFVGs, Troop Toolkit), computed from 1-minute candles:
-
-1. **FFVG**: the first fair value gap after a confirmed swing high/low on any
-   1–6 minute timeframe, within 6 candles of the swing (your "Sweep Proximity 6").
-2. **Tap**: the first time any 1-minute wick trades into an untapped FFVG.
-3. **IFFVG**: an FFVG that a candle on its own timeframe closes fully through
-   flips into an opposite zone that can be tapped the same way.
-4. **Pointer**: a 3/4/5/6-minute candle that closes inside the previous
-   candle's wick (beyond the body, within the high/low).
-5. **PROC = entry**: a pointer whose candle, or the one before it, made the
-   first-ever wick into a same-direction untapped FFVG/IFFVG. The bot enters
-   with 3 contracts and shows the next opposite zone as the expected move.
-6. **Add**: another PROC the same way while the trade is in profit → +3 (6 max).
-7. **Exit**: only on a PROC against the trade, i.e. a pointer against you on
-   another FFVG/IFFVG. No stop loss.
-8. **Walk away**: a PROC is invalidated when an opposite candle on its own
-   timeframe closes beyond its box; 3 of those in a day and the bot stops.
-9. **MNQ/MES correlation**: an MNQ PROC is only taken (or added to) when MES
-   agrees within 6 minutes before or after it, and vice versa. `confirm_mode`
-   sets how strict "agrees" is: `proc` (MES printed its own PROC the same way,
-   the default), `pointer` (a same-way 3–6m pointer) or `tap` (a wick into a
-   same-way FFVG/IFFVG). Exits never wait for confirmation. The bots keep both
-   markets' structure up to date even if only one of them is being traded.
-
-Settings (`params` in `config.py`, most tried by the optimizer): `confirm_with`,
-`confirm_mode`, `confirm_window`, `pointer_tfs`,
-`pivot_len`, `sweep_proximity`, `use_iffvg`, `walk_after`,
-`exit_on_invalidation`, `killzones` (Asia 20:00–00:00, London 02:00–05:00,
-NY AM 09:30–11:00, NY PM 14:00–16:00 ET), `require_liquidity_sweep` (the PROC
-must take one of those sessions' highs/lows, like Troop's liquidity levels).
-
-`backend/bots/pointer.py` is the earlier, simpler pointer bot, kept for reference.
-
-### Position size
-
-Every trade **starts at 3 contracts**. When another pointer forms in the trade's
-direction and the trade is in profit, the bot **adds 3 more, up to 6, never
-more**. The whole account holds at most **12 micros** at once (two bots at full
-size), and only one bot can hold a given symbol at a time, so they never take
-opposite sides of the same contract.
-
-### Trading day and sessions
-
-The simulated day matches the futures day under Lucid's flat rule: **18:00 ET
-open → Asia → London (03:00) → New York (09:30) → flat by 16:45 ET**. Bots track
-market structure the whole time but only open trades in the killzones London
-02:00–05:00, NY AM 09:30–11:00 and NY PM 14:00–16:00 ET (open trades run on
-until a PROC against them). **Tradovate's session for the micros ends at 16:00 ET**, so no new entries or adds
-after 15:50 and every trade is flattened at 15:55 (`market.FLAT_BY_MIN`); the real-order router also refuses a
-new entry after 15:50. The day still rolls at 16:45. On the 22 days of history this changed nothing: no trade
-was ever open past 15:55.
-
-### Real-data results (Sep 8 – Oct 5 2026, 21 days of 1m NQ/ES/RTY)
-
-| Settings | Profitable days | Total | Profit factor | Evaluations |
-|---|---|---|---|---|
-| **Defaults**: MNQ only (MES confirms), killzones London + NY AM + NY PM, pointer confirmation, swing length 6, stop after 3 losers in a row, $1,200 daily cap, −$600 daily stop | **71%** | **+$13,224** | **2.9** | 1 passed, 0 failed |
-| Same with a −$800 daily stop | 76% | +$11,847 | 2.73 | 1 passed, 0 failed |
-| Same with a $1,000 daily cap | 76% | +$10,173 | 2.63 | 1 passed, 0 failed |
-| Same, with MES and M2K bots also trading | 71% | +$10,321 | 1.86 | 1 passed, 0 failed |
-| Same, but entering in every session | 45% | −$515 | 0.97 | 0 passed, 2 failed |
-| Original settings (all sessions, PROC confirmation, swing length 2) | 48% | −$127 | 0.97 | 1 passed, 2 failed |
-
-On the last 7 days, which were never used for tuning, MNQ-only had 86%
-profitable days and +$4,252. Win rate is ~48%: winners average ~2.9× losers
-because trades only close on a PROC against them (or the daily cap).
-
-What the trade-level breakdown showed, and what was tried:
-
-- MNQ made +$9,645 while MES (−$197) and M2K (−$154) were breakeven → MNQ only.
-- Trades that grew to 6 contracts made +$11,047; trades that stayed at 3 lost
-  −$1,752. The edge is in adding to winners.
-- Trades closed within 15 minutes lost (chop); trades held 60+ minutes won 72%.
-- Losing days went straight to the −$800 stop without ever being up much →
-  stop after 3 losing trades in a row.
-- The daily cap does most of the profit-taking. $1,200 beat $1,000 (+16%, same
-  consistency); $1,500 made more but fewer profitable days and a best day over
-  Lucid's $1,500 consistency limit.
-- Tested and rejected (worse when re-run): dropping 5m pointers, exiting only
-  on an opposite PROC of the same or higher timeframe, a 2-loss streak stop,
-  adding on MNQ's own pointers, an $800 goal or no goal, a profit lock that
-  stops a green day from giving back (`lock_trigger` / `lock_floor`), 3 or 10
-  minute confirmation windows, FFVGs only (IFFVGs carry a lot of the edge),
-  and requiring a liquidity sweep (cut profit by ~90%).
-- Robustness: with 2-3 ticks of slippage per side instead of 1 the results
-  barely change, so the edge isn't living on perfect fills.
-- Daily stops of −$600 and −$1,000 both beat −$800 on total profit, which
-  shows how much of the difference between settings is noise on 21 days.
-  Adding on an MES pointer (`add_on:
-  "partner_pointer"`) made more money but fewer profitable days and a best day
-  over $1,500: worth re-testing as more data comes in. 21 days is a small sample:
-keep fetching data and re-running the backtest as history grows.
-
-### Trims and the 5-minute chart (tested Oct 2026)
-
-**Trims (partial profits).** Setting `params={"trim": True}` makes a bot close part of the
-position each time price reaches the next untapped opposite FFVG/IFFVG in the
-trade's direction. The last contract always runs until a pointer against, and
-PROCs with the trade can add back up to 6. These settings tune it:
-
-| Setting | What it does |
-| --- | --- |
-| `trim_frac` | Share of open contracts closed at each zone |
-| `trim_min_tf` | Only zones of this timeframe or higher count |
-| `trim_min_pts` | Only zones at least this many points from entry count |
-| `trim_max` | Most trims per trade |
-| `trim_fill` | `limit` at the zone edge, or `close` (market order after the candle) |
-
-On real accounts each trim is sent to TradersPost as a `resize` to the remaining size.
-
-On the 21 real days, **no trim setting made more money than no trims**:
-
-| Setting | Total | Change |
-| --- | --- | --- |
-| No trims (default) | $13,224 | — |
-| Best trim: 3m+ zones, 30+ pts away, 1/3 each | $12,899 | −$325 |
-| Median of 36 trim settings | $11,886 | −$1,338 |
-| Trim at every next zone | $6,896 | about half |
-
-Every setting kept 71.4% green days. Trims shrink the size on the runners that
-make the money (average win $540 vs average loss $181), and the daily $600 goal
-and $1,200 cap already bank profits. So trims stay off by default.
-
-**The 5-minute chart.** The **MNQ 5/6M** bot already trades 5m pointers (`pointer_tfs: [5, 6]`).
-Results by entry timeframe:
-
-| Entry | Trades | P&L | Win rate |
-| --- | --- | --- | --- |
-| 3m PROC | 25 | +$6,521 | |
-| 4m PROC | 10 | +$2,322 | |
-| 5m PROC | 16 | −$755 | 31% |
-| 6m PROC | 18 | +$3,950 | |
-
-Removing 5m entries still made less overall ($11,362). Other ways of using the 5m, tested:
-
-| Setup | Total |
-| --- | --- |
-| Current: [3,4] + [5,6] | $13,224 |
-| Dedicated 5m bot | $12,474 |
-| 5m only | $3,417 |
-| 5m PROC/pointer as a direction filter (`bias_tf: 5`) | $17 – $4,119 |
-
-So the current setup stays.
-
-### Context filters: RSI, ICT day open, premium/discount, chop (tested Oct 6 2026)
-
-Optional entry filters in `bots/proc.py`, all **off by default**. Each one only removes PROCs; it never adds trades:
-
-| Setting | What it does |
-| --- | --- |
-| `rsi_filter` | `{"tf": 5, "period": 14, "ob": 70, "os": 30}`: no longs when RSI is overbought, no shorts when oversold. `"mode": "momentum"`: longs only with RSI above 50, shorts below |
-| `day_open_bias` | ICT true day open (00:00 ET): `"discount"` = longs below it, shorts above; `"trend"` = the reverse |
-| `range_bias` | Premium/discount of the previous trading day's range: `"discount"` = longs in its lower half, shorts in the upper; `"trend"` = the reverse |
-| `min_range_pts` | Chop filter: the average 1-minute high-low over the last 30 minutes must be at least this many points |
-
-Walk-forward on Yahoo's 1-minute data, Sep 8 – Oct 6: each filter judged on the first 15 days, then checked on the last 7.
-
-| Setting | First 15 days | Last 7 days |
-| --- | --- | --- |
-| **Current (no filter)** | **+$5,621** | **+$5,044** |
-| RSI 5m exhaustion 70/30 | +$5,261 | +$4,611 |
-| RSI 5m exhaustion 80/20 | +$6,601 | +$2,601 |
-| RSI 5m momentum | +$4,650 | −$1,433 |
-| RSI 15m momentum | +$2,390 | +$518 |
-| ICT day open, discount | −$912 | +$3,796 |
-| ICT day open, trend | +$2,287 | −$1,384 |
-| Previous-day range, discount | +$3,546 | +$3,526 |
-| Previous-day range, trend | +$2,542 | −$1,360 |
-| Chop filter 6 / 9 / 12 pts | +$5,541 / +$3,775 / +$1,482 | +$3,808 / +$3,028 / +$5,495 |
-
-None beat the current setup on both halves, so all stay off. The PROC already is an ICT-style structure entry
-(fair value gaps, inversions, killzones, SMT-like MES confirmation); the filters mostly removed good trades.
-Volume can't be tested yet: Yahoo's data has none. The feed script now sends volume and the server saves TradingView's candles (see Candle history), so it can be tested once a few weeks are collected.
-
-### Daily goal
-
-| | Default | What happens |
-|---|---|---|
-| Daily goal | **$600** closed profit | no new trades; open trades keep running until a pointer forms against them |
-| Daily cap | **$1,200** open + closed | flatten everything, done for the day |
-| Daily stop | **−$600** open + closed | flatten everything, done for the day (smaller when the account is near its drawdown) |
-
-### Prop firm account (`backend/account.py`)
-
-All bots trade one shared account with LucidFlex 50K rules:
-
-| Rule | LucidFlex 50K | What the bots do |
-|---|---|---|
-| Profit target | $3,000, at least 2 trading days | stop for the day once it's in hand; pass at the 16:45 close |
-| Drawdown | **End-of-day**: $2,000 below the highest *closing* balance, only moves at the close, locks at $50,100 once the account closes at $52,100 | never let a day's loss reach it (keep a $100 cushion). Equity touching it during the day is treated as a breach (the safe reading) |
-| Consistency | evaluation: best day ≤ 50% of profit; funded: none | the $1,200 cap keeps the best day under half the $3,000 target |
-| Daily loss limit | none | our own −$600 daily stop |
-| Max size | 40 micros | at most 12 micros open, 3–6 per trade |
-| Flat rule | flat by 16:45 ET, no overnight/weekend holds (Tradovate's micro session ends 16:00) | no entries after 15:50, flatten at 15:55 |
-
-`LUCIDPRO_50K` is also included (no evaluation consistency rule; 40% funded
-consistency and a $2,100 payout buffer). Use it with
-`PropAccount(rules=LUCIDPRO_50K)` in `engine.py`. After passing, the account
-switches to the funded stage and the panel shows when a payout is eligible. If
-it fails, or ends up with under $150 of room above the drawdown, the bots stop
-and the panel shows **Reset evaluation**. Change `Guards` in `account.py` to
-adjust the goal, cap, stop or contract budget.
-
-The account's limits are the only exits besides a pointer against the trade:
-there are still **no per-trade stops**.
-
-| Bot rule | Effect |
+| Setting | Purpose |
 |---|---|
-| End of day | flattens everything 5 minutes before the close |
-| Walk away | 3 pointer inverses in a day and that bot stops for the day |
+| `NEXUS_MODE` | `sim` (default: random-walk market) or `live` (real candles, paper trading) |
+| `NEXUS_PASSWORD` | The app's password; in live mode the app answers 503 until one is set |
+| `ANTHROPIC_API_KEY` | Turns on the AI trading desk and the station's agents |
+| `NEXUS_POLICY_*` | Per-kind send policy for outbound actions: `auto` or `owner` |
 
-### Funded account and payouts (LucidFlex 50K, rules as of Oct 2026)
+Secrets come only from the environment and are masked in logs and errors.
 
-When the evaluation passes, the account switches to the funded rules with its own
-guards (`funded_guards()`: the same goal, cap and stop by default, with overrides
-through `NEXUS_FUNDED_DAILY_GOAL` / `_CAP` / `_STOP` / `_KEEP_ROOM`).
-
-**Lucid's funded rules, built in:**
-
-- No consistency rule and no buffer; 90/10 split.
-- A payout cycle needs **5 days of at least $150 profit** and a **net-positive cycle**.
-- Payouts are **$500 minimum, up to 50% of profit or $2,000**, and 5 payouts per account before it moves to a live account.
-- After a payout the MLL locks at **$50,100**.
-- Scaling plan: 20, 30 or 40 micros at $0, $1k or $2k of profit, set each session. It never binds, because we use 12 at most.
-
-**In the app:**
-
-- The account panel shows the cycle progress, the largest payout allowed, and a
-  **suggested payout** that keeps `$1,500` above the locked MLL afterwards.
-- You get a 💸 push when a payout opens up.
-- **Record a payout** mirrors one you requested at Lucid.
-- **Sync with my Lucid account** sets the phase, balance, MLL, payouts taken and cycle days from your dashboard.
-
-**What the 21 real days say:**
-
-- The evaluation passed on day 6 (Sep 15).
-- The funded account made about $6,400 over the next 14 days.
-- Taking every suggested payout gave one payout of $1,950 (you keep $1,755) on Sep 28, with the second due on Oct 6.
-
-Lucid's payout limits, not the bots, cap the take-home: about $2,000 per account
-per cycle of 5+ days. The way to scale is more accounts and fast, steady $150+
-days, not bigger days.
-
-    python -m backend.backtest data/*_1m.csv --payouts
-
-### Scale plan (`backend/scale.py`)
-
-**📈 SCALE PLAN** in the account panel shows every account by stage (in evaluation, funded, payout ready,
-moved to live, failed), the next milestone for each with an estimated date, the payouts coming (your 90%),
-and when the treasury can buy the next evaluation. Estimates use $400/day (the latest 22-day backtest on real
-candles) until there are 10 traded paper days, then your own average, with ~55% of days making $150+.
-
-Set what Lucid charges you for an evaluation and your account limit with the button in the panel
-(`POST /api/scale`). From then on the next evaluation is a one-time treasury goal: once the pool covers it on
-top of a month of bills, ULTRON puts **Buy: Lucid evaluation #N** in your approvals. Nothing is bought for you:
-you buy it at Lucid and add it under 👥. In the simulation the plan reads the simulated account and never
-asks for money.
-
-### Your Lucid accounts (`backend/accounts.py`)
-
-Open **👥 My Lucid accounts** in the account panel and add each account you buy:
-a name, its phase, and the balance, MLL and payout progress from your Lucid
-dashboard. Every bot trade is applied to every account, so each card shows:
-
-- the balance and today's P&L
-- the room above its MLL
-- evaluation progress, or the payout cycle and the suggested payout
-
-The top of the panel totals what's **ready to pay out right now** across all
-accounts. You get pushes when an account passes, fails, has a payout ready, or
-has to stop while the bots keep trading.
-
-**Routing with one TradersPost strategy per account (recommended).** Give each
-account its own TradersPost strategy and paste that strategy's webhook into
-**Add webhook**. The router then manages every account separately:
-
-- An account only joins a new trade if it may trade (not stopped for the day,
-  not at its evaluation target) and has room in its contract budget.
-- An account close to its MLL stays at 3 contracts while the others add to 6.
-- Trims resize each account to its own size, and exits go to every account in
-  the trade.
-
-Accounts without their own webhook copy everything sent to
-`NEXUS_TRADERSPOST_WEBHOOKS`. For those the app can only tell you to pause the
-subscription. Webhook URLs stay in `data/accounts.json` on the server and are
-never sent to the app.
-
-### Add a worker
-
-```python
-# backend/config.py
-(ProcBot, BotConfig(id="mes-ny", name="MES NY", underlying="MES", district="LAB", timeframe=5,
-                    params={"pointer_tfs": [5], "killzones": ["NY AM"]}, color="#ff00aa")),
-```
-
-To add another micro (e.g. MYM), add it to `Market.underlyings` and its dollars
-per point to `FUTURES_MULTIPLIER` in `broker.py` (MNQ $2, MES $5, M2K $5, MYM $0.50).
-
-The city lays itself out automatically for however many workers you register.
-
-## Live paper trading (`backend/live.py`)
-
-Run the city on real markets with paper money:
+## Testing
 
 ```bash
-NEXUS_MODE=live uvicorn backend.main:app
+python -m pytest -q                  # 186 tests, ~30 s; the network is blocked during tests
+python -m pytest -q -m "not integration"
+python -m pyflakes backend tests
 ```
 
-- Real MNQ / MES / M2K candles (via NQ=F / ES=F / RTY=F on Yahoo) step the
-  bots minute by minute. The header shows **● LIVE PAPER** and how far behind
-  the data is: Yahoo's free CME feed is **~10 minutes delayed**, so this is a
-  forward test, not something to mirror trades from.
-- On startup the bots read the last 2 days of candles without trading, so
-  their FFVG / PROC structure is ready before the first live candle.
-- Every closed trade goes to `data/paper_trades.csv`, every finished day to
-  `data/paper_days.csv`, and the prop account to `data/paper_account.json`, so
-  a restart resumes the same evaluation (open positions aren't carried over).
-- Leave it running on a small server or always-on computer for a few weeks:
-  forward-test results can't be overfit, unlike backtests.
-
-Going from paper to a real Lucid account needs a real-time data feed and order
-routing through the platform your account uses (see *Going live* below).
-
-## News filter (`backend/news.py`)
-
-These bots trade without a stop loss, so a CPI, FOMC or NFP candle is the
-quickest way to lose a prop account. For every high-impact USD release on the
-ForexFactory calendar:
-
-- **No new trades** from 10 minutes before the release until 15 minutes after it, or 45 minutes after for FOMC.
-- **Open trades are closed** 2 minutes before the release.
-
-The account panel lists the next releases, the activity feed shows each pause,
-and your phone gets an alert. The calendar refreshes every 6 hours and is saved
-to `data/news_calendar.json`. Add your own events in `data/news_extra.json`.
-
-Settings (environment variables):
-
-| Variable | Default | What it does |
-| --- | --- | --- |
-| `NEXUS_NEWS_BEFORE` | 10 | Minutes before a release with no new trades |
-| `NEXUS_NEWS_AFTER` | 15 | Minutes after a release with no new trades |
-| `NEXUS_NEWS_AFTER_FOMC` | 45 | Minutes after an FOMC release with no new trades |
-| `NEXUS_NEWS_FLATTEN` | 2 | Minutes before a release to close open trades; `0` holds them instead |
-
-To backtest with a calendar: `--news data/news_calendar.json`.
-
-## Trading desk: journals, news and a daily plan (`backend/desk.py`)
-
-The bots hold two meetings a day on Claude (`claude-opus-5-5`):
-
-- **🌙 Evening meeting**, after each day's report:
-  - Every bot writes a journal entry in its own voice about its actual trades (why in, why out, what it learned).
-  - The desk updates its **standing lessons**, which are fed back into every later meeting. That's how they learn.
-  - The desk sets the risk mode for the overnight and London session.
-- **☀️ Morning briefing**, 08:40 ET on weekdays:
-  - A web search for what is moving NQ/ES today (the 8:30 data, Fed, megacap news, geopolitics).
-  - A plan, a one-line note for each bot, and the risk mode for New York.
-
-The desk is built to compete and never quit, and to treat discipline as the weapon.
-**It can only take risk off**:
-
-- `normal`: trade as usual (the default)
-- `cautious`: no adds, positions stay at 3 contracts
-- `sit_out`: no new trades until the next meeting
-
-It can't touch the strategy, the stops, or the goal and cap. The replay check trades
-every day in normal mode, so each non-normal mode's cost or savings is measured, and
-the desk sees that history. You can make the desk advisory-only from its panel.
-
-**Turn it on:** add `ANTHROPIC_API_KEY` in Render → Environment. Without a key the desk
-stays off and nothing else changes. Expect about 4 Claude calls and up to 10 web
-searches a day: roughly $0.30–0.70 a day, or $10–20 a month.
-
-**Where to see it:**
-
-- 🧠 Desk notes in the account panel: briefings, meetings, lessons, and "hold a meeting now"
-- **JOURNAL** in each bot's room
-- The desk section of each daily report
-- A push after each meeting
-
-Everything is saved in `data/desk/`.
-
-## Space Station: ULTRON's business operations (`backend/station/`)
-
-The city's trading desk is Venture #1 of a bigger economy. Tap 🛰️ in the city's top bar (or open
-`/station3d.html`) for the **Space Station**, where ULTRON, the station's commander, runs a crew of AI agents
-that research, validate and start online businesses. ULTRON reports to Jarvis, the owner's operations lead.
-
-**The orbital station (3D).** ULTRON's command core sits in the middle, ringed by the modules: Research Lab,
-Revenue Ops, Marketing & Media, Creative Lab, Marketplace Deck, Finance Observatory, Legal & QA, War Room,
-Engineering Bay, Agent Quarters, the Crew Lounge, the Approval Chamber and the City Dock (where the trading
-bots appear). Every agent is a robot that walks to its department while it works, with what it's doing
-floating above it; idle agents rest in the lounge, benched ones in quarters. Ventures orbit as planets
-(colour = stage, size = health). Real events play out live: a post going out fires a beam from the
-Marketing dish, a lead or sale sends a courier to the Finance Observatory, a milestone sets off fireworks.
-Tap the core, any module, robot or planet for its details; approve or reject from the Approval Chamber.
-`Labels` cycles between who's working, everyone, and off. The 2D Command Board (`/station.html`) is one
-tap away for the full records.
-
-**Milestones and pets.** Each agent's work count comes from the audit log (tasks delivered, routines run,
-QA calls, plans, posts drafted, War Room sessions, audits). Crossing 1, 5, 15, 40 and 100 earns First
-delivery, Reliable, Veteran, Legend and Hall of Fame, once, with an event in the log; Reliable and up each
-bring a pet (robo-cat, drone, star-jelly, comet-fox) that follows the agent around the station. The station
-also tracks its own firsts: first opportunity, venture, post, lead, sale, $100, $1,000, War Room session.
-
-**One treasury, everyone earns their keep.** The city and the station pay into one pool and draw their
-bills from it, so whichever side is earning keeps the other running. Each side, venture and agent has its
-own P&L. Only real money counts: income and expenses you record, Lucid payouts you record in the account
-panel (at the 90% trader split), and the station's own Claude usage. Paper profit is shown but never
-counted. Agents can never book revenue.
-
-**Mission 1, "First Dollar":** ventures that need **$0 of startup capital** and can start today come first.
-Anything with a monthly cost (next on the list: Printify Premium, ~$29/month, up to 20% off product costs)
-waits until the pool can cover two months of it plus a month of bills; then ULTRON asks you to approve it.
-
-**Claude credits left** (`backend/station/credits.py`): the agents' fuel, on the board's Command tab, the
-City's top bar (⛽) and the 3D station's HUD. Anthropic has no API for the prepaid balance, so: tap **I
-added credits** with the amount whenever you top up in the Anthropic Console, and the station counts down
-from it with the cost of every Claude call it and the trading desk make (the desk's calls are booked to the
-City; they don't count against the station's $50 cap). With `ANTHROPIC_ADMIN_KEY` (an Admin API key,
-`sk-ant-admin...`) it also reads Anthropic's own cost report every hour and uses the larger number, so usage
-outside the station comes off too. When Anthropic answers "credit balance is too low", the counter shows
-empty, ULTRON stops starting Claude jobs (they wait, they aren't failed) and tries one every 20 minutes, so
-credits added without being recorded are picked up on their own. Below `NEXUS_CREDITS_LOW` ($5) you get
-one warning per top-up. The Jarvis brief carries the same numbers.
-
- (`backend/station/digital.py`). The
-research routines rank first what the crew can run end to end through the station's own rails, with $0 and
-no work from you: digital products it writes and designs itself (guides, checklists, planners, workbooks,
-template packs, printables), sold on the station storefront and as Etsy digital downloads, with Pinterest
-for traffic. Each opportunity says whether it's `autonomous` or `owner_assisted`, which rails it uses and
-what format the crew will make.
-- **Launch rule** (your call, Oct 6 2026): an autonomous idea scoring 60+ launches on its own, at most one
-  a day and at most 3 live experiments; the approval is recorded as approved by your standing rule, and
-  you get a notification. Kill it any time from its venture card. It **closes itself after 21 days with no
-  sale** and its products come off sale (`NEXUS_AUTO_LAUNCH=0` turns the rule off;
-  `NEXUS_AUTO_KILL_DAYS` changes the 21). Owner-assisted ideas still wait for your approval.
-- **Products:** the Product Designer writes one complete product a day per venture (up to 6 on the shelf),
-  rendered as a letter-size PDF plus a 2:3 cover; Compliance & QA checks every word; then it goes on sale:
-  a Stripe payment link that returns the buyer to a verified download, a page on the storefront
-  (`/shop/<slug>`, public), an Etsy digital listing when Etsy is connected, and a pin when Pinterest is.
-  `NEXUS_DIGITAL_PER_DAY` (default 3) caps new products a day.
-- **Delivery:** `/shop/<slug>/thanks` asks Stripe whether the Checkout Session is paid and came from this
-  product's link before the download appears; the PDFs aren't served any other way. The sale books itself
-  into the treasury (the webhook books it too; each sale once). The storefront's name is
-  `NEXUS_STORE_NAME` (default "Nexus City Studio").
-- If research has never produced an opportunity (the first runs failed), it tries again every 3 hours
-  instead of waiting for the next day's slot.
-
- (`backend/station/shop.py`, venture `V-ETSY`): print-on-demand through
-Printify, end to end without you.
-1. Every 2 days, when fewer than 4 products are in the pipeline, Market Research scans what's selling on
-   Etsy now (best-seller badges, review counts, the shops selling it, their prices and the search words
-   buyers use) and the **Etsy Shop Manager** turns it into 4 product briefs: niche, product (t-shirt,
-   sweatshirt, hoodie, mug or poster), our own printed words, title, 13 tags and a price inside the band
-   the competitors prove.
-2. The **Product Designer** renders each design: original typographic artwork with the bundled Inter font,
-   print-ready (4500x5400 transparent PNG for garments). Competitors show us the niche and the price, never
-   the design: copying another shop's design, wording or photos is infringement, and Etsy removes the
-   listings and the shop for it.
-3. Compliance & QA checks each listing like any post (trademarks, phrases someone owns, claims, Etsy's
-   rules); fails get one revision.
-4. The Shop Manager creates the product in Printify (dark ink on light colors, light ink on dark, sizes
-   S-2XL), raises the price if it wouldn't cover the product cost, Etsy's fees and $4 of profit, adds Etsy's
-   AI-assisted design disclosure, and publishes. Printify puts it on the Etsy shop. At most
-   `NEXUS_SHOP_LISTINGS_PER_DAY` (default 2) new listings a day, $0.20 each on Etsy.
-5. Every 6 hours it reads Printify's orders: which listing sold, units, retail and product cost. The War
-   Room sees per-listing sales. Etsy deposits aren't booked automatically: record them in Finance.
-
-The Marketplace Deck in the 3D station shows the live listings with their designs, the ones in the works
-and the orders; a sale sends a courier to the Finance Observatory.
-
-**How work flows:**
-1. **Research Station:** five routines (times ET): Opportunity Market Radar (weekdays 08:00), Etsy and
-   Digital Product Validation Scan (Tue/Thu 09:00), Fiverr and AI Service Offer Scan (Wed 09:00), Faceless
-   Content and Music Opportunity Watch (Fri 09:00), Weekly Opportunity Command Brief (Mon 10:00). Each
-   searches the web and files scored opportunities with evidence, costs, a 7-day plan and kill criteria.
-   On first start the Radar runs right away. "Run now" runs any routine on demand.
-2. **Approval:** ULTRON keeps the best $0 opportunity in front of you as a launch proposal (up to 3 live
-   experiments). You can also promote any opportunity from the feed yourself.
-3. **Validation:** the Opportunity Validation Agent turns it into a venture with an offer, a 14-day goal and
-   6-12 tasks with dependencies. Specialists (Service Delivery, Listing/SEO, ...) are added only when a
-   venture needs that role, and reused after that.
-4. **Agents draft, you act.** Agents write the gig, the product, the listing, the outreach. Everything
-   outside the station (accounts, publishing, messages, payments) is an owner task marked
-   **WAITING FOR OWNER**, with the agent's draft attached and a Copy button. Tick it off when it's done.
-5. **ULTRON watches:** stalled or failed tasks are retried once, then escalated. Idle agents go to the Crew
-   Lounge. Every change is written to an append-only audit log (`data/station/events.jsonl`). At 08:30 ET
-   ULTRON writes a daily report for Jarvis and pushes a summary to your phone.
-
-**The teams:**
-
-| Team | Members | What they do |
-|---|---|---|
-| Command | ULTRON | Runs the loop, approvals, daily report to Jarvis |
-| Research | Market Research, Opportunity Validation | The five routines; turns approved ventures into plans |
-| Marketing & Outreach | Marketing Lead, Content Creator, Outreach Agent | A channel plan per venture; daily posts made from the crew's real work, linking to where customers buy; personal emails to businesses that publicly invite inquiries |
-| Finance | Finance Agent (treasurer), Accountant, Auditor | The pool and budgets; monthly statements with a tax set-aside estimate; a daily audit (07:00 ET) of the tamper-evident ledger, Stripe reconciliation and every agent's cost against what it delivered. Plain code: no model writes the numbers |
-| Legal | Legal Counsel, Compliance & QA | Terms, refund policies and client agreements (drafts for you to review, not legal advice); the QA gate in front of everything that leaves |
-| War Room | War Room Strategist, ULTRON in the chair | Reads every result and decides: double down, keep, modify, pivot/pause (done on the spot) or kill (your approval). Writes the lessons every agent follows and steers what research hunts next. Meets Sundays 17:00 ET, as soon as 8 new results come in, or when you press "Convene now" |
-
-Specialists (Service Delivery, Listing/SEO, ...) are still added only when a venture needs that role.
-
-**Your own businesses** can be ventures too. **Padilla Property Solutions** (`V-PPS`, solar in Puerto Rico) is
-one: it writes in Puerto Rican Spanish, follows its own compliance list (no savings, price or incentive
-claims you haven't provided), doesn't count against the experiment limit, and the War Room can change its
-tactics but never pause or kill it.
-
-**What leaves the station** (`backend/station/actions.py`): every post, email and Stripe change is an
-action. It must pass Compliance & QA (one revision allowed, then it's stopped and the War Room sees why),
-stay under its daily cap, and the outbound switch must be on. Then it's sent by its connector, or, if that
-platform isn't connected, it waits in your posting queue with a Copy button. Outreach never goes twice to
-the same address or to anyone who opted out, and every contact comes with the page where they publish it.
-
-**Connections** (set them in Render → Environment; the station never sees the keys anywhere else):
-
-| Connection | Settings | What it unlocks |
-|---|---|---|
-| Stripe | `STRIPE_API_KEY` (a restricted key: Products, Prices, Payment Links write; Checkout Sessions read) | Agents create the checkout link for a venture on their own |
-| Stripe sales | `STRIPE_WEBHOOK_SECRET` from a webhook to `https://<your app>/api/station/stripe/webhook` (event `checkout.session.completed`) | Every paid checkout books itself into the treasury with Stripe's fee; the Auditor books any the webhook missed |
-| Email | `NEXUS_SMTP_HOST`, `NEXUS_SMTP_PORT`, `NEXUS_SMTP_USER`, `NEXUS_SMTP_PASSWORD`, `NEXUS_MAIL_FROM`, `NEXUS_MAIL_ADDRESS` | Outreach sends itself, with your postal address and an opt-out line (CAN-SPAM) |
-| Facebook Page | `NEXUS_FB_PAGE_ID`, `NEXUS_FB_PAGE_TOKEN` (a Page access token with `pages_manage_posts`); `NEXUS_FB_PAGE_VENTURE` (default `V-PPS`) | The Page belongs to one venture, Padilla Property Solutions: its posts go out on their own, in Spanish, written after reading the Page's latest posts. Other ventures never post there |
-| LinkedIn | `NEXUS_LINKEDIN_TOKEN` (scopes `openid profile w_member_social`; expires every 60 days) | Posts go out on your profile. When the token expires, posts fail with a note to renew it |
-| Instagram | `NEXUS_IG_USER_ID` (the Instagram professional account linked to the Page); the Page token must also have `instagram_basic` and `instagram_content_publish` | Padilla's posts go to Instagram too, each with its image card |
-| TikTok | not yet: every post needs a video, and TikTok's API needs their audit | Its posts wait in your queue |
-| Etsy (via Printify) | `PRINTIFY_API_TOKEN` (Printify → My profile → Connections → Generate token; scopes: shops, catalog, products, orders, uploads); optional `PRINTIFY_SHOP_ID`. Your Etsy shop must be connected in Printify (My stores → Add new store → Etsy) | The crew lists its products on Etsy and reads the orders. Printify charges your card for each order's production when the order comes in |
-| Storefront | Stripe (above) and `NEXUS_PUBLIC_URL` (or Render's own `RENDER_EXTERNAL_URL`) | Autonomous ventures sell their PDFs at `/shop` with automatic delivery |
-| Etsy digital downloads | `ETSY_KEYSTRING`, `ETSY_SHARED_SECRET` from a free app at etsy.com/developers (callback `https://<your app>/api/station/connect/etsy/callback`), then **Connect** on the board's Marketing tab | Each product is also listed on your Etsy shop as a download ($0.20 per listing; auto-renew off) |
-| Pinterest | `PINTEREST_APP_ID`, `PINTEREST_APP_SECRET` from developers.pinterest.com (callback `https://<your app>/api/station/connect/pinterest/callback`), then **Connect**. Pinterest's Trial access only makes sandbox pins nobody else sees (set `PINTEREST_SANDBOX=1` to test); public pins need its Standard access (Pinterest asks for a short screen recording of the Connect flow and a pin being made) | Every new product gets a pin linking to its storefront page |
-| Fiverr | none: no seller API, and bots break its terms | The crew prepares; you publish and reply there |
-
-Refunds and payouts aren't wired at all: they stay in your Stripe dashboard.
-
-**Image cards** (`backend/station/media.py`): every Facebook and Instagram post gets a branded 1080x1350 card
-(headline, up to 3 points, call to action) drawn with Pillow and the bundled Inter font, in the venture's
-colors. The card's words go through QA with the post. Cards are served at `/media/<random name>` without the
-password, because Instagram downloads the image itself; on Render the public address comes from
-`RENDER_EXTERNAL_URL` automatically (elsewhere set `NEXUS_PUBLIC_URL`).
-
-**Outreach is off for every venture** until you press **Allow outreach** on that venture's card.
-
-**Replies are read for you** (`backend/station/mailbox.py`). Every 20 minutes the station checks the outreach inbox
-over IMAP, using the same login as sending (a Gmail app password works for both). It looks only at mail from addresses
-it emailed, and reads without marking anything as read:
-- an opt-out ("unsubscribe", "remove me", "stop emailing", "not interested"...) goes straight onto the
-  do-not-contact list;
-- any other reply becomes a lead on that venture, and you get a push to answer it.
-
-The inbox host comes from the SMTP host (Gmail and Outlook are known). For other providers, set `NEXUS_IMAP_HOST`.
-
-**Results** (`backend/station/results.py`): every 6 hours the Auditor reads each recent post's reactions,
-comments and shares (Facebook) and likes and comments (Instagram). On a venture's card you log each lead in
-one tap (DM, WhatsApp, call, comment, referral), optionally tied to the post that brought it, then mark it
-quoted, won (the amount is booked as real income) or lost. The War Room ranks posts by the leads they bring,
-then by engagement, and turns that into lessons and new tasks.
-
-What the station can't do: move money out, refund, sign anything, run a marketplace account, or touch the
-trading bots' orders and risk. The **Stop all outbound** button on the Command tab stops every outgoing post,
-email and Stripe change at once.
-
-**Jarvis's morning check-in:** set `NEXUS_JARVIS_TOKEN` (a long random string, at least 24 characters)
-on Render and the same value in the Claude cloud environment. A scheduled session reads
-`GET /api/jarvis/brief` (Bearer token; read-only: ULTRON's latest report, money, ventures, what's waiting
-for you, and `blockers`: what holds each venture up) every weekday at 8:45 ET and briefs you. Without the token
-the address doesn't exist (404).
-
-**Jarvis works the board for you** (`backend/jarvis.py`, `POST /api/jarvis/act`, same token). The owner's rule
-(Oct 7 2026): Jarvis does whatever needs doing on the board without asking, and only brings you what involves real
-money or an account. It can retry or cancel tasks, do owner tasks that need no account, fix a draft's words (it goes
-back through Compliance & QA), OK a waiting social post, pause or resume a venture, ask for a new channel plan or
-today's posts, decide $0 approvals with no account to open, run a routine or the War Room, give ULTRON and the
-crew a standing directive, and push a message to your phone. Everything it does is on the audit log as `jarvis`.
-Refused (403, yours): spending, funding goals, Stripe links, the trading desk and live orders, Forge promotions,
-killing a venture, and any task or launch that needs an account, a payment or your identity.
-
-**Setup:** it runs with the city, in both modes. Research and agent drafting need `ANTHROPIC_API_KEY` (the
-same key as the trading desk). Without it, records, approvals and the treasury still work.
-
-| Setting | Default | |
-|---|---|---|
-| `NEXUS_STATION_AI_BUDGET` | `50` | $/month cap on the station's Claude usage. At the cap, research and drafting pause until next month. |
-| `NEXUS_STATION_EXPERIMENTS` | `3` | Live ventures at once, besides the trading desk |
-| `NEXUS_STATION_TASKS_PER_DAY` | `25` | Agent drafting runs per day |
-| `NEXUS_PAYOUT_SPLIT` | `0.9` | Your share of a Lucid payout |
-| `NEXUS_STATION_MODEL` | `claude-opus-5-5` | |
-| `NEXUS_POSTS_PER_DAY` / `NEXUS_OUTREACH_PER_DAY` | `6` / `15` | Daily caps on what goes out |
-| `NEXUS_POLICY_SOCIAL` / `_OUTREACH` / `_STRIPE` | `auto` | `owner` makes that kind wait for your OK even after QA |
-| `NEXUS_TAX_RATE` | `0.25` | The Accountant's tax set-aside estimate |
-
-A research routine is roughly $0.30-$1.00 of Claude usage; a drafting task, a QA check or a day's posts
-roughly $0.05-$0.30; an outreach batch or a War Room session roughly $0.30-$0.80. With marketing running
-daily, one active venture uses most of the default $50 cap: raise it once ventures are earning.
-
-## One world: the city and the station district (`frontend/world.js`)
-
-Opening the app now starts with a title screen. **▶ PRESS START** flies the camera down from space into the world.
-The Space Station's departments are buildings on a ring around the city, joined to it by roads: Research Lab,
-Revenue Ops, Marketing & Media, Creative Lab, Marketplace Deck, Finance Observatory, Legal & QA, War Room,
-Engineering Bay, Agent Quarters, Crew Lounge, Approval Chamber and City Dock.
-
-The crew lives there. Every agent has a callsign, a handle, a vibe and lines of their own, set in `PERSONAS` in
-`backend/station/crew.py`:
-
-| | | | |
-|---|---|---|---|
-| ULTRON | SCOUT | VERA | LEDGER |
-| HYPE | PIXEL | ECHO | TALLY |
-| HAWK | BRIEF | GATE | GENERAL |
-| MERCH | MUSE | | |
-
-Each wears its skin and apparel from `skins.js`. Agents walk to their department's building when they have a task.
-On their free time they roam the roads to the lounge, the park, the plaza or a friend's building, and say things
-along the way.
-
-Tap an agent for their card (job, status, what they're working on, milestones) and **🎥 enter their room**. It's
-the same streamer room as the trading bots, with their current task and stats on the screens. Tap a building to
-see who works there. Everything shown is live station data.
-
-## The Lookout (`backend/bots/watcher.py`)
-
-The M2K bot is gone: the Russell added nothing to a strategy that trades NQ and ES. Its building is now
-**TheLookout** (NQ/ES LOOKOUT, district BIG BOARD), who watches the big contracts and **never trades**:
-
-- runs the PROC read (FFVGs, taps, 3-6m pointers, PROCs) on NQ and ES and calls each PROC with whether the
-  other market is with it ("NQ 4m PROC ↑ 10:32 · ES is with it"); those calls show in the city feed
-- keeps one read on his board: **together ↑ / together ↓** (both charts agree), **split** (they disagree:
-  careful), a market moving **alone**, or **quiet**
-- OG Pointer and SixMinuteSage only enter when ES agrees: that confirmation reads the **same shared engine**
-  as the Lookout's ES read (`proc.shared_engine`), so there is one read, never a copy
-- has no contracts and no position, sends no orders, and keeps watching through an account stop
-
-Nothing about the trading changed: same entries, same exits, same numbers in the backtests.
-
-## Strategy Forge (`backend/forge.py`)
-
-New setups are found, tested honestly, shadow-traded on paper, and go live only when you approve. Open it with
-**⚒️ STRATEGY FORGE** in the account panel.
-
-1. **Forge, every Saturday.** It runs in its own low-priority process, so trading never slows down. It builds 40
-   setups from the strategy's tested filters: confirmation mode and window, killzones, sweep requirement, trims,
-   chop and bias filters, and walk-away count. It writes no new code, and it never touches the PROC zone settings
-   (pivot length, IFFVGs, proximity), which match your TradingView chart.
-2. **Test.** Each setup is backtested on the saved 1-minute candles: TradingView's own once 15+ days are saved,
-   otherwise the Yahoo history. To pass, a setup must beat the live settings on the first half of the training
-   days, the second half, and the newest 30% it never saw while being chosen. Its worst day can be no worse by more
-   than $200, and it can't fail more evaluations.
-3. **Shadow.** The best setup that passes is replayed with each real trading day after the close, next to the live
-   settings. This is paper only: no orders.
-4. **Vote.** After 10 shadow days, the desk's rules decide. If the shadow beat the live settings by $100+, with at
-   least as many green days and a comparable worst day, a "Promote?" card goes to your approvals. If not, it's
-   retired.
-5. **Promote.** Only you can promote. The new settings switch in at the next session roll (18:00 ET, bots flat).
-   They're saved in `data/strategy.json` and survive restarts, and every promotion is logged. The daily
-   paper-vs-replay scorecard uses the same settings.
-
-The first run on 22 real days (Sep 8 – Oct 7 2026) tried 40 setups. One beat the live settings on the training
-days, none passed every check, and the live settings stayed. You can also run the forge from the panel while the
-market is shut.
-
-## Candle history (`backend/history.py`)
-
-Yahoo only keeps about 30 days of 1-minute candles, so live mode saves them as they come in:
-
-- **On startup:** it backfills the last 29 days.
-- **At every day roll:** it saves the newest days again.
-
-Everything goes to `data/history/{MNQ,MES,M2K}_1m.csv` on the Render disk. The
-account panel shows how many days are saved, with download links (also at
-`/api/history/MNQ.csv`). Feed the files to the backtester to re-test and
-re-optimize on more data as it builds up:
-
-    python -m backend.backtest MNQ_1m.csv MES_1m.csv M2K_1m.csv --optimize
-
-**TradingView's own candles.** Yahoo's copy differs from what TradingView sends (missing minutes, different
-closes), and TradingView's export needs a Premium plan. So every candle the feed script delivers is also
-saved, once, to `data/history/tradingview/{MNQ,MES}_1m.csv`, with volume when the script sends it. The
-account panel shows the days collected and download links (`/api/history/tradingview/MNQ.csv`); the
-backtester reads them as is. It starts with the first candle after this was deployed.
-
-## Paper vs backtest check (`backend/scorecard.py`)
-
-When each trading day ends, live mode downloads that day's candles again and
-replays them through the same bots, settings and account state. It then checks
-that paper trading took the same trades. A mismatch means the live pipeline
-changed the result (late or missing candles, a restart, a bot switched on or
-off), so backtest numbers won't carry over to real money yet.
-
-The account panel also compares the paper days so far with the backtest: green
-days, average day and profit factor. After each day you get a push such as
-"📊 Day done +$640 · replay +$640 ✅". The full history is at `/api/scorecard`
-and in `data/paper_checks.json`.
-
-Before you connect real money, look for:
-
-- **Replay match:** close to 100% on days without a restart.
-- **Green days and average day:** near the backtest after 15–20 days.
-
-## Daily report (`backend/report.py`)
-
-When each trading day ends (around 6pm ET in live mode), the app saves a report
-of the day. Once the paper-vs-backtest replay has checked the day, it pushes a
-summary to your phone, for example:
-
-> 📊 Tue Oct 6 · +$640 · 3 trades
-> 2W 1L · goal ✓
-> Eval +$1,840 / $3,000 (61%) · $2,450 room
-> Replay ✅ 3/3 trades matched
-> Best: OG_Pointer +$520 (3m PROC + MES)
-
-Tap the push, or 📒 Daily reports in the account panel, to see each trade's
-entry reason, adds, exit reason and prices. The panel also shows news pauses and
-daily stops. Reports are saved in `data/reports/` and served at `/api/reports`.
-For ntfy, set `NEXUS_PUBLIC_URL` (Render sets `RENDER_EXTERNAL_URL` for you)
-so that tapping the notification opens the report.
-
-## Full-screen chart
-
-In any bot's room, tap **CHART** to open a full-screen chart of what the bot sees:
-
-- 1m, 3m, 6m or 15m candles, aligned to the clock
-- The untapped FFVG and IFFVG zones (✓ marks a zone that has been tapped)
-- The live PROC box
-- Every pointer (small arrow) and PROC (big arrow) on the bot's timeframes
-- The MES pointers that confirm entries, in the strip at the bottom
-- Today's entries (yellow arrow), exits (✕ with P&L) and the open position with live P&L
-
-Drag to scroll back, pinch or scroll to zoom, and double-tap to return to now.
-The chart refreshes every 3 seconds.
-
-## Watch it from your phone, 24/7 (deploy to Render)
-
-The repo is ready to host: `Dockerfile` + `render.yaml` run the city in live
-paper mode with a password and a disk for the paper-trading logs.
-
-1. **Merge PR #1** into `main` on GitHub (Render deploys the default branch).
-2. Sign up at **render.com** with your GitHub account.
-3. Dashboard → **New → Blueprint** → pick `levetteit/nexus-city` → **Apply**.
-4. When asked for **`NEXUS_PASSWORD`**, pick a strong password. That's what
-   you'll type on your phone. (`NEXUS_WEBHOOK_SECRET` is generated for you.)
-5. It uses the **Starter plan (~$7/month) + a 1 GB disk (~$0.25/month)**. The free
-   plan sleeps after 15 minutes without visitors, which would stop the bots.
-6. When the deploy is green, open the `https://starnet-city-….onrender.com` URL (the Render service keeps its original name, so the address doesn't change: see docs/MIGRATION_FROM_STARNET.md)
-   on your phone, log in with any username + your password, then
-   **Share → Add to Home Screen** (iPhone) or **⋮ → Add to Home screen /
-   Install app** (Android). It opens full screen like an app.
-
-On the phone you get a compact account bar (tap it for the full panel), the
-city, and an **activity feed** of what every bot is doing: PROCs seen, waiting
-for MES, entries, adds, exits, account stops. Tap a building for its card.
-
-Every push to `main` redeploys automatically. Paper results stay on the disk
-(`/app/data/paper_trades.csv`, `paper_days.csv`); download them from Render's
-Shell tab. The same Docker image runs on Fly.io, Railway or any VPS: set
-`NEXUS_PASSWORD`, mount a volume at `/app/data`, expose port 8000.
-
-## Trade alerts on your phone (`backend/notify.py`)
-
-Get a notification every time a bot enters, adds to or exits a trade (with the
-P&L), when the account stops for the day, and if a real order ever fails.
-
-**iPhone / Android (no extra app):** open Nexus City from its **home-screen icon**
-(on iPhone, web push only works from there), tap the account bar to expand it →
-**🔔 TURN ON ALERTS** → **Allow**. You'll get a confirmation buzz; **SEND TEST**
-sends another. Turn it on separately on each device you want alerts on.
-
-**Backup: ntfy.** Install the free **ntfy** app, subscribe to a long random topic
-name (e.g. `nexus-7f3k9q2x`), and set `NEXUS_NTFY_TOPIC` to the same name in
-Render → Environment.
-
-Alerts only fire in live mode. Real-order alerts are marked **· REAL**.
-
-## Real orders on your Lucid accounts (`backend/execution.py`)
-
-Lucid allows automated trading (not high-frequency trading or sub-5-second
-scalping, which these bots don't do). Real orders go **bot → TradersPost →
-Tradovate → your Lucid account(s)**. Two pieces, both one-time setup:
-
-**1. Real-time prices (required).** The free Yahoo data is ~10 minutes late, and
-real orders are blocked whenever prices are more than 2.5 minutes old. The
-`tradingview/nexus_city_feed.pine` script streams each 1-minute candle the moment
-it closes (needs a paid TradingView plan with webhooks and CME real-time data):
-
-1. In Render → your service → **Environment**, copy `NEXUS_FEED_SECRET`.
-2. TradingView → open **NQ1!** on the **1-minute** chart → Pine Editor → paste
-   the script → **Add to chart** → settings → paste the secret.
-3. **Create Alert** → Condition **Nexus City feed → Any alert() function call** →
-   Notifications: **Webhook URL** `https://<your-render-url>/api/feed` → Create.
-4. Repeat 2–3 on **ES1!** (ES confirms every entry).
-
-Like Macre, the bots read the **full-size** charts and execute on the micros: NQ1!'s candles feed the MNQ
-bots, ES1!'s the MES side, and orders still go to MNQ / MES. NQ and MNQ trade at the same price, but NQ's
-book is far deeper, so its wicks (and so its FFVGs, taps and pointers) are the clean ones; Yahoo's NQ=F /
-ES=F, which every backtest here used, are the full-size contracts too. MNQ1! / MES1! alerts still work on
-their own, but while an NQ1! / ES1! alert is feeding, a micro alert for the same market is ignored (the feed
-log says so: delete it). The account panel shows which chart feeds which symbol (`NQ → MNQ`).
-
-The account panel shows **Price data: TradingView · real-time** once it's flowing.
-After updating the script (it now also sends volume), re-create both alerts: TradingView keeps the old
-version in an existing alert.
-
-**2. Order routing.**
-
-1. Buy your Lucid account(s) and choose **Tradovate** as the platform.
-2. Sign up at **traderspost.io** → **Brokers → Tradovate** → log in with your
-   Lucid Tradovate credentials (repeat for each Lucid account).
-3. **Strategies → New strategy** (futures). Copy its **webhook URL**.
-4. **Subscribe** each Lucid account to the strategy. In the subscription
-   settings: allow **shorting**, allow **add to position**, use the **signal's
-   quantity**, market orders. No stop loss or take profit (the bots manage exits).
-5. Render → **Environment** → set `NEXUS_TRADERSPOST_WEBHOOKS` to that URL →
-   Save (it redeploys).
-6. In the city, the account panel shows **Real orders: off**. Tap
-   **ARM REAL ORDERS** and type `ARM`. The header turns to **● REAL ORDERS**.
-
-What gets sent: entry `buy`/`sell` with the bot's quantity (3), `add` (3 more,
-6 max) and `exit`, on the front-month contract (e.g. `MNQZ2026`, rolling 8
-days before expiry). Every order is logged in `data/orders.csv`.
-
-Safety built in:
-- Off until you arm it; **FLATTEN ALL** exits everything on your accounts and disarms.
-- New entries are blocked when price data is over 2.5 minutes old; exits always go through.
-- Adds and exits are only sent for positions the router opened itself.
-- After a restart, any position left open is closed immediately (the bots restart flat).
-- Your Lucid account still enforces its own rules (drawdown, position limits,
-  4:45 PM ET flat); the bots' daily goal / cap / stop and 15:55 flatten sit inside those.
-
-The city's account panel still tracks paper P&L from the bots' fills. Your real
-fills (slippage, commissions) are in TradersPost and Tradovate. Run paper for a
-while, then start with **one** evaluation account before connecting more.
-
-## Signal check against Macre's indicator (`backend/signals.py`)
-
-The PROC engine is a rebuild of the TradingView indicators, and the backtest is
-only as good as that rebuild. **🎯 Signal check** in the account panel lists
-every PROC the bots traded each day, with a mini chart of:
-
-- the candles around it
-- the FFVG/IFFVG it reacted to
-- the pointer candle
-- the entry
-
-Each signal is labeled by its candle's open time, as TradingView does. Mark each one
-**✅ on my chart** or **❌ not on my chart** (with a note), and add PROCs your
-indicator printed that the bots missed. A per-killzone table shows how many PROCs
-the engine saw on each timeframe. On the 21 days that's about 40 per day inside
-the killzones; if your indicator shows far fewer, the rebuild is too loose. The
-agreement score and the mismatches show exactly what to fix. Saved in
-`data/signals/`.
-
-## Tests and the watchdog
-
-**Tests.** `python -m pytest tests` checks the things that cost money when they break:
-
-- Lucid's rules: drawdown, consistency, payouts and scaling.
-- The real-order router: per-account sizing, stale data, restarts.
-- The account book and the news filter.
-- The desk's risk-off-only modes.
-- The password gate.
-- A regression on 5 real trading days (`tests/fixtures`). The 21-day baseline also runs when `data/` is present.
-
-GitHub runs the tests on every pull request.
-
-**Watchdog (`backend/watchdog.py`).** It pushes to your phone when, during market hours:
-
-- MNQ or MES drops off the TradingView real-time feed (usually an expired alert), and again when it's back;
-- no candles arrive at all for 25 minutes;
-- the server restarts with real positions open.
-
-Every weekday at 08:30 ET it also sends a short systems check. If the whole server
-is down it can't warn you itself, so point a free uptime monitor (e.g. UptimeRobot)
-at `https://<your-app>/healthz`.
-
-## Backtest and optimize on real data (`backend/backtest.py`)
-
-The live city runs on simulated, random prices, so it can't tell you if the
-strategy works. The backtester replays **real 1-minute candles** through the
-exact same bots, prop account rules and daily goal/cap/stop.
-
-1. **Get data.** Free: `python -m backend.fetch_data` downloads the last ~30
-   days of real 1-minute NQ / ES / RTY futures from Yahoo Finance into
-   `data/MNQ_1m.csv`, `data/MES_1m.csv`, `data/M2K_1m.csv` (micros track the
-   full-size contracts exactly). Run it every few weeks: it merges new candles
-   in, so your history keeps growing. A paid TradingView plan can also export
-   1-minute charts (chart menu → *Export chart data…*); name the files the same way.
-2. **Backtest the current settings:**
-   ```bash
-   python -m backend.backtest data/*.csv
-   ```
-   You get days traded, **% profitable days**, days that reached the $600 goal,
-   win rate, average win/loss, profit factor, best/worst day, evaluations passed
-   and failed, and P&L by session.
-3. **Optimize:**
-   ```bash
-   python -m backend.backtest data/*.csv --optimize --out results.json
-   ```
-   It tries ~190 combinations of the PROC settings (MNQ/MES confirmation off /
-   tap / pointer / PROC and its window, swing pivot length, IFFVGs on/off,
-   liquidity sweep required, killzones). Export **both MNQ and MES** so the
-   confirmation can be tested on the **first 70% of days**,
-   then re-runs the top 5 on the **last 30%** they never saw. Pick settings that
-   hold up on those unseen days, not the ones with the best tuned numbers.
-4. Put the winning settings in `params` in `backend/config.py`.
-
-More history gives more reliable answers; a few weeks of 1-minute data is a
-minimum. `--make-sample FOLDER` writes synthetic files if you just want to see
-it run.
-
-## TradingView alerts
-
-The PROC, Untapped FFVGs and Troop Toolkit indicators don't publish alert
-conditions, so they can't send webhooks. That's why the bots rebuild PROC
-themselves from price data. The webhook still accepts direct orders from any
-other alert you set up:
-
-1. Start the server with a secret: `NEXUS_WEBHOOK_SECRET=<long random string> uvicorn backend.main:app --host 0.0.0.0`
-2. Give it a public HTTPS address (`ngrok http 8000`, or a cloud server).
-3. In the TradingView alert, tick **Webhook URL** → `https://<address>/api/tradingview`, message:
-   ```json
-   {"secret": "<your secret>", "ticker": "{{ticker}}", "signal": "long", "price": {{close}}}
-   ```
-   `signal` is `long`, `short` or `exit`. Alerts go to every bot on that symbol
-   (`MNQ1!`, `MES1!`), or add `"bot": "mnq-3m"` for one bot.
-
-## Going live (read this first)
-
-Everything runs on **simulated prices with a paper broker**. To trade for real
-you'd swap `Market` for a live data feed and `PaperBroker` for the platform your
-prop firm account runs on (check which platforms your Lucid plan supports,
-e.g. Tradovate, NinjaTrader or Rithmic-based platforms). Check your firm allows automated trading first.
-Simulated prices are a random walk, so they don't prove the strategy works
-(or that it doesn't). To judge it, backtest it on real historical candles.
+CI runs four jobs on every pull request:
+- **lint**
+- **pytest** with coverage
+- **security**: gitleaks over the full history, and pip-audit on the lockfile
+- **docker**: builds the image and smoke-tests it
+
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+## Deployment
+
+- **Docker:** the `Dockerfile` builds a single image.
+- **Render:** `render.yaml` deploys it to Render with a password and a persistent disk, and every push to `main` redeploys.
+- **Anywhere else:** the same image runs on any Docker host. Set `NEXUS_PASSWORD`, mount a volume at `/app/data` and expose port 8000.
+
+A deploy restarts the app, and on startup it closes any positions the order router had open. Deploy while the bots are flat.
+
+Step-by-step hosting, phone alerts and monitoring are in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+## Project status
+
+- **Single-owner project.** It is in daily use by its owner: hosted on Render in live paper mode, with real-order routing wired to one prop firm account.
+- **Trading results:**
+  - Backtest: 21 days of real 1-minute data (Sep–Oct 2026). That is a small sample and not evidence of future performance.
+  - Forward test: paper trading is ongoing.
+  - Details: [docs/TRADING.md](docs/TRADING.md).
+- **Station:** live. Some outbound channels wait on third-party approvals or tokens.
+- **Known gaps:** the trading-reliability issues in [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md) (C-1, T-H1 to T-H7) are documented. Fixes for them are approved but not yet implemented.
+
+## Roadmap
+
+1. **Trading reliability:** supervise the trading loop and make `/healthz` detect a stall. Send exits while disarmed, use wall-clock flatten timing, keep account halts across restarts, and retry orders safely.
+2. **Persistence:** move from JSON files to PostgreSQL along the schema already designed in [docs/PERSISTENCE.md](docs/PERSISTENCE.md), once the data outgrows one disk.
+3. **Station:** reconnect the expired social tokens, finish the Pinterest app review, and test channels with real traffic.
+4. **Docs:** an architecture document with diagrams, and a modernization report.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/CITY.md](docs/CITY.md) | The 3D city: weather, streamer rooms, skins, shuttles, the shared world |
+| [docs/TRADING.md](docs/TRADING.md) | The strategy, sizing, sessions, prop account rules, real-data results, backtesting, Strategy Forge |
+| [docs/LIVE_TRADING.md](docs/LIVE_TRADING.md) | Live paper trading, the news filter, the AI trading desk, reports, real orders, TradingView setup |
+| [docs/STATION.md](docs/STATION.md) | ULTRON, the agents, ventures, the outbox, treasury, connectors, Jarvis |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Hosting on Render, phone alerts, the watchdog |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, authentication, secrets, agent boundaries, safeguards |
+| [docs/PERSISTENCE.md](docs/PERSISTENCE.md) | Storage, durability, recovery, the PostgreSQL design |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Setup, tests, CI, dependencies |
+| [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md) | The engineering audit: findings and their status |
+| [docs/MIGRATION_FROM_STARNET.md](docs/MIGRATION_FROM_STARNET.md) | The StarNet → Nexus City rename |
+
+## Author
+
+Built by **Jerai Padilla** ([@levetteit](https://github.com/levetteit)), with AI pair-programming from Claude Code.
