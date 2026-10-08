@@ -14,6 +14,8 @@ touch the trading bots' orders and risk. Each of those is an approval that waits
 """
 from __future__ import annotations
 
+import json
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
@@ -39,11 +41,25 @@ def _is_connection(exc) -> bool:
         return True
     return isinstance(exc, anthropic.APIStatusError) and (exc.status_code in (401, 403)
                                                           or "credit balance" in str(getattr(exc, "message", "")).lower())
+
+
+BUSY_STATUSES = (429, 500, 502, 503, 504, 529)   # rate limited, overloaded or a server error: Claude's, not the job's
+
+
+def _is_busy(exc) -> bool:
+    """Claude answered but couldn't take the request right now (audit M-8). The SDK has already retried; the job
+    keeps its place and runs again after a short wait instead of being marked failed."""
+    try:
+        import anthropic
+    except ImportError:
+        return False
+    return isinstance(exc, anthropic.APIStatusError) and exc.status_code in BUSY_STATUSES
 MAX_EXPERIMENTS = int(env("STATION_EXPERIMENTS", "3"))      # live ventures besides the trading desk
 TASKS_PER_DAY = int(env("STATION_TASKS_PER_DAY", "25"))     # agent drafting runs per ET day
 STALL_MINUTES = 30
 KICKOFF_RETRY = timedelta(hours=3)   # no opportunities on file: research again this soon instead of tomorrow
 AI_BACKOFF = timedelta(minutes=20)   # after a connection failure, wait this long instead of burning the day's slots
+AI_BUSY_BACKOFF = timedelta(minutes=3)   # Claude rate-limited or overloaded: a short wait, then the same job again
 ACTIVE_STAGES = ("approved", "build", "launch", "operate", "measure", "optimize", "scale")
 REPORT_AT = (8, 30)   # ET, daily
 AUDIT_AT = (7, 0)     # ET, daily
@@ -66,6 +82,9 @@ def offer_of(o: dict) -> str:
 class Ultron:
     def __init__(self, data_dir: str, client=None, notify: Optional[Callable[[str, str], None]] = None) -> None:
         self.store = Store(data_dir)
+        # ULTRON's settings are changed by its job thread, the event loop and the API's threadpool: change them and
+        # save them under this lock (audit M-6). `with ultron.cfg_lock:` around any change made from outside.
+        self.cfg_lock = threading.RLock()
         connectors.set_data_dir(data_dir)
         self.treasury = Treasury(self.store)
         self.brain = Brain(self.treasury, client)
@@ -176,7 +195,17 @@ class Ultron:
         self._save_cfg()
 
     def _save_cfg(self) -> None:
-        self.store.save_doc("ultron.json", self.cfg)
+        """Save a consistent snapshot. Writers that take `cfg_lock` can't change it mid-copy; a change from a thread
+        that doesn't hold the lock can still interrupt the copy, so a few retries cover that."""
+        with self.cfg_lock:
+            for attempt in range(5):
+                try:
+                    snapshot = json.loads(json.dumps(self.cfg, default=str))
+                    break
+                except RuntimeError:   # "dictionary changed size during iteration"
+                    if attempt == 4:
+                        raise
+            self.store.save_doc("ultron.json", snapshot)
 
     # ---------------------------------------------------------------- the tick (fast, no network)
     def tick(self, engine=None, now: Optional[datetime] = None, real_account: bool = True) -> Optional[dict]:
@@ -392,26 +421,29 @@ class Ultron:
     def _job_failed(self, job: dict, exc: Exception, now: datetime) -> None:
         """Record why a job failed and leave its work where it will be retried (Claude unreachable) or skipped."""
         s = self.store
-        self.last_error = redact((self.brain.last_error or str(exc)) if _is_connection(exc) else str(exc))[:200]
+        busy = _is_busy(exc)
+        self.last_error = redact((self.brain.last_error or str(exc)) if _is_connection(exc) or busy else str(exc))[:200]
         if "credit balance" in str(exc).lower():
             credits.mark_empty(s, now)
-        if _is_connection(exc):
-            # the network or the key, not the job: keep the job and its slot, try again in a few minutes
-            self.cfg["ai_backoff_until"] = (now + AI_BACKOFF).isoformat()
+        if _is_connection(exc) or busy:
+            # the network, the key or Claude being busy, not the job: keep the job and its slot, try again shortly
+            with self.cfg_lock:
+                self.cfg["ai_backoff_until"] = (now + (AI_BUSY_BACKOFF if busy else AI_BACKOFF)).isoformat()
             self._save_cfg()
-            s.event("ultron.ai_unreachable", "A-001", f"{job['kind']} waiting: {self.last_error}", severity="WARNING")
+            s.event("ultron.ai_busy" if busy else "ultron.ai_unreachable", "A-001", f"{job['kind']} waiting: {self.last_error}",
+                    severity="INFO" if busy else "WARNING")
             if job["kind"] == "plan":
                 s.update("ventures", job["venture"], {"planned": False}, "A-001", "planning will retry")
             if job["kind"] == "shop_research":
                 self.cfg.pop("shop_research_at", None)
                 self._save_cfg()
             if job["kind"] == "product":
-                s.update("ventures", job["venture"], {"product_at": None}, "A-001", "Claude unreachable: product will retry")
+                s.update("ventures", job["venture"], {"product_at": None}, "A-001", "Claude unavailable: product will retry")
             if job["kind"] in ("task",):
                 s.update("tasks", job["task"], {"status": "queued", "attempts": max(0, s.get("tasks", job["task"]).get("attempts", 1) - 1)},
-                         "A-001", "Claude unreachable: back in the queue")
+                         "A-001", "Claude unavailable: back in the queue")
             if job["kind"] in ("qa", "revise"):
-                s.update("actions", job["action"], {"status": job["kind"]}, "A-001", "Claude unreachable: will retry")
+                s.update("actions", job["action"], {"status": job["kind"]}, "A-001", "Claude unavailable: will retry")
             return None
         s.event("ultron.job_failed", "A-001", f"{job['kind']} failed: {self.last_error}", ref=job.get("task") or job.get("routine")
                 or job.get("venture"), severity="WARNING")

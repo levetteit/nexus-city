@@ -183,7 +183,7 @@ Step-by-step hosting, phone alerts and monitoring are in [docs/OPERATIONS.md](do
 
 ## Roadmap
 
-1. **Station reliability:** the open medium findings M-6 (config shared across threads) and M-8 (Claude rate limits treated as failures).
+1. **Hygiene:** the low-severity items in the audit (for example Subresource Integrity on the Three.js import, OAuth tokens encrypted at rest).
 2. **Persistence:** move from JSON files to PostgreSQL along the schema already designed in [docs/PERSISTENCE.md](docs/PERSISTENCE.md), once the data outgrows one disk.
 3. **Station:** finish the Pinterest app review, and test channels with real traffic.
 

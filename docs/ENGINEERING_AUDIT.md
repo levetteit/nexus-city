@@ -575,5 +575,15 @@ behaviour that was already right.
 `test_outbound_stop_also_stops_kit_pins` used the real clock, so once the daily audit hour had passed the audit job outranked the pin
 and the test failed for the rest of the day. It now uses a fixed time.
 
-Still open: M-6, M-8 and the low-severity items in section 3.
+---
+
+## 16. Station reliability (2026-10-08)
+
+| Finding | Fix | Test (`tests/test_station_reliability.py`) |
+|---|---|---|
+| M-6 | ULTRON's settings have one lock (`cfg_lock`). `_save_cfg` takes a consistent snapshot under it and retries if a writer outside the lock interrupts the copy. The outbound switch, the War Room button and Jarvis's `routine.run` / `warroom` change settings under the lock | `test_saving_settings_survives_a_change_from_another_thread`, `test_many_writers_never_break_a_save`, `test_outside_writers_take_the_settings_lock` |
+| M-8 | Claude answering 429, 529 or another 5xx (after the SDK's own retries) is treated as "busy": the job keeps its place and its daily slot, ULTRON waits `AI_BUSY_BACKOFF` (3 minutes; 20 for an outage) and the event is `ultron.ai_busy`, not `ultron.job_failed`. A real error such as a 400 still fails the job | `test_a_busy_claude_keeps_the_task_and_waits_a_little[429/529/503]`, `test_a_real_error_still_fails_the_task` |
+
+With this, every critical, high and medium finding is fixed except **M-10** (the default send policy), which the
+owner chose to keep. The low-severity items in section 3 remain.
 
