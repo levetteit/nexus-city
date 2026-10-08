@@ -56,6 +56,20 @@ async def broadcast(msg: dict) -> None:
         clients.discard(ws)
 
 
+async def json_body(request: Request) -> dict:
+    """The request's JSON object. An empty body is `{}`; anything that isn't a JSON object is a 400, not a crash."""
+    raw = await request.body()
+    if not raw.strip():
+        return {}
+    try:
+        b = json.loads(raw)
+    except ValueError:
+        raise HTTPException(400, "body must be JSON")
+    if not isinstance(b, dict):
+        raise HTTPException(400, "body must be a JSON object")
+    return b
+
+
 async def run_city() -> None:
     while True:
         events = engine.tick()
@@ -420,7 +434,7 @@ async def desk_meeting(request: Request) -> dict:
     """Hold a meeting now (`{"kind": "morning"}` or `"evening"`)."""
     if desk is None or not desk.enabled:
         raise HTTPException(503, "add ANTHROPIC_API_KEY to turn the trading desk on")
-    kind = (await request.json()).get("kind", "morning")
+    kind = (await json_body(request)).get("kind", "morning")
     if kind not in ("morning", "evening") or desk.running:
         raise HTTPException(409, "a meeting is already running" if desk.running else "kind must be morning or evening")
     last = reports.get(reports.list(1)[0]["day"]) if kind == "evening" and reports.list(1) else None
@@ -433,7 +447,7 @@ async def desk_act(request: Request) -> dict:
     """Let the desk's risk mode affect trading (true) or keep it advisory (false)."""
     if desk is None:
         raise HTTPException(503, "the trading desk only runs in live mode")
-    desk.set_act(bool((await request.json()).get("act")))
+    desk.set_act(bool((await json_body(request)).get("act")))
     return desk.status()
 
 
@@ -460,7 +474,7 @@ def signals_day(day: str) -> dict:
 @app.post("/api/signals/{day}/{action}")
 async def signals_action(day: str, action: str, request: Request) -> dict:
     """vote: {id, vote: yes|no|"", note} · missed: {clock "HH:MM", tf, side, note}"""
-    b = await request.json()
+    b = await json_body(request)
     try:
         if action == "vote":
             return _signals().vote(day, str(b["id"]), str(b.get("vote", "")), str(b.get("note", "")))
@@ -744,7 +758,7 @@ async def scale_set(request: Request) -> dict:
     """Your numbers for the plan: {"eval_price": 99, "max_accounts": 5} (the price Lucid charges you, your limit)."""
     if not station:
         raise HTTPException(503, "the station isn't running")
-    b = await request.json()
+    b = await json_body(request)
     try:
         station.treasury.set_scale(None if b.get("eval_price") is None else float(b["eval_price"]),
                                    None if b.get("max_accounts") is None else int(b["max_accounts"]))
@@ -761,7 +775,7 @@ def accounts_list() -> dict:
 @app.post("/api/accounts")
 async def accounts_add(request: Request) -> dict:
     """Add a Lucid account: name, phase, balance, mll, payouts, cycle_days, optional webhook."""
-    b = await request.json()
+    b = await json_body(request)
     try:
         _book().add(str(b.get("name", "")), b["phase"], float(b["balance"]), float(b["mll"]),
                     int(b.get("payouts") or 0), int(b.get("cycle_days") or 0), str(b.get("webhook") or ""))
@@ -773,7 +787,7 @@ async def accounts_add(request: Request) -> dict:
 @app.post("/api/accounts/{acc_id}/{action}")
 async def accounts_action(acc_id: str, action: str, request: Request) -> dict:
     """sync (phase, balance, mll, payouts, cycle_days) · payout (amount) · webhook (url) · remove"""
-    b = await request.json() if action != "remove" else {}
+    b = await json_body(request) if action != "remove" else {}
     try:
         acc = _book().get(acc_id)
         if action == "sync":
@@ -797,7 +811,7 @@ async def accounts_action(acc_id: str, action: str, request: Request) -> dict:
 async def account_payout(request: Request) -> dict:
     """Record a payout you took at the firm (`{"amount": 1000}`)."""
     try:
-        engine.account.take_payout(float((await request.json())["amount"]))
+        engine.account.take_payout(float((await json_body(request))["amount"]))
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(400, str(exc))
     _save_account()
@@ -813,7 +827,7 @@ def _day_pnl(b: dict):
 @app.post("/api/account/sync")
 async def account_sync(request: Request) -> dict:
     """Match the paper account to the real one: phase, balance, MLL, payouts taken, cycle days."""
-    b = await request.json()
+    b = await json_body(request)
     try:
         engine.account.sync(b["phase"], float(b["balance"]), float(b["mll"]), int(b.get("payouts", 0)), int(b.get("cycle_days", 0)),
                             _day_pnl(b))
@@ -947,7 +961,7 @@ async def station_etsy_scan(rid: str, request: Request) -> dict:
         raise HTTPException(409, "a scan is already running")
     if not connectors.etsy_app():
         raise HTTPException(400, "set ETSY_KEYSTRING and ETSY_SHARED_SECRET on the server first")
-    terms = etsyscan.parse_terms(str((await request.json()).get("terms", "")))
+    terms = etsyscan.parse_terms(str((await json_body(request)).get("terms", "")))
     if not terms:
         raise HTTPException(400, "give at least one search phrase")
 
@@ -964,7 +978,7 @@ async def station_etsy_scan(rid: str, request: Request) -> dict:
 async def station_kit_publish(kit_id: str, request: Request) -> dict:
     """The owner's go for a finished kit (kits.py): {"price": 12.99, "venture": "V-006"}. Storefront + Etsy (+ first pin)."""
     from .station import connectors, kits
-    b = await request.json()
+    b = await json_body(request)
     try:
         return await asyncio.to_thread(kits.publish, _station().store, kit_id, float(b.get("price") or 0), b.get("venture") or None)
     except KeyError:
@@ -1008,7 +1022,7 @@ def station_record(collection: str, rid: str) -> dict:
 @app.post("/api/station/approvals/{rid}")
 async def station_decide(rid: str, request: Request) -> dict:
     """The owner's decision: `{"decision": "approve" | "reject" | "changes", "note": "..."}`."""
-    b = await request.json()
+    b = await json_body(request)
     try:
         a = _station().decide(rid, b.get("decision", ""), str(b.get("note", ""))[:500])
         if a.get("kind") == "strategy_promote" and MODE == "live":
@@ -1042,10 +1056,7 @@ def station_opportunity(rid: str, action: str) -> dict:
 @app.post("/api/station/tasks/{rid}/done")
 async def station_task_done(rid: str, request: Request) -> dict:
     """Tick off an owner task (`{"note": "made the Fiverr account"}`)."""
-    try:
-        note = (await request.json()).get("note", "")
-    except Exception:
-        note = ""
+    note = (await json_body(request)).get("note", "")
     try:
         return _station().owner_done(rid, str(note)[:500])
     except KeyError:
@@ -1057,7 +1068,7 @@ async def station_task_done(rid: str, request: Request) -> dict:
 @app.post("/api/station/money")
 async def station_money(request: Request) -> dict:
     """Record real money: `{"kind": "income"|"expense", "amount": 25, "unit": "station"|"city", "note": "...", "venture": "V-002"}`."""
-    b = await request.json()
+    b = await json_body(request)
     try:
         return _station().record(b.get("kind", ""), float(b.get("amount", 0)), b.get("unit", "station"),
                                  str(b.get("note", ""))[:300], b.get("venture") or None)
@@ -1069,7 +1080,7 @@ async def station_money(request: Request) -> dict:
 async def station_credits(request: Request) -> dict:
     """You added Claude credits in the Anthropic Console: `{"amount": 20, "note": "..."}`. Returns the new count."""
     from .station import credits
-    b = await request.json()
+    b = await json_body(request)
     st = _station()
     try:
         credits.add(st.store, float(b.get("amount", 0)), str(b.get("note", "")))
@@ -1172,10 +1183,7 @@ async def station_action(rid: str, what: str, request: Request) -> dict:
     a = st.store.get("actions", rid)
     if not a:
         raise HTTPException(404)
-    try:
-        note = str((await request.json()).get("note", ""))[:500]
-    except Exception:
-        note = ""
+    note = str((await json_body(request)).get("note", ""))[:500]
     try:
         if what == "done":
             return actions.owner_done(st.store, rid, note)
@@ -1199,7 +1207,7 @@ async def station_action(rid: str, what: str, request: Request) -> dict:
 async def station_outbound(request: Request) -> dict:
     """The Station's E-STOP: `{"on": false}` stops every outgoing post, email and Stripe change at once."""
     st = _station()
-    on = bool((await request.json()).get("on"))
+    on = bool((await json_body(request)).get("on"))
     st.cfg["outbound"] = on
     st._save_cfg()
     st.store.event("station.outbound", "owner", "outbound ON: QA-passed work goes out" if on else "OUTBOUND STOPPED by the owner",
@@ -1230,7 +1238,7 @@ def station_finance(month: str | None = None) -> dict:
 @app.post("/api/station/feedback")
 async def station_feedback(request: Request) -> dict:
     """Tell the station what you think about anything (`{"ref": "V-002", "note": "nobody clicks these"}`). The War Room reads it."""
-    b = await request.json()
+    b = await json_body(request)
     note = str(b.get("note", "")).strip()[:1000]
     if not note:
         raise HTTPException(400, "note is empty")
@@ -1253,7 +1261,7 @@ async def station_venture_outreach(rid: str, request: Request) -> dict:
     st = _station()
     if not st.store.get("ventures", rid):
         raise HTTPException(404)
-    on = bool((await request.json()).get("on"))
+    on = bool((await json_body(request)).get("on"))
     return st.store.update("ventures", rid, {"outreach_allowed": on}, "owner", f"outreach {'allowed' if on else 'off'} for {rid}",
                            kind="venture.outreach_allowed")
 
@@ -1274,12 +1282,9 @@ async def jarvis_act(request: Request) -> dict:
     ULTRON, a push to the owner. Money, accounts and the trading desk are refused (403): they stay the owner's."""
     from . import jarvis
     _jarvis_auth(request)
+    b = await json_body(request)
     try:
-        b = await request.json()
-    except ValueError:
-        raise HTTPException(400, "body must be JSON")
-    try:
-        return jarvis.act(_station(), b if isinstance(b, dict) else {}, notify=_station_notify)
+        return jarvis.act(_station(), b, notify=_station_notify)
     except jarvis.Refused as exc:
         raise HTTPException(403, f"the owner's: {exc}")
     except KeyError as exc:
@@ -1335,7 +1340,7 @@ def _city_brief() -> dict:
 async def station_add_lead(rid: str, request: Request) -> dict:
     """Log a lead: `{"source": "dm"|"whatsapp"|"call"|"comment"|"referral"|"other", "note": "...", "action": "X-012"}`."""
     from .station import results
-    b = await request.json()
+    b = await json_body(request)
     try:
         return results.add_lead(_station().store, rid, str(b.get("source", "")), str(b.get("note", ""))[:300], b.get("action") or None)
     except KeyError:
@@ -1349,7 +1354,7 @@ async def station_set_lead(rid: str, request: Request) -> dict:
     """Move a lead along: `{"status": "quoted"|"won"|"lost", "amount": 350}`. Won books the amount as real income."""
     from .station import results
     st = _station()
-    b = await request.json()
+    b = await json_body(request)
     try:
         amount = float(b["amount"]) if b.get("amount") not in (None, "") else None
         return results.set_lead(st.store, rid, str(b.get("status", "")), amount, str(b.get("note", ""))[:300], record_income=st.record)
@@ -1364,7 +1369,7 @@ async def station_venture_link(rid: str, request: Request) -> dict:
     """Where customers buy (`{"name": "fiverr", "url": "https://www.fiverr.com/..."}`). Content starts once a venture has one."""
     st = _station()
     v = st.store.get("ventures", rid)
-    b = await request.json()
+    b = await json_body(request)
     name, url = str(b.get("name", "")).strip().lower()[:30], str(b.get("url", "")).strip()[:500]
     if not v:
         raise HTTPException(404)
@@ -1377,7 +1382,7 @@ async def station_venture_link(rid: str, request: Request) -> dict:
 async def station_optout(request: Request) -> dict:
     """Someone asked not to be contacted: never again, by any agent."""
     from .station import actions
-    email = str((await request.json()).get("email", ""))
+    email = str((await json_body(request)).get("email", ""))
     if "@" not in email:
         raise HTTPException(400, "not an email address")
     actions.opt_out(_station().store, email)
@@ -1406,7 +1411,7 @@ async def station_venture_stage(rid: str, request: Request) -> dict:
     """The owner moves a venture (e.g. to launch, operate, paused or killed)."""
     from .station.store import STAGES
     st = _station()
-    stage = (await request.json()).get("stage")
+    stage = (await json_body(request)).get("stage")
     if not st.store.get("ventures", rid):
         raise HTTPException(404)
     if stage not in STAGES:

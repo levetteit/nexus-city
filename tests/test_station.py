@@ -1387,3 +1387,20 @@ def test_cut_off_answer_retries_with_less_thinking():
             stop = "max_tokens" if len(calls) == 1 else "end_turn"
             return SimpleNamespace(stop_reason=stop, content=[SimpleNamespace(type="text", text='{"ok": true}')])
     assert B().structured("A-001", "s", "p", {}) == {"ok": True} and calls == ["high", "low"]
+
+
+def test_a_failed_task_is_recorded_without_secrets_and_never_raises(ultron):
+    u, fake = ultron
+    v = u.store.create("ventures", {"name": "Copy shop", "stage": "operate", "planned": True}, "test")
+    t = u.store.create("tasks", {"title": "write the copy", "venture": v["id"], "assigned_agent": "A-006", "kind": "agent",
+                                 "status": "queued", "depends_on": [], "attempts": 0, "instructions": "", "expected_output": "",
+                                 "success_criteria": ""}, "test")
+
+    def broken(*a, **kw):
+        raise RuntimeError("upstream said no to key sk-ant-api03-supersecretvalue123456")
+    u.brain.structured = broken
+    assert u.run_job({"kind": "task", "task": t["id"]}, now=MON_0900) is None
+    failed = u.store.get("tasks", t["id"])
+    assert failed["status"] == "failed" and "supersecretvalue" not in failed["error"]
+    assert "supersecretvalue" not in u.last_error and u.busy is None
+    assert any(e["kind"] == "ultron.job_failed" for e in u.store.events(20))

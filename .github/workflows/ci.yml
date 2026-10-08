@@ -16,8 +16,8 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
       - run: pip install "pyflakes>=3,<4"
@@ -30,8 +30,8 @@ jobs:
     name: pytest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
           cache: pip
@@ -52,7 +52,7 @@ jobs:
     name: security
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0   # the secret scan covers the whole history, not just this commit
       - name: Secret scan (gitleaks, full history; config in .gitleaks.toml)
@@ -60,7 +60,7 @@ jobs:
           curl -sSL -o gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
           tar xzf gitleaks.tgz gitleaks
           ./gitleaks git . --redact --no-banner
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
       - name: Dependency vulnerabilities (pip-audit on the shipped lockfile)
@@ -72,7 +72,7 @@ jobs:
     name: docker
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build the image
         run: docker build -t nexus-city:ci .
       - name: Start it and check it serves (simulation mode, no keys)

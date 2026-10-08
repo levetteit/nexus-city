@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from ..redact import redact
 from .brain import Brain
 from .store import Store
 
@@ -295,7 +296,8 @@ def run_task(store: Store, brain: Brain, task: dict) -> dict:
             f"SUCCESS CRITERIA: {task['success_criteria']}\n\nINPUTS FROM EARLIER TASKS:\n"
             + (json.dumps(inputs, indent=1) if inputs else "(none)")), TASK_SCHEMA, venture=venture.get("id"), effort="medium")
     except Exception as exc:
-        store.update("tasks", task["id"], {"status": "failed", "error": str(exc)[:200]}, agent["id"], f"failed: {str(exc)[:120]}",
+        err = redact(exc)
+        store.update("tasks", task["id"], {"status": "failed", "error": err[:200]}, agent["id"], f"failed: {err[:120]}",
                      kind="task.failed")
         store.update("agents", agent["id"], {"status": "WAITING", "current_task": None}, agent["id"], "task failed", kind="agent.state")
         raise
