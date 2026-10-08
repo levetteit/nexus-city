@@ -562,3 +562,18 @@ token character with `0`, which is sometimes already `0`); it now always changes
 15 of the 16 new tests fail on the code before this change; the other one ("disarmed opens nothing new") pins
 behaviour that was already right.
 
+---
+
+## 15. Remaining trading and deploy items (2026-10-08)
+
+| Finding | Fix | Test |
+|---|---|---|
+| M-3 | On real candles (`ReplayMarket` and so `LiveMarket`: `anchor_signals = False`) a TradingView alert's `price` no longer moves the mark that stops and the drawdown are measured on. The simulation still snaps to it | `test_an_alert_price_moves_the_simulation_but_not_real_candles` |
+| M-12 | All accounts get each order at the same time (`asyncio.gather`), so one hung webhook can't delay another account's exit. Orders still go out one after another, so an exit never overtakes its entry | `test_a_hung_webhook_does_not_delay_the_other_accounts` |
+| O-H2 | `render.yaml` `buildFilter.paths` lists exactly what the image contains (`backend/`, `frontend/`, `kits/`, `requirements.lock`, `Dockerfile`, `.dockerignore`, `render.yaml`). Docs, tests and CI changes no longer redeploy and restart the bots | `test_the_render_build_filter_covers_everything_the_image_contains` (fails if the Dockerfile copies something the filter misses) |
+
+`test_outbound_stop_also_stops_kit_pins` used the real clock, so once the daily audit hour had passed the audit job outranked the pin
+and the test failed for the rest of the day. It now uses a fixed time.
+
+Still open: M-6, M-8 and the low-severity items in section 3.
+

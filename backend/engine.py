@@ -164,7 +164,9 @@ class Engine:
             b for b in self.bots.values() if b.cfg.underlying == payload.get("symbol")]
         if not targets:
             return []
-        if payload.get("price") is not None:
+        # The simulation snaps to an alert's price; on real candles the candles are the price, and an alert's
+        # value (late, mistyped or bogus) must not move the mark that stops and the drawdown are measured on (M-3).
+        if payload.get("price") is not None and getattr(self.market, "anchor_signals", True):
             self.market.underlyings[targets[0].cfg.underlying].anchor(float(payload["price"]))
         results = []
         for bot in targets:

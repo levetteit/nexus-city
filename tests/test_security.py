@@ -200,8 +200,10 @@ def test_outbound_stop_also_stops_kit_pins(tmp_path, monkeypatch):
     from backend.station.ultron import Ultron
     u = Ultron(str(tmp_path), client=None)
     monkeypatch.setattr(kits, "pins_due", lambda s, now: ["kit-1"])
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+    from datetime import datetime
+    from backend.station.ultron import ET
+    now = datetime(2026, 10, 7, 7, 0, tzinfo=ET)          # a fixed time: the real clock let the daily audit win
+    u.cfg["audited"] = now.date().isoformat()             # only pins are due
     assert (u.next_job(now) or {}).get("kind") == "kit_pin"
     u.cfg["outbound"] = False
     assert (u.next_job(now) or {}).get("kind") != "kit_pin"

@@ -92,6 +92,8 @@ def clock_min(t: datetime) -> int:
 class ReplayMarket:
     """Plays recorded 1-minute candles through the same interface as `Market`."""
 
+    anchor_signals = False   # real candles set the price; an alert's price never moves it
+
     def __init__(self, data: dict[str, list]) -> None:
         self.underlyings = {s: Underlying(s, rows[0][4], iv=0.2, vol=0.2, tick_size=SYMBOLS[s])
                             for s, rows in data.items() if rows}

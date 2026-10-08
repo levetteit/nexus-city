@@ -225,3 +225,60 @@ def test_late_candles_for_one_symbol_are_applied_not_dropped(monkeypatch):
     closes = [b.close for b in m.underlyings["MES"].bars[-3:]]
     assert closes == [5, 6, 7]                                         # both late ES minutes, in order
     assert m.underlyings["MES"].price == 7 and m.underlyings["MNQ"].price == 3
+
+
+# ---------------------------------------------------------------- M-3: an alert's price can't move a real mark
+def test_an_alert_price_moves_the_simulation_but_not_real_candles(real_data):
+    from backend.account import PropAccount
+    from backend.backtest import ReplayMarket
+    from backend.engine import Engine
+    live_like = Engine(market=ReplayMarket(real_data), account=PropAccount())
+    live_like.market.step()
+    before = live_like.market.underlyings["MNQ"].price
+    live_like.signal({"symbol": "MNQ", "signal": "long", "price": 1.0})        # a bogus alert value
+    assert live_like.market.underlyings["MNQ"].price == before
+
+    sim = Engine()
+    sim.signal({"symbol": "MNQ", "signal": "long", "price": 20_000.0})
+    assert sim.market.underlyings["MNQ"].price == 20_000.0                    # the simulation still snaps to it
+
+
+# ---------------------------------------------------------------- M-12: one hung account can't delay the others
+def test_a_hung_webhook_does_not_delay_the_other_accounts(tmp_path, monkeypatch):
+    B = "https://tp/b"
+    r = TradersPostRouter(str(tmp_path), webhooks=[A, B])
+    real_sleep = asyncio.sleep
+    done = []
+
+    async def network(fn, url, payload):                                       # A answers slowly, B at once
+        await real_sleep(0.2 if url == A else 0)
+        done.append((payload["action"], url))
+        return 200, "ok"
+    monkeypatch.setattr(execution.asyncio, "to_thread", network)
+    monkeypatch.setattr(execution.asyncio, "sleep", lambda s: real_sleep(0))
+    order = lambda action: ("MNQ", {"ticker": "MNQZ2026", "action": action, "quantity": 3}, "bot", [A, B])
+
+    async def go():
+        r.queue = asyncio.Queue()
+        task = asyncio.create_task(r._worker())
+        r.queue.put_nowait(order("buy"))
+        r.queue.put_nowait(order("exit"))
+        await real_sleep(0.8)
+        task.cancel()
+    asyncio.run(go())
+    assert done == [("buy", B), ("buy", A), ("exit", B), ("exit", A)]         # B never waits on A; exit after entry
+
+
+# ---------------------------------------------------------------- O-H2: only app changes redeploy (and restart the bots)
+def test_the_render_build_filter_covers_everything_the_image_contains():
+    import fnmatch
+    import pathlib
+    import yaml
+    root = pathlib.Path(__file__).resolve().parent.parent
+    paths = yaml.safe_load((root / "render.yaml").read_text())["services"][0]["buildFilter"]["paths"]
+    copied = [line.split()[1] for line in (root / "Dockerfile").read_text().splitlines() if line.startswith("COPY ")]
+    for src in copied:
+        probe = src if "." in src.split("/")[-1] else f"{src}/x.py"
+        assert any(fnmatch.fnmatch(probe, p) for p in paths), f"{src} is in the image but a change to it wouldn't deploy"
+    for doc in ("docs/SECURITY.md", "tests/test_api.py", "README.md", ".github/workflows/ci.yml"):
+        assert not any(fnmatch.fnmatch(doc, p) for p in paths), f"{doc} would restart the bots"

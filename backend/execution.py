@@ -296,8 +296,14 @@ class TradersPostRouter:
             symbol, payload, reason, targets = await self.queue.get()
             delivered = False
             try:
-                results = [await self._send_one(symbol, payload, reason, url) for url in targets]
-                delivered = all(results)
+                # every account gets this order at the same time, so one hung webhook can't hold up the others'
+                # exits (M-12). The next order still waits for this one: an exit never overtakes its entry.
+                results = await asyncio.gather(*(self._send_one(symbol, payload, reason, url) for url in targets),
+                                               return_exceptions=True)
+                for r in results:
+                    if isinstance(r, Exception):
+                        self._fail("worker", redact(f"order worker: {type(r).__name__}: {r}")[:200])
+                delivered = all(r is True for r in results)
             except Exception as exc:   # a bug here must not strand every later order in the queue
                 self._fail("worker", redact(f"order worker: {type(exc).__name__}: {exc}")[:200])
             finally:

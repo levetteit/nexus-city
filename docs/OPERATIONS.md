@@ -23,7 +23,7 @@ On the phone you get a compact account bar (tap it for the full panel), the
 city, and an **activity feed** of what every bot is doing: PROCs seen, waiting
 for MES, entries, adds, exits, account stops. Tap a building for its card.
 
-Every push to `main` redeploys automatically. Paper results stay on the disk
+A push to `main` redeploys automatically when the app changes (`backend/`, `frontend/`, `kits/`, the lockfile or the Dockerfile). The build filter in `render.yaml` skips docs, tests and CI files, because a deploy restarts the bots. If an existing service doesn't pick the filter up from the Blueprint, set the same paths under **Settings → Build Filters** in Render. Paper results stay on the disk
 (`/app/data/paper_trades.csv`, `paper_days.csv`); download them from Render's
 Shell tab. The same Docker image runs on Fly.io, Railway or any VPS: set
 `NEXUS_PASSWORD`, mount a volume at `/app/data`, expose port 8000.
