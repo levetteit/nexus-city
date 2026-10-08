@@ -16,18 +16,17 @@ Files: data/station/products/<random>.pdf (served only after a verified payment)
 from __future__ import annotations
 
 import html
-import io
 import json
 import os
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 from ..env import env
 from . import connectors, media
 from .brain import Brain
-from .store import Store, now_iso
+from .store import Store
 
 PER_DAY = int(env("DIGITAL_PER_DAY", "3"))
 PRODUCT_EVERY = timedelta(hours=float(env("DIGITAL_EVERY_HOURS", "24")))   # per venture

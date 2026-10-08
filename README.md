@@ -1,5 +1,7 @@
 # Nexus City
 
+[![CI](https://github.com/levetteit/nexus-city/actions/workflows/ci.yml/badge.svg)](https://github.com/levetteit/nexus-city/actions/workflows/ci.yml)
+
 > Formerly **StarNet / Starnet City**. Every `NEXUS_*` setting below also accepts its old `STARNET_*` name; see [docs/MIGRATION_FROM_STARNET.md](docs/MIGRATION_FROM_STARNET.md).
 
 A live 3D "trading city": each Python bot is a **worker** living in its own

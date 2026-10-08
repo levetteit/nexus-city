@@ -906,7 +906,6 @@ def media_ok(u, name):
 
 
 def test_old_etsy_goal_is_retired(tmp_path):
-    import os as _os
     d = tmp_path / "station"
     d.mkdir()
     (d / "treasury.json").write_text(json.dumps({"goals": [{"id": "etsy-launch", "name": "Open the first Etsy store", "monthly": 29.0,

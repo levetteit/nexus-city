@@ -21,7 +21,6 @@ zone settings (pivot length, IFFVGs, proximity) match your TradingView chart and
 from __future__ import annotations
 
 import copy
-import itertools
 import json
 import os
 import random

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import email
 import imaplib
-import os
 import re
 from datetime import datetime, timedelta
 from email.utils import parseaddr

@@ -1,0 +1,90 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - run: pip install "pyflakes>=3,<4"
+      - name: Byte-compile everything (syntax errors fail here)
+        run: python -m compileall -q backend tests kits
+      - name: Static checks (undefined names, unused imports, shadowing)
+        run: python -m pyflakes backend tests
+
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock
+            requirements-dev.txt
+      - run: pip install -r requirements.lock -r requirements-dev.txt   # the exact versions that ship, plus test tools
+      - name: Tests (network blocked by tests/conftest.py; nothing is sent anywhere)
+        run: python -m pytest -q --cov=backend --cov-report=term | tee pytest.log
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Tests" >> "$GITHUB_STEP_SUMMARY"
+          tail -n 1 pytest.log >> "$GITHUB_STEP_SUMMARY"
+          grep '^TOTAL' pytest.log | awk '{print "Coverage of backend/: " $NF}' >> "$GITHUB_STEP_SUMMARY"
+
+  security:
+    name: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the secret scan covers the whole history, not just this commit
+      - name: Secret scan (gitleaks, full history; config in .gitleaks.toml)
+        run: |
+          curl -sSL -o gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
+          tar xzf gitleaks.tgz gitleaks
+          ./gitleaks git . --redact --no-banner
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - name: Dependency vulnerabilities (pip-audit on the shipped lockfile)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.lock --no-deps --disable-pip --progress-spinner off
+
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t nexus-city:ci .
+      - name: Start it and check it serves (simulation mode, no keys)
+        run: |
+          docker run -d --name city -p 8000:8000 -e NEXUS_MODE=sim -e NEXUS_DATA_DIR=/tmp/data nexus-city:ci
+          for i in $(seq 1 30); do
+            if curl -fsS localhost:8000/healthz; then break; fi
+            sleep 2
+          done
+          curl -fsS localhost:8000/healthz | grep -q '"ok":true'
+          curl -fsS localhost:8000/ | grep -q '<title>Nexus City</title>'
+          curl -fsS localhost:8000/api/state > /dev/null
+      - name: Logs
+        if: always()
+        run: docker logs city || true

@@ -1,7 +1,6 @@
 """The Strategy Forge: honest tests, a paper shadow, and nothing goes live without the owner."""
 from datetime import date, datetime, timedelta
 
-import pytest
 
 from backend import forge
 from backend.backtest import ET
