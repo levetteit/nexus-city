@@ -1,6 +1,11 @@
-fastapi>=0.110
-uvicorn[standard]>=0.29
-tzdata>=2024.1   # timezone data for Windows (Linux/macOS already have it)
-pywebpush>=2.0   # phone notifications (web push)
-anthropic>=1.11,<2
-Pillow>=10.1   # image cards for Instagram and Facebook posts (station/media.py)
+# Nexus City runtime dependencies (direct imports only). Python 3.12 (see .python-version).
+# Ranges: tested minimum up to the next major version. The exact versions that ship are pinned in
+# requirements.lock (regenerate: see docs/DEVELOPMENT.md).
+fastapi>=0.110,<1               # web app, REST API, WebSocket
+uvicorn[standard]>=0.29,<1      # ASGI server (the [standard] extra adds uvloop, websockets, python-dotenv for --env-file)
+anthropic>=1.11,<2              # Claude API: trading desk, AI operations station
+pywebpush>=2.0,<3               # web push notifications
+py-vapid>=1.9,<2                # web push keys (imported directly in backend/notify.py)
+cryptography>=42                # key handling for web push (imported directly in backend/notify.py)
+Pillow>=10.1,<13                # image cards for social posts, product covers
+tzdata>=2024.1                  # IANA time zones on systems without them (Windows, slim images)
