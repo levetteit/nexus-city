@@ -5,3 +5,8 @@ docs
 *.pyc
 .venv
 kits/*/source
+.env
+.env.*
+*.pem
+.github
+tests

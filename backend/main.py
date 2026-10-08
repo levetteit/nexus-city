@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .env import env
+from .redact import redact
 from .config import TICK_SECONDS
 from .bots.pointer import SIGNALS
 from .backtest import ET
@@ -117,7 +118,7 @@ async def run_live() -> None:
                 await asyncio.to_thread(calendar.refresh)   # no-op unless the cached week is stale
                 await asyncio.to_thread(market.poll)
             except Exception as exc:   # network hiccup: try again next poll
-                print(f"live poll failed: {exc}")
+                print(redact(f"live poll failed: {exc}"))
         market.release()   # candles pushed by the real-time TradingView feed
         et = datetime.now(timezone.utc).astimezone(ET)
         if desk.enabled and et.weekday() < 5 and (8, 40) <= (et.hour, et.minute) < (9, 25) and morning_done != et.date().isoformat():
@@ -155,7 +156,7 @@ async def check_day(day: dict | None, report: dict) -> None:
             report["check"] = await asyncio.to_thread(scorecard.replay, day)
             reports.save(report)
     except Exception as exc:   # e.g. Yahoo down: send the report without the check
-        print(f"replay check failed: {exc}")
+        print(redact(f"replay check failed: {exc}"))
     title, body = reports.message(report, scorecard.edge(engine.account), BASELINE)
     notifier.send(title, body, "report", url=f"/?report={report['day']}")
     if desk.enabled:
@@ -177,8 +178,8 @@ async def run_desk(kind: str, report: dict | None = None) -> dict | None:
         ctx = context(engine, report, recent, scorecard.status(engine.account), engine.news, desk.lessons, past)
         out = await asyncio.to_thread(desk.evening if kind == "evening" else desk.morning, ctx)
     except Exception as exc:
-        desk.last_error = desk.last_error or str(exc)[:200]
-        print(f"desk {kind} failed: {exc}")
+        desk.last_error = redact(desk.last_error or str(exc))[:200]
+        print(redact(f"desk {kind} failed: {exc}"))
         return None
     finally:
         desk.running = False
@@ -276,7 +277,7 @@ async def run_forge() -> None:
                     day += timedelta(days=1)
             _forge_proposal(forge.state(live.DATA_DIR))
         except Exception as exc:   # the forge must never take trading down
-            print(f"forge loop: {exc}")
+            print(redact(f"forge loop: {exc}"))
         await asyncio.sleep(FORGE_CHECK)
 
 
@@ -328,8 +329,8 @@ async def run_station() -> None:
             if job:
                 await asyncio.to_thread(station.run_job, job)
         except Exception as exc:   # the station must never take the city down
-            station.last_error = str(exc)[:200]
-            print(f"station tick failed: {exc}")
+            station.last_error = redact(exc)[:200]
+            print(redact(f"station tick failed: {exc}"))
         await asyncio.sleep(15)
 
 
@@ -585,6 +586,7 @@ FEED_LOG: list[dict] = []   # the last few TradingView feed webhooks and what ha
 
 def _feed_note(ok: bool, reason: str, ticker: str = "") -> None:
     from datetime import datetime, timezone
+    reason, ticker = redact(reason), redact(ticker)[:40]   # a malformed body can start with the secret itself
     entry = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ok": ok, "reason": reason, "ticker": ticker}
     if not ok and (not FEED_LOG or FEED_LOG[-1]["reason"] != reason):   # shows in Render → Logs
         print(f"feed webhook rejected ({ticker or '?'}): {reason}")
@@ -600,7 +602,7 @@ async def feed(request: Request) -> dict:
     try:
         p = json.loads(raw)
     except ValueError:
-        _feed_note(False, f"not JSON (starts with {raw[:30]!r}): the alert message must be left empty")
+        _feed_note(False, f"not JSON ({len(raw)} bytes): the alert message must be left empty")   # never echo the body: it can hold the secret
         raise HTTPException(400, "body must be JSON")
     ticker = str(p.get("ticker", "")) if isinstance(p, dict) else ""
     if not secret:
@@ -609,7 +611,7 @@ async def feed(request: Request) -> dict:
     if not isinstance(p, dict) or not hmac.compare_digest(str(p.get("secret", "")), secret):
         got = str(p.get("secret", "")) if isinstance(p, dict) else ""
         hint = "empty: set the secret in the indicator, then create the alert again" if not got else \
-            f"doesn't match ({len(got)} characters sent, {len(secret)} expected)"
+            "doesn't match the server's feed secret"
         _feed_note(False, f"wrong feed secret: {hint}", ticker)
         raise HTTPException(401, "bad secret")
     if engine is None or MODE != "live":
@@ -909,6 +911,7 @@ async def tradingview(request: Request) -> dict:
     if signal not in SIGNALS:
         raise HTTPException(400, f"signal must be one of {sorted(SIGNALS)}")
     payload["signal"] = signal
+    payload.pop("secret", None)   # checked: it goes no further (bots, events, logs)
     if "ticker" in payload:
         payload["symbol"] = normalize_symbol(str(payload["ticker"]))
     return {"ok": True, "symbol": payload.get("symbol"), "results": engine.signal(payload)}
@@ -998,7 +1001,7 @@ async def station_etsy_scan(rid: str, request: Request) -> dict:
         try:
             await asyncio.to_thread(st.etsy_scan, rid, terms)
         except Exception as exc:   # recorded on the task; the station carries on
-            print(f"etsy scan {rid} failed: {exc}")
+            print(redact(f"etsy scan {rid} failed: {exc}"))
     asyncio.create_task(run())
     return {"started": True, "terms": terms, "listings": sum(n for _, n in terms)}
 

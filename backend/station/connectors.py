@@ -43,13 +43,17 @@ import urllib.request
 from email.message import EmailMessage
 from typing import Optional
 from ..env import env, set_env
+from ..redact import redact
 
 STRIPE_API = "https://api.stripe.com/v1"
 STRIPE_FEE = (0.029, 0.30)   # standard US card pricing, used only to estimate fees on booked sales
 
 
 class ConnectorError(RuntimeError):
-    pass
+    """A connector failed. The message is shown in the app and logs, so secrets are masked out of it."""
+
+    def __init__(self, message: str = "", *args) -> None:
+        super().__init__(redact(message), *args)
 
 
 # ---------------------------------------------------------------------------- Stripe
@@ -210,6 +214,11 @@ def _graph_base() -> str:
     return "https://graph.facebook.com/" + (f"{version}/" if version else "")
 
 
+def _graph_auth(token: Optional[str]) -> dict:
+    """The Page token as a Bearer header: Graph API reads never carry it in the URL."""
+    return {"Authorization": f"Bearer {token or ''}"}
+
+
 def _facebook_post(text: str, link: str, image_url: str = "") -> dict:
     page, token = env("FB_PAGE_ID"), env("FB_PAGE_TOKEN")
     try:
@@ -234,7 +243,7 @@ def _instagram_post(text: str, link: str, image_url: str = "") -> dict:
     try:
         box = _http_json("POST", f"{_graph_base()}{ig}/media", form={"image_url": image_url, "caption": text, "access_token": token})
         for _ in range(6):
-            st = _http_json("GET", f"{_graph_base()}{box['id']}?" + urllib.parse.urlencode({"fields": "status_code", "access_token": token}))
+            st = _http_json("GET", f"{_graph_base()}{box['id']}?fields=status_code", headers=_graph_auth(token))
             if st.get("status_code") in ("FINISHED", None):
                 break
             if st.get("status_code") == "ERROR":
@@ -293,25 +302,24 @@ def facebook_recent_posts(limit: int = 12) -> list[dict]:
     if not (page and token):
         return []
     base = _graph_base()
-    q = urllib.parse.urlencode({"fields": "message,created_time,permalink_url", "limit": limit, "access_token": token})
-    res = _http_json("GET", f"{base}{page}/posts?{q}")
+    q = urllib.parse.urlencode({"fields": "message,created_time,permalink_url", "limit": limit})
+    res = _http_json("GET", f"{base}{page}/posts?{q}", headers=_graph_auth(token))
     return [{"at": x.get("created_time", "")[:10], "text": (x.get("message") or "")[:700], "url": x.get("permalink_url", "")}
             for x in res.get("data", []) if x.get("message")]
 
 
 def facebook_post_metrics(post_id: str) -> dict:
     """Reactions, comments and shares on one of the Page's posts (pages_read_engagement)."""
-    q = urllib.parse.urlencode({"fields": "reactions.summary(total_count),comments.summary(total_count),shares",
-                                "access_token": env("FB_PAGE_TOKEN", "")})
-    r = _http_json("GET", f"{_graph_base()}{post_id}?{q}")
+    q = urllib.parse.urlencode({"fields": "reactions.summary(total_count),comments.summary(total_count),shares"})
+    r = _http_json("GET", f"{_graph_base()}{post_id}?{q}", headers=_graph_auth(env("FB_PAGE_TOKEN", "")))
     total = lambda k: ((r.get(k) or {}).get("summary") or {}).get("total_count", 0)
     return {"reactions": total("reactions"), "comments": total("comments"), "shares": (r.get("shares") or {}).get("count", 0)}
 
 
 def instagram_media_metrics(media_id: str) -> dict:
     """Likes and comments on one Instagram post (instagram_basic)."""
-    q = urllib.parse.urlencode({"fields": "like_count,comments_count", "access_token": env("FB_PAGE_TOKEN", "")})
-    r = _http_json("GET", f"{_graph_base()}{media_id}?{q}")
+    q = urllib.parse.urlencode({"fields": "like_count,comments_count"})
+    r = _http_json("GET", f"{_graph_base()}{media_id}?{q}", headers=_graph_auth(env("FB_PAGE_TOKEN", "")))
     return {"likes": r.get("like_count", 0), "comments": r.get("comments_count", 0)}
 
 
