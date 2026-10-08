@@ -179,11 +179,11 @@ Step-by-step hosting, phone alerts and monitoring are in [docs/OPERATIONS.md](do
   - Forward test: paper trading is ongoing.
   - Details: [docs/TRADING.md](docs/TRADING.md).
 - **Station:** live. Some outbound channels wait on third-party approvals or tokens.
-- **Known gaps:** the trading-reliability issues in [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md) (C-1, T-H1 to T-H7) are documented. Fixes for them are approved but not yet implemented.
+- **Known gaps:** loop supervision and order-safety fixes (audit C-1, T-H2, T-H3, T-H5, T-H6) are done. Three approved fixes that change trading behaviour (T-H1, T-H4, T-H7 in [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md)) are next.
 
 ## Roadmap
 
-1. **Trading reliability:** supervise the trading loop and make `/healthz` detect a stall. Send exits while disarmed, use wall-clock flatten timing, keep account halts across restarts, and retry orders safely.
+1. **Trading reliability:** send exits while disarmed, flatten on the wall clock instead of waiting for a candle, and keep account halts across restarts (approved; loop supervision and safe order retries are done).
 2. **Persistence:** move from JSON files to PostgreSQL along the schema already designed in [docs/PERSISTENCE.md](docs/PERSISTENCE.md), once the data outgrows one disk.
 3. **Station:** reconnect the expired social tokens, finish the Pinterest app review, and test channels with real traffic.
 

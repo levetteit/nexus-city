@@ -517,3 +517,23 @@ deliberate corrections:
 - **Run it** installed `requirements.txt` instead of the lockfile.
 - **Two Station paragraphs** had lost their bold titles in an earlier edit. They were restored from git history:
   "Autonomous ventures…" and "The Etsy shop, run by the crew".
+
+---
+
+## 13. Trading reliability, part 1 (non-behavioural fixes, 2026-10-08)
+
+| Finding | Fix | Test (`tests/test_trading_reliability.py`) |
+|---|---|---|
+| C-1 | Each step of the live loop guarded per candle (the order router can't be stopped by a broken log or report). Errors are logged and alerted once an hour per step. `supervised()` records a loop that dies. `/healthz` returns 503 when the loop died or hasn't completed a pass in 5 minutes | `test_a_broken_trade_log_cannot_stop_real_orders`, `test_healthz_fails_when_*`, `test_a_failing_step_*` |
+| T-H2 | Entries and adds are resent only when the request never reached TradersPost (`never_delivered`: connection refused, DNS, connect timeout). After a read timeout, reset or any HTTP reply they aren't. Exits and resizes keep retrying. HTTP errors are now answers, not exceptions | `test_never_delivered_*`, `test_an_entry_that_timed_out_*`, `test_an_entry_the_server_rejected_*`, `test_exits_are_still_retried_*` |
+| T-H3 | The worker survives any error. Each webhook's failure stays reported until that webhook succeeds (`url_errors`), with recent failures listed. Queued exits are saved (`unsent_exits`), so a restart resends an exit that never went out; a failed exit stays saved | `test_the_worker_survives_*`, `test_a_failure_on_one_account_*`, `test_an_exit_queued_before_a_restart_*`, `test_a_sent_exit_is_forgotten_*` |
+| T-H5 | `toggle`, `execution_flatten` and `reset_account` are `async def`, so they run on the event loop with the tick | `test_engine_changing_endpoints_run_on_the_event_loop` |
+| T-H6 | The router and account book are built and `start()`ed before the news and candle downloads | `test_leftover_positions_are_closed_before_any_market_download` |
+
+**Behavioural note on T-H2.** An entry that TradersPost answers with an error (for example a 502) is no longer
+retried, so that account can miss that trade. That is the trade-off the finding asks for: a missed entry is
+recoverable, a doubled one is not. 22 of the 24 tests fail on the code before this change; the other 2 check
+behaviour that was already right and must stay so (retry after a failed connection, exits always retried).
+
+Still open and approved, changing trading behaviour: T-H1, T-H4, T-H7, M-4, M-11.
+

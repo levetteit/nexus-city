@@ -20,6 +20,10 @@ Safety, in order of importance:
   * After a restart, any position the router had open is closed right away
     (the bots restart flat, so a leftover real position would be unmanaged).
   * Every order and response is logged to data/orders.csv.
+  * Entries and adds are resent only when the request never reached TradersPost (it couldn't connect). After a
+    timeout or any reply, resending could open a second position, so it isn't. Exits and resizes are always
+    retried: repeating them can't add risk.
+  * An exit waiting in the queue is saved with the router's state, so a restart before it goes out still sends it.
 """
 from __future__ import annotations
 
@@ -27,7 +31,10 @@ import asyncio
 import csv
 import json
 import os
+import socket
+import urllib.error
 import urllib.request
+from collections import deque
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from .persist import write_json_atomic
@@ -35,6 +42,17 @@ from .env import env
 from .redact import redact
 
 MAX_DATA_DELAY_MIN = 2.5
+SAFE_TO_REPEAT = ("exit", "resize")   # only reduce a position: sending one twice can't add risk
+
+
+def never_delivered(exc: BaseException) -> bool:
+    """True when a POST certainly didn't reach the server: the connection itself failed (refused, DNS, connect
+    timeout, TLS handshake). A timeout or reset after connecting may mean the order was already accepted."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return False   # the server answered
+    if isinstance(exc, urllib.error.URLError):
+        return True    # urlopen wraps failures that happen before the request is sent
+    return isinstance(exc, (ConnectionRefusedError, socket.gaierror))
 QUARTERS = {3: "H", 6: "M", 9: "U", 12: "Z"}
 
 
@@ -73,7 +91,10 @@ class TradersPostRouter:
         self.open: dict[str, dict] = {}      # symbol -> {"side", "qty", "contract", "targets"} we have on for real
         self.account_urls = lambda: []       # per-account webhooks (accounts.py sets this)
         self.url_names = lambda: {}          # webhook -> account name, for the order log (never the URL itself)
-        self.last_error = ""
+        self.last_error = ""                 # the latest failure on a webhook that hasn't succeeded since
+        self.url_errors: dict[str, str] = {}  # webhook -> its latest failure, cleared when that webhook succeeds again
+        self.errors: deque = deque(maxlen=20)   # recent failures, newest last (for the account panel)
+        self.unsent_exits: dict[str, dict] = {}   # symbol -> exit queued but not yet sent (saved: survives a restart)
         self.sent = 0
         self.blocked = 0
         self.queue: asyncio.Queue | None = None
@@ -93,10 +114,12 @@ class TradersPostRouter:
                 s = json.load(f)
             self.armed = bool(s.get("armed")) and self.configured
             self.open = s.get("open", {})
+            self.unsent_exits = s.get("unsent_exits", {})
 
     def _save(self) -> None:
         os.makedirs(self.data_dir, exist_ok=True)
-        write_json_atomic(self.state_path, {"armed": self.armed, "open": self.open}, indent=1)
+        write_json_atomic(self.state_path, {"armed": self.armed, "open": self.open, "unsent_exits": self.unsent_exits},
+                          indent=1)
 
     def arm(self, on: bool) -> None:
         if on and not self.configured:
@@ -108,6 +131,7 @@ class TradersPostRouter:
         return {"configured": self.configured, "armed": self.armed, "open": self.open,
                 "data_ok": delay_min <= MAX_DATA_DELAY_MIN, "max_delay": MAX_DATA_DELAY_MIN,
                 "sent": self.sent, "blocked": self.blocked, "last_error": self.last_error,
+                "failing": len(self.url_errors), "errors": list(self.errors)[-5:],
                 "targets": len(self.all_urls()), "shared": len(self.webhooks)}
 
     def recent(self, n: int = 20) -> list[dict]:
@@ -124,11 +148,15 @@ class TradersPostRouter:
         """Begin sending; close anything left open by a previous run. Returns the symbols it closed."""
         self.queue = asyncio.Queue()
         asyncio.create_task(self._worker())
-        closed = list(self.open)
+        closed = list(dict.fromkeys(list(self.open) + list(self.unsent_exits)))
         for symbol, pos in list(self.open.items()):
             self._enqueue(symbol, {"action": "exit", "cancel": True}, "restart: bots start flat", pos["contract"],
                           list(_targets(pos)) or self.all_urls())
             del self.open[symbol]
+        for symbol, pending in list(self.unsent_exits.items()):   # queued before the restart, never sent
+            if symbol not in self.open:
+                self._enqueue(symbol, {"action": "exit", "cancel": True}, "restart: exit that was still queued",
+                              pending.get("contract"), pending.get("targets") or self.all_urls())
         self._save()
         return closed
 
@@ -217,36 +245,76 @@ class TradersPostRouter:
         if "signalPrice" not in msg and self.last_px.get(symbol):
             msg["signalPrice"] = self.last_px[symbol]
         payload = {"ticker": contract or front_month(symbol), **msg, "time": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        targets = targets if targets is not None else self.all_urls()
+        if msg.get("action") == "exit":
+            self.unsent_exits[symbol] = {"contract": payload["ticker"], "targets": list(targets)}
         if self.queue is not None:
-            self.queue.put_nowait((symbol, payload, reason, targets if targets is not None else self.all_urls()))
+            self.queue.put_nowait((symbol, payload, reason, targets))
 
     async def _worker(self) -> None:
-        """Send orders one at a time, in order, so an exit can never overtake its entry."""
+        """Send orders one at a time, in order, so an exit can never overtake its entry. Never stops: a failure
+        while sending or logging one order is recorded and the next order still goes out."""
         while True:
             symbol, payload, reason, targets = await self.queue.get()
-            for url in targets:
-                status, body = 0, ""
-                for attempt in range(3):
+            delivered = False
+            try:
+                results = [await self._send_one(symbol, payload, reason, url) for url in targets]
+                delivered = all(results)
+            except Exception as exc:   # a bug here must not strand every later order in the queue
+                self._fail("worker", redact(f"order worker: {type(exc).__name__}: {exc}")[:200])
+            finally:
+                # an exit that reached every account is done; one that failed stays saved, so a restart sends it again
+                if payload.get("action") == "exit" and delivered and self.unsent_exits.pop(symbol, None) is not None:
                     try:
-                        status, body = await asyncio.to_thread(self._post, url, payload)
-                        if 200 <= status < 300:
-                            break
-                    except Exception as exc:   # network error: retry
-                        status, body = 0, str(exc)
-                    await asyncio.sleep(1 + attempt)
-                ok = 200 <= status < 300
-                self.sent += ok
-                self.last_error = "" if ok else redact(f"{payload['action']} {payload['ticker']}: HTTP {status} {body}")[:200]
-                name = self.url_names().get(url) or (f"shared webhook {self.webhooks.index(url) + 1}"
-                                                     if url in self.webhooks else "webhook")
-                self._log(symbol, payload, f"{reason} → {name}", status, body)
+                        self._save()
+                    except Exception as exc:
+                        self._fail("worker", redact(f"saving router state: {exc}")[:200])
+
+    async def _send_one(self, symbol: str, payload: dict, reason: str, url: str) -> bool:
+        repeatable = payload.get("action") in SAFE_TO_REPEAT
+        status, body = 0, ""
+        for attempt in range(3):
+            try:
+                status, body = await asyncio.to_thread(self._post, url, payload)
+                if 200 <= status < 300 or not repeatable:
+                    break   # done, or TradersPost answered: an entry it may have taken is never sent twice
+            except Exception as exc:
+                status, body = 0, str(exc)
+                if not repeatable and not never_delivered(exc):
+                    body = f"not resent (it may have reached TradersPost): {body}"
+                    break
+            await asyncio.sleep(1 + attempt)
+        ok = 200 <= status < 300
+        self.sent += ok
+        if ok:
+            self.url_errors.pop(url, None)
+            if not self.url_errors:
+                self.last_error = ""
+        else:
+            self._fail(url, redact(f"{payload['action']} {payload['ticker']}: HTTP {status} {body}")[:200])
+        try:
+            names = self.url_names()
+        except Exception:
+            names = {}
+        name = names.get(url) or (f"shared webhook {self.webhooks.index(url) + 1}" if url in self.webhooks else "webhook")
+        self._log(symbol, payload, f"{reason} → {name}", status, body)
+        return ok
+
+    def _fail(self, key: str, message: str) -> None:
+        self.url_errors[key] = message
+        self.last_error = message
+        self.errors.append({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "error": message})
 
     @staticmethod
     def _post(url: str, payload: dict) -> tuple[int, str]:
         req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
                                      headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, resp.read().decode(errors="replace")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status, resp.read().decode(errors="replace")
+        except urllib.error.HTTPError as exc:   # TradersPost answered with an error: report it, it's not a network failure
+            return exc.code, exc.read().decode(errors="replace") if exc.fp else ""
+
 
     def _log(self, symbol: str, payload: dict, reason: str, status: int, body: str = "") -> None:
         os.makedirs(self.data_dir, exist_ok=True)

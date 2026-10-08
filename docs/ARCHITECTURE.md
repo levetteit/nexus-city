@@ -76,7 +76,8 @@ flowchart LR
 - **Failure isolation.**
   - The station loop catches every exception from a tick and records it on `station.last_error`, so the station cannot stop the City.
   - Each ULTRON job has its own recovery path (`Ultron._job_failed`). When Claude is unreachable, the job waits for a back-off; any other failure skips it.
-  - Known gap (audit **C-1**): nothing supervises the trading loop yet.
+  - The trading loop guards each step for every candle (the trade log, the account book, the order router, notifications, reports), so one broken step can't stop the others. The router comes first among the steps that touch money.
+  - `supervised()` records a trading loop that ends with an error and alerts the owner. `/healthz` returns 503 when the loop has died or hasn't completed a pass in 5 minutes, so the host restarts the app instead of leaving positions unmanaged.
 - **Shared state.** The station store serialises access with one re-entrant lock. The trading engine is owned by the trading loop.
 
 ## 3. AI operations workflow
@@ -215,7 +216,7 @@ flowchart TD
    Allowed orders go onto a queue. A worker posts them to TradersPost, retries failures and logs every attempt to `orders.csv` with the URLs masked.
 6. **Restart.** `router.start()` sends exits for any position the previous process left open, because the bots restart flat.
 
-Known gaps in this flow (audit **T-H1 to T-H7**, fixes approved) are listed in [SECURITY.md](SECURITY.md#7-trading-safeguards).
+The remaining approved gaps in this flow (audit **T-H1, T-H4, T-H7**) are listed in [SECURITY.md](SECURITY.md#7-trading-safeguards).
 
 ### 4.2 Changing the strategy safely
 
@@ -277,7 +278,7 @@ for later are in [PERSISTENCE.md](PERSISTENCE.md).
 
 | Decision | Why | Cost |
 |---|---|---|
-| One process, asyncio loops | One deploy unit, shared in-memory state, nothing else to operate | No horizontal scaling; a trading-loop crash isn't supervised yet (C-1) |
+| One process, asyncio loops | One deploy unit, shared in-memory state, nothing else to operate | No horizontal scaling; the trading and AI loops share one process (failures are isolated per step, not per process) |
 | Files, not a database | Survives restarts on one disk, easy to inspect and back up, no extra service | One writer only; queries are scans; the PostgreSQL design is ready when needed |
 | LLM output is a draft, code decides | Prompts aren't a security boundary: QA, policy, caps, the E-STOP and allowlists are enforced in Python | More states to manage (section 3.2) |
 | One agent job at a time | Predictable spend, simple concurrency, readable audit log | Throughput bounded by one Claude call at a time |
