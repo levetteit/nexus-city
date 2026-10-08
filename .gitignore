@@ -8,3 +8,5 @@ results.json
 .env.*
 !.env.example
 *.pem
+.coverage
+htmlcov/
