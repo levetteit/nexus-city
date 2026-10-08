@@ -19,6 +19,7 @@ import json
 import os
 import urllib.request
 from typing import Optional
+from .persist import write_json_atomic
 from .env import env
 
 PUBLIC_URL = env("PUBLIC_URL") or os.getenv("RENDER_EXTERNAL_URL", "")   # Render sets the latter
@@ -82,8 +83,7 @@ class Notifier:
 
     def _save(self) -> None:
         os.makedirs(self.data_dir, exist_ok=True)
-        with open(self.subs_path, "w") as f:
-            json.dump(self.subs, f)
+        write_json_atomic(self.subs_path, self.subs)
 
     def status(self) -> dict:
         return {"web_push": self.web_push, "public_key": self.public_key, "devices": len(self.subs),

@@ -16,6 +16,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 
+from .persist import write_json_atomic
 from .backtest import ET
 
 FEED_GRACE_MIN = 5      # a known real-time symbol missing this long during market hours -> alert
@@ -51,8 +52,7 @@ class Watchdog:
 
     def _save(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, "w") as f:
-            json.dump({"expected": self.expected, "checked_on": self.checked_on}, f)
+        write_json_atomic(self.path, {"expected": self.expected, "checked_on": self.checked_on})
 
     def forget_feed(self) -> None:
         """Stop expecting the TradingView feed (you removed it on purpose)."""

@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from ..env import env
+from ..persist import read_jsonl, repair_jsonl_tail, write_json_atomic
 from .store import Store, now_iso
 
 # Claude Opus 5.5 list prices (USD per million tokens) and web search ($ per search)
@@ -66,10 +67,12 @@ class Treasury:
                 self.cfg.update(json.load(f))
         if any(g["id"] == "etsy-launch" for g in self.cfg["goals"]):   # the owner already runs the Etsy shop
             self.cfg["goals"] = [g for g in self.cfg["goals"] if g["id"] != "etsy-launch"] + DEFAULT_GOALS
-        self.entries: list[dict] = []
-        if os.path.exists(self.path):
-            with open(self.path) as f:
-                self.entries = [json.loads(line) for line in f if line.strip()]
+        torn = repair_jsonl_tail(self.path)   # a crash mid-append: the fragment is set aside, the chain stays readable
+        self.entries, self.bad_lines = read_jsonl(self.path)
+        if torn or self.bad_lines:
+            store.event("storage.repaired", "A-008", f"ledger: {'a line cut off by a crash was moved to ' + os.path.basename(torn) if torn else ''}"
+                        f"{'; ' if torn and self.bad_lines else ''}{f'{self.bad_lines} unreadable line(s) skipped' if self.bad_lines else ''}",
+                        severity="WARNING")
 
     # ---------------------------------------------------------------- booking
     def book(self, kind: str, amount: float, unit: str, source: str, note: str, venture: Optional[str] = None,
@@ -150,9 +153,12 @@ class Treasury:
         """Credit the city with Lucid payouts recorded in the account panel (each once)."""
         payouts = list(getattr(account, "payouts", []) or [])
         n = self.cfg.get("payouts_synced", 0)
-        for day, amount in payouts[n:]:
+        for i, (day, amount) in enumerate(payouts[n:], start=n):
+            ref = f"lucid-payout-{i + 1}"
+            if self.has_ref(ref):   # booked before a crash stopped the counter being saved: never twice
+                continue
             self.book("lucid_payout", amount * PAYOUT_SPLIT, "city", "lucid_payout",
-                      f"Lucid payout ${amount:,.0f} (day {day}) at the {PAYOUT_SPLIT:.0%} trader split", venture="V-001")
+                      f"Lucid payout ${amount:,.0f} (day {day}) at the {PAYOUT_SPLIT:.0%} trader split", venture="V-001", ref=ref)
         if len(payouts) > n:
             self.cfg["payouts_synced"] = len(payouts)
             self._save_cfg()
@@ -238,5 +244,4 @@ class Treasury:
         }
 
     def _save_cfg(self) -> None:
-        with open(self.cfg_path, "w") as f:
-            json.dump(self.cfg, f, indent=1)
+        write_json_atomic(self.cfg_path, self.cfg, indent=1)

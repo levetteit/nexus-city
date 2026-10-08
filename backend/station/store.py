@@ -10,7 +10,9 @@ import json
 import os
 import threading
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Protocol
+
+from ..persist import repair_jsonl_tail, write_json_atomic
 
 COLLECTIONS = ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions", "leads",
                "products")
@@ -30,7 +32,30 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+class StationStore(Protocol):
+    """What the station needs from storage. `Store` (JSON files + JSONL audit log) implements it today; a future
+    PostgresStore would implement the same methods (docs/PERSISTENCE.md). Records are plain dicts; every change
+    writes an audit event."""
+
+    lock: Any
+
+    def all(self, name: str) -> list[dict]: ...
+    def get(self, name: str, rid: str) -> Optional[dict]: ...
+    def find(self, name: str, **match) -> list[dict]: ...
+    def create(self, name: str, record: dict, by: str, why: str = "") -> dict: ...
+    def update(self, name: str, rid: str, changes: dict, by: str, why: str = "", kind: Optional[str] = None) -> dict: ...
+    def event(self, kind: str, by: str, summary: str, ref: Optional[str] = None, data: Any = None,
+              severity: str = "INFO") -> dict: ...
+    def events(self, limit: int = 100, kinds: Optional[tuple] = None) -> list[dict]: ...
+    def save_doc(self, name: str, doc: Any) -> None: ...
+    def load_doc(self, name: str) -> Optional[Any]: ...
+    def update_doc(self, name: str, change: Callable[[Any], Any]) -> Any: ...
+
+
 class Store:
+    """The JSON-file implementation of StationStore: one file per collection, rewritten atomically on each change,
+    plus the append-only audit log events.jsonl. Thread-safe through one re-entrant lock."""
+
     def __init__(self, data_dir: str) -> None:
         self.dir = os.path.join(data_dir, "station")
         os.makedirs(self.dir, exist_ok=True)
@@ -48,6 +73,13 @@ class Store:
             with open(cpath) as f:
                 self.counters = json.load(f)
         self.events_path = os.path.join(self.dir, "events.jsonl")
+        torn = repair_jsonl_tail(self.events_path)   # a crash mid-append: set the fragment aside, keep the log clean
+        self._events: list[dict] = []                 # the audit log, parsed once and then read incrementally
+        self._events_offset = 0
+        self.bad_event_lines = 0
+        if torn:
+            self.event("storage.repaired", "station", f"audit log: a line cut off by a crash was moved to {os.path.basename(torn)}",
+                       severity="WARNING")
 
     # ---------------------------------------------------------------- records
     def all(self, name: str) -> list[dict]:
@@ -100,42 +132,55 @@ class Store:
             f.write(json.dumps(ev, default=str) + "\n")
         return ev
 
+    def _read_new_events(self) -> None:
+        """Parse only what was appended since the last read (whole lines only; bad lines are skipped and counted)."""
+        try:
+            size = os.path.getsize(self.events_path)
+        except OSError:
+            return
+        if size < self._events_offset:   # the file was replaced or rotated: start over
+            self._events, self._events_offset = [], 0
+        if size == self._events_offset:
+            return
+        with open(self.events_path, "rb") as f:
+            f.seek(self._events_offset)
+            chunk = f.read()
+        end = chunk.rfind(b"\n") + 1      # leave a line that's still being written for next time
+        for line in chunk[:end].splitlines():
+            if not line.strip():
+                continue
+            try:
+                self._events.append(json.loads(line))
+            except ValueError:
+                self.bad_event_lines += 1
+        self._events_offset += end
+
     def events(self, limit: int = 100, kinds: Optional[tuple] = None) -> list[dict]:
-        if not os.path.exists(self.events_path):
-            return []
-        with self.lock, open(self.events_path) as f:
-            lines = f.readlines()
-        out = []
-        for line in reversed(lines):
-            ev = json.loads(line)
-            if kinds is None or ev["kind"].startswith(kinds):
-                out.append(ev)
-                if len(out) >= limit:
-                    break
-        return out
+        """The newest `limit` events (optionally only kinds starting with `kinds`), newest first."""
+        with self.lock:
+            self._read_new_events()
+            out = []
+            for ev in reversed(self._events):
+                if kinds is None or str(ev.get("kind", "")).startswith(kinds):
+                    out.append(dict(ev))
+                    if len(out) >= limit:
+                        break
+            return out
 
     # ---------------------------------------------------------------- files
     def _save(self, name: str) -> None:
-        path = os.path.join(self.dir, f"{name}.json")
-        tmp = path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(list(self.data[name].values()), f, indent=1, default=str)
-        os.replace(tmp, path)
+        write_json_atomic(os.path.join(self.dir, f"{name}.json"), list(self.data[name].values()), indent=1, default=str)
 
     def _save_counters(self) -> None:
-        with open(os.path.join(self.dir, "counters.json"), "w") as f:
-            json.dump(self.counters, f)
+        write_json_atomic(os.path.join(self.dir, "counters.json"), self.counters)
 
     def save_doc(self, name: str, doc: Any) -> None:
         """A free-form document (routine outputs, ULTRON's reports) under data/station/docs/."""
         d = os.path.join(self.dir, "docs")
         os.makedirs(d, exist_ok=True)
         path = os.path.join(d, name)
-        tmp = f"{path}.{threading.get_ident()}.tmp"   # write, then swap: a reader never sees a half-written file
-        with self.lock:
-            with open(tmp, "w") as f:
-                json.dump(doc, f, indent=1, default=str)
-            os.replace(tmp, path)
+        with self.lock:   # write, then swap: a reader never sees a half-written file
+            write_json_atomic(path, doc, indent=1, default=str)
 
     def update_doc(self, name: str, change: Callable[[Any], Any]) -> Any:
         """Read-modify-write a document under the store's lock, so two threads can't overwrite each other's change
@@ -158,3 +203,6 @@ class Store:
         if not os.path.isdir(d):
             return []
         return sorted((n for n in os.listdir(d) if n.startswith(prefix) and n.endswith(".json")), reverse=True)[:limit]
+
+
+JSONStore = Store   # the name the persistence docs use

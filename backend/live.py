@@ -21,6 +21,7 @@ import json
 import os
 from datetime import datetime, timezone
 
+from .persist import write_json_atomic
 from .env import env
 from .account import PropAccount
 from .backtest import ET, ReplayMarket
@@ -147,8 +148,7 @@ def load_account() -> PropAccount:
 
 def save_account(acct: PropAccount) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(os.path.join(DATA_DIR, "paper_account.json"), "w") as f:
-        json.dump({k: getattr(acct, k) for k in ACCOUNT_FIELDS}, f, indent=1)
+    write_json_atomic(os.path.join(DATA_DIR, "paper_account.json"), {k: getattr(acct, k) for k in ACCOUNT_FIELDS}, indent=1)
 
 
 def load_careers(engine) -> None:
@@ -164,8 +164,7 @@ def load_careers(engine) -> None:
 
 def save_careers(engine) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(os.path.join(DATA_DIR, "paper_bots.json"), "w") as f:
-        json.dump({b.cfg.id: {"career": b.career, "career_best": b.career_best} for b in engine.bots.values()}, f, indent=1)
+    write_json_atomic(os.path.join(DATA_DIR, "paper_bots.json"), {b.cfg.id: {"career": b.career, "career_best": b.career_best} for b in engine.bots.values()}, indent=1)
 
 
 def _append(name: str, header: list[str], row: list) -> None:

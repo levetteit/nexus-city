@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
+from .persist import write_json_atomic
 from .env import env
 
 ET = ZoneInfo("America/New_York")
@@ -128,8 +129,7 @@ class NewsCalendar:
             with open(path) as f:
                 extra = set(self.parse(json.load(f), False))
         rows = [{"date": e.time.isoformat(), "title": e.title} for e in self.events if e not in extra]
-        with open(self._cache_path(), "w") as f:
-            json.dump(rows, f, indent=1)
+        write_json_atomic(self._cache_path(), rows, indent=1)
 
     def refresh(self, force: bool = False) -> bool:
         """Download this week's calendar if the cached one is stale. Blocking; run in a thread."""
