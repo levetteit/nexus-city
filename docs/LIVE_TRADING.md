@@ -190,7 +190,11 @@ days before expiry). Every order is logged in `data/orders.csv`.
 
 Safety built in:
 - Off until you arm it; **FLATTEN ALL** exits everything on your accounts and disarms.
+- Disarming stops new entries and adds. A position already open for real keeps getting its trims and exit until
+  it's flat; the account panel shows it as still managed.
 - New entries are blocked when price data is over 2.5 minutes old; exits always go through.
+- No new entries from 15:50 ET by the real clock, even if the candles are late. From 15:55 ET by the clock, and
+  inside a news-flatten window, open real positions are exited without waiting for a candle.
 - Adds and exits are only sent for positions the router opened itself.
 - After a restart, any position left open is closed immediately (the bots restart flat).
 - Your Lucid account still enforces its own rules (drawdown, position limits,

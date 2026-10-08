@@ -667,7 +667,8 @@ function execRows(s) {
   if (!x.configured) return data + `<div class="row"><span>Real orders</span><span>not connected</span></div>`;
   const open = Object.entries(x.open).map(([sym, p]) => `${p.side === "buy" ? "LONG" : "SHORT"} ${p.qty} ${p.contract}`).join(", ");
   return data + `
-    <div class="row"><span>Real orders</span><span class="${x.armed ? "neg" : ""}">${x.armed ? "● ARMED" : "off (paper only)"}</span></div>
+    <div class="row"><span>Real orders</span><span class="${x.armed ? "neg" : ""}">${x.armed ? "● ARMED" : Object.keys(x.open || {}).length ? "off: no new trades" : "off (paper only)"}</span></div>
+    ${!x.armed && Object.keys(x.open || {}).length ? `<div class="halt">still managing ${Object.keys(x.open).map(esc).join(", ")} until flat: its trims and exit still go out (FLATTEN ALL closes it now)</div>` : ""}
     ${x.armed && !x.data_ok ? `<div class="halt">entries paused: price data is over ${x.max_delay} min old</div>` : ""}
     ${open ? `<div class="row"><span>On your accounts</span><span>${open}</span></div>` : ""}
     ${x.last_error ? `<div class="halt">last order failed: ${esc(x.last_error)}</div>` : ""}

@@ -248,6 +248,7 @@ def test_a_broken_trade_log_cannot_stop_real_orders(app_main, tmp_path, monkeypa
     class Market:
         i, warm_until, delay_minutes = 0, 0, 0.0
         _left = 1
+        timeline = [(__import__("datetime").datetime(2026, 10, 7, 11, 0), {})]
 
         def poll(self): pass
         def release(self): pass
@@ -264,7 +265,7 @@ def test_a_broken_trade_log_cannot_stop_real_orders(app_main, tmp_path, monkeypa
     quiet = SimpleNamespace(start_day=lambda *a, **k: None, observe=lambda *a, **k: None)
     monkeypatch.setattr(live, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(live, "LiveMarket", Market)
-    monkeypatch.setattr(live, "load_account", lambda: None)
+    monkeypatch.setattr(live, "load_account", lambda **k: None)
     monkeypatch.setattr(live, "load_careers", lambda e: None)
     monkeypatch.setattr(live, "record", lambda *a: 1 / 0)                      # the broken step
     monkeypatch.setattr(app_main, "Engine", Engine)

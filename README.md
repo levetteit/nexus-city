@@ -179,11 +179,11 @@ Step-by-step hosting, phone alerts and monitoring are in [docs/OPERATIONS.md](do
   - Forward test: paper trading is ongoing.
   - Details: [docs/TRADING.md](docs/TRADING.md).
 - **Station:** live. Some outbound channels wait on third-party approvals or tokens.
-- **Known gaps:** loop supervision and order-safety fixes (audit C-1, T-H2, T-H3, T-H5, T-H6) are done. Three approved fixes that change trading behaviour (T-H1, T-H4, T-H7 in [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md)) are next.
+- **Trading reliability:** every approved finding from the audit's trading review is fixed with regression tests (C-1, T-H1 to T-H7, M-4, M-11; see [docs/ENGINEERING_AUDIT.md](docs/ENGINEERING_AUDIT.md)). The remaining open items are medium and low findings listed there.
 
 ## Roadmap
 
-1. **Trading reliability:** send exits while disarmed, flatten on the wall clock instead of waiting for a candle, and keep account halts across restarts (approved; loop supervision and safe order retries are done).
+1. **Trading:** the open medium findings (M-3 signal price anchoring, M-12 serial order posting) and Render build filters so docs-only changes don't restart the bots.
 2. **Persistence:** move from JSON files to PostgreSQL along the schema already designed in [docs/PERSISTENCE.md](docs/PERSISTENCE.md), once the data outgrows one disk.
 3. **Station:** reconnect the expired social tokens, finish the Pinterest app review, and test channels with real traffic.
 

@@ -537,3 +537,28 @@ behaviour that was already right and must stay so (retry after a failed connecti
 
 Still open and approved, changing trading behaviour: T-H1, T-H4, T-H7, M-4, M-11.
 
+---
+
+## 14. Trading reliability, part 2 (owner-approved behaviour changes, 2026-10-08)
+
+| Finding | New behaviour | Test (`tests/test_trading_behaviour.py`) |
+|---|---|---|
+| T-H1 | Disarming stops new entries and adds. A position the router already holds for real keeps getting its trims and exit until flat (Flatten all still closes everything at once and disarms). The account panel shows "off: no new trades" and the position still being managed | `test_disarmed_router_still_trims_and_exits_what_is_open`, `test_disarmed_router_opens_nothing_new` |
+| T-H4 | The live loop checks the real clock before each batch of candles. From 15:55 ET on weekdays, and inside a news-flatten window, it exits real open positions (`flatten_open`, without disarming) and notifies the owner. New real entries are also refused from 15:50 ET by the real clock, not only by candle time | `test_the_session_end_flatten_follows_the_clock`, `test_a_news_flatten_follows_the_clock`, `test_no_new_real_entries_after_1550_by_the_clock` |
+| T-H7 | `paper_account.json` also saves `halted`, `loss_streak`, `day_peak` and the trading day. On the same trading day they're restored, so a redeploy can't undo "3 losses in a row" or a profit lock. If the trading day changed while the app was down, the day is rolled once on load. The trading day comes from the newest candle, the same rule as the engine's own roll, so a weekend restart doesn't roll twice | `test_a_restart_on_the_same_day_keeps_the_halt`, `test_a_restart_across_the_1800_open_rolls_the_day`, `test_a_weekend_restart_does_not_roll_twice`, `test_an_old_save_*` |
+| M-4 | When the router skips an entry it calls `book.entry_skipped`, and the accounts leave the trade (none of its P&L is booked to them). A skipped add is taken back from the accounts that were counted in (`book.add_skipped`). Trims end at `min(real size, the bot's left)`, never below what is really held | `test_a_skipped_entry_books_nothing_*`, `test_a_skipped_add_is_taken_back_*` |
+| M-11 | Each symbol tracks its own newest candle. A candle whose minute already went out without it (for example ES from Yahoo while TradingView streams only NQ) is no longer dropped: it is applied, in order, at the next step | `test_late_candles_for_one_symbol_are_applied_not_dropped` |
+
+**What changed in the code:** `execution.py` (handle, `_skip_open`, `flatten_open`, `wall_clock_et`, `in_session_end`),
+`accounts.py` (`entry_skipped`, `add_skipped`), `live.py` (account save and load, `_take`, late candles), `backtest.py`
+(a step can carry several candles per symbol, each labelled with its own time), `main.py` (`_wallclock_flatten`) and
+`frontend/city.js` (the panel's disarmed state). Strategy, sizing and the account rules are unchanged; the 5-day
+real-data regression still produces the same result (5 days, 18 trades, +$2,755.50).
+
+**Test hygiene in the same change.** `conftest.py` pins the router's real clock to a Wednesday at 11:00 ET, so the
+suite can't depend on when CI runs. `test_security.py`'s wrong-cookie check failed 1 time in 16 (it replaced the last
+token character with `0`, which is sometimes already `0`); it now always changes it.
+
+15 of the 16 new tests fail on the code before this change; the other one ("disarmed opens nothing new") pins
+behaviour that was already right.
+

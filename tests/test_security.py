@@ -72,7 +72,8 @@ def test_session_cookie_is_server_signed_secure_and_constant_time(tmp_path):
     assert gate.token not in (hashlib.sha256(b"starnet:pw").hexdigest(), hashlib.sha256(b"pw").hexdigest())
     assert (tmp_path / "session.key").stat().st_mode & 0o777 == 0o600
     assert gate._authorized({b"cookie": f"nexus_auth={gate.token}".encode()}) == (True, False)
-    assert gate._authorized({b"cookie": f"nexus_auth={gate.token[:-1]}0".encode()}) == (False, False)
+    wrong = gate.token[:-1] + ("1" if gate.token.endswith("0") else "0")   # always differs from the real token
+    assert gate._authorized({b"cookie": f"nexus_auth={wrong}".encode()}) == (False, False)
     assert gate._authorized({b"cookie": f"other=nexus_auth={gate.token}".encode()}) == (False, False)   # no substring tricks
     again = PasswordGate(None, password="pw", mode="live", data_dir=str(tmp_path))
     assert again.token == gate.token                                             # the key survives a restart

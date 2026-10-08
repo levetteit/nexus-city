@@ -120,16 +120,18 @@ class ReplayMarket:
         self._day_key = key
         self.clock_min = clock_min(t)
         self.clock_str = t.strftime("%H:%M")
-        for sym, (_, o, h, l, c) in bars.items():
+        for sym, rows in bars.items():
             u = self.underlyings[sym]
-            u.bars.append(Bar(o, h, l, c, self.clock_str, int(t.timestamp() // 60)))
-            if len(u.bars) > 1200:
-                u.bars = u.bars[-1200:]
-            u.bar_count += 1
-            u.price = c
-            u.history.append(c)
-            if len(u.history) > 500:
-                u.history = u.history[-500:]
+            # usually one candle; a live symbol catching up after a late delivery brings several, oldest first
+            for rt, o, h, l, c in (rows if isinstance(rows, list) else [rows]):
+                u.bars.append(Bar(o, h, l, c, rt.strftime("%H:%M"), int(rt.timestamp() // 60)))
+                if len(u.bars) > 1200:
+                    u.bars = u.bars[-1200:]
+                u.bar_count += 1
+                u.price = c
+                u.history.append(c)
+                if len(u.history) > 500:
+                    u.history = u.history[-500:]
 
     @property
     def minutes_to_close(self) -> float:
