@@ -156,7 +156,7 @@ changes state.
 
 **What would you change to scale the system?**
 1. Move the store to PostgreSQL; the schema is already designed in PERSISTENCE.md.
-2. Supervise the trading loop and make health checks detect a stall (audit item C-1).
+2. Move the trading loop into its own process, so a crash in the web or AI side can't touch it (today each step is guarded and `/healthz` detects a dead or stalled loop).
 3. Split the station worker from the web process, behind a job queue, so several agent jobs can run at once.
 4. Add structured logging and metrics.
 5. Move the frontend to TypeScript for type checking.

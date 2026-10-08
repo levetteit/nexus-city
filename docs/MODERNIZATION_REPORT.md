@@ -148,6 +148,10 @@ Totals since the baseline: **91 files changed, 5,179 insertions, 1,623 deletions
 | Frontend | No type checking or automated browser tests |
 | Code size | Five trading-path functions over 60 lines stay as they are until the reliability fixes, which bring their own tests |
 
+> **Update (trading-reliability work, after this report):** C-1, T-H2, T-H3, T-H5 and T-H6 are fixed, with 24
+> regression tests in `tests/test_trading_reliability.py`. Section 7 describes the state at the end of the
+> modernization. T-H1, T-H4, T-H7, M-4 and M-11 remain.
+
 ## 8. Recommended future work
 
 1. **Trading reliability**, in this order:

@@ -148,17 +148,18 @@ puts an offer in front of buyers. Set `NEXUS_POLICY_STRIPE=owner` (or any other 
 | Session cutoffs | No entries or adds from 15:50 ET; positions are flattened at 15:55 ET (Tradovate's micro session ends at 16:00) |
 | Account rules | Daily goal, cap and stop; maximum loss limit; losing-streak stop; contract limits; news blackouts (`backend/account.py`, `backend/news.py`) |
 | Exits | Sent as TradersPost `exit` / `resize`, which can only reduce a position, never reverse it |
-| Restart | Positions the router had open are closed on startup, because the bots restart flat |
+| Restart | Positions the router had open, and exits that were still queued, are closed on startup before any market download, because the bots restart flat |
+| No duplicate entries | Entries and adds are resent only when the request never reached TradersPost; after a timeout or any reply they are not, so a second position can't open. Exits and resizes are always retried |
+| Order worker | Never stops on an error; each webhook's failure stays reported until that webhook succeeds again |
+| Loop supervision | Each step of the live loop is guarded, so a broken log or report can't stop real orders. If the loop dies or stalls for 5 minutes, `/healthz` returns 503 and the owner is alerted |
 | Strategy changes | Strategy Forge candidates must pass a walk-forward test and a paper shadow, then the owner approves them |
 
-**Known gaps, approved for the trading-reliability phase** (see `docs/ENGINEERING_AUDIT.md`):
-- **C-1:** nothing supervises the trading loop, so an exception stops it while `/healthz` stays green.
+**Fixed in the trading-reliability work:** C-1 (loop supervision), T-H2 (duplicate entries), T-H3 (order worker),
+T-H5 (engine changes from worker threads) and T-H6 (restart flatten waited for Yahoo).
+
+**Known gaps, approved, not yet implemented** (they change trading behaviour; see `docs/ENGINEERING_AUDIT.md`):
 - **T-H1:** exits are not sent while disarmed.
-- **T-H2:** order retries can duplicate entries.
-- **T-H3:** the order worker isn't guarded.
 - **T-H4:** time-based exits depend on candle arrival.
-- **T-H5:** synchronous handlers mutate the engine from worker threads.
-- **T-H6:** the restart flatten waits for Yahoo.
 - **T-H7:** a restart clears account halts.
 
 ## 8. Financial safeguards

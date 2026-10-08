@@ -85,6 +85,17 @@ async def run_live() -> None:
     from .report import DayReports
     from .scorecard import Scorecard
     notifier = notify.Notifier(live.DATA_DIR)
+    # Real orders first: a restart with positions open must send their exits now, not after the news and candle
+    # downloads (which can take minutes, or fail when Yahoo is down).
+    router = execution.TradersPostRouter(live.DATA_DIR)
+    from .accounts import AccountBook
+    book = AccountBook(live.DATA_DIR)
+    router.account_urls = book.urls
+    router.url_names = lambda: {a.webhook: a.name for a in book.accounts if a.webhook}
+    closed = router.start()
+    if closed:   # we restarted while real positions were open: they were just closed
+        notifier.send("🔄 Nexus City restarted with real positions open",
+                      f"Sent exits for {', '.join(closed)}: the bots restart flat. Check your accounts.", "watchdog")
     from .history import History
     history = History(live.DATA_DIR)
     asyncio.create_task(asyncio.to_thread(history.save, True))   # keep the last 29 days before Yahoo drops them
@@ -96,15 +107,6 @@ async def run_live() -> None:
                     params=forge.live_params(live.DATA_DIR) or None)   # settings you promoted from the Strategy Forge
     live.load_careers(engine)
     asyncio.create_task(run_forge())
-    router = execution.TradersPostRouter(live.DATA_DIR)
-    from .accounts import AccountBook
-    book = AccountBook(live.DATA_DIR)
-    router.account_urls = book.urls
-    router.url_names = lambda: {a.webhook: a.name for a in book.accounts if a.webhook}
-    closed = router.start()
-    if closed:   # we restarted while real positions were open: they were just closed
-        notifier.send("🔄 Nexus City restarted with real positions open",
-                      f"Sent exits for {', '.join(closed)}: the bots restart flat. Check your accounts.", "watchdog")
     from .watchdog import Watchdog
     watchdog = Watchdog(live.DATA_DIR)
     while market.i + 1 < market.warm_until:   # read history, don't trade it
@@ -126,6 +128,7 @@ async def run_live() -> None:
     last_poll = 0.0
     last_order_error = ""
     while True:
+        LOOP["beat"] = time.time()
         loop = asyncio.get_running_loop()
         if loop.time() - last_poll >= POLL_SECONDS:
             last_poll = loop.time()
@@ -141,27 +144,91 @@ async def run_live() -> None:
             asyncio.create_task(run_desk("morning"))
         events = []
         while market.has_next():
-            new = engine.tick()
-            live.record(engine, new)
-            alerts = book.observe(engine, new)                  # each Lucid account follows the trades it's in
-            router.handle(engine, new, market.delay_minutes, book)   # real orders, if armed
-            notifier.handle(engine, new + alerts, real=router.armed)   # buzz your phone
+            try:
+                new = engine.tick()
+            except Exception as exc:   # this candle is lost for the bots; the next one still runs
+                _loop_error("engine tick", exc)
+                continue
+            # Each consumer is guarded on its own, so a bug in one (a log, a report) can never stop the
+            # real-order router from seeing this candle's trades.
+            _guarded("trade log", live.record, engine, new)
+            alerts = _guarded("account book", book.observe, engine, new) or []   # each Lucid account follows its trades
+            _guarded("order router", router.handle, engine, new, market.delay_minutes, book)   # real orders, if armed
+            _guarded("notifications", notifier.handle, engine, new + alerts, real=router.armed)   # buzz your phone
             new += alerts
-            signals.observe(engine, new)
-            report = reports.observe(engine, new)
-            finished = scorecard.observe(engine, new)
+            _guarded("signal log", signals.observe, engine, new)
+            report = _guarded("daily report", reports.observe, engine, new)
+            finished = _guarded("scorecard", scorecard.observe, engine, new)
             if report:   # a trading day just ended: replay it, compare with paper trading, send the report
-                reports.save(report)
+                _guarded("daily report", reports.save, report)
                 asyncio.create_task(check_day(finished, report))
                 asyncio.create_task(asyncio.to_thread(history.save))   # add the day that just ended
             events += new
-        for title, body in watchdog.check(market, router, desk):
-            notifier.send(title, body, "watchdog")
-        if router.last_error and router.last_error != last_order_error:   # a real order failed: tell you now
-            notifier.send("⚠️ Real order failed", router.last_error, "error")
-        last_order_error = router.last_error
-        await broadcast({"type": "tick", "state": state(), "events": events})
+        try:
+            for title, body in watchdog.check(market, router, desk):
+                notifier.send(title, body, "watchdog")
+            if router.last_error and router.last_error != last_order_error:   # a real order failed: tell you now
+                notifier.send("⚠️ Real order failed", router.last_error, "error")
+            last_order_error = router.last_error
+            await broadcast({"type": "tick", "state": state(), "events": events})
+        except Exception as exc:
+            _loop_error("watchdog / broadcast", exc)
         await asyncio.sleep(1)
+
+
+# ---------------------------------------------------------------- supervising the trading loop (audit C-1)
+LOOP = {"beat": 0.0, "dead": "", "errors": 0, "last_error": "", "alerted": {}}
+LOOP_STALL_SECONDS = 300   # no pass through the live loop for this long = stalled (a pass takes about a second)
+
+
+def _loop_error(where: str, exc: BaseException) -> None:
+    """Record a failure inside the trading loop and tell the owner (once an hour per place), then carry on."""
+    msg = redact(f"{where}: {type(exc).__name__}: {exc}")[:200]
+    LOOP["errors"] += 1
+    LOOP["last_error"] = msg
+    print(f"trading loop error: {msg}")
+    now = time.time()
+    if notifier and now - LOOP["alerted"].get(where, 0) > 3600:
+        LOOP["alerted"][where] = now
+        try:
+            notifier.send("⚠️ Trading loop error", f"{msg}. The loop carried on; check the account panel.", "error")
+        except Exception:
+            pass
+
+
+def _guarded(where: str, fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:
+        _loop_error(where, exc)
+        return None
+
+
+def loop_problem() -> str:
+    """Why the live trading loop isn't running, or "" when it is (or hasn't started yet)."""
+    if LOOP["dead"]:
+        return f"trading loop stopped: {LOOP['dead']}"
+    if MODE == "live" and LOOP["beat"] and time.time() - LOOP["beat"] > LOOP_STALL_SECONDS:
+        return f"trading loop stalled: no pass for {int(time.time() - LOOP['beat'])} s"
+    return ""
+
+
+async def supervised(coro_fn) -> None:
+    """Run the trading loop; if it ever ends with an error, record it and alert the owner. /healthz then fails,
+    so the host restarts the app (and a restart closes any real positions: the bots start flat)."""
+    try:
+        await coro_fn()
+    except asyncio.CancelledError:
+        raise
+    except BaseException as exc:
+        LOOP["dead"] = redact(f"{type(exc).__name__}: {exc}")[:200]
+        print(f"trading loop stopped: {LOOP['dead']}")
+        if notifier:
+            try:
+                notifier.send("🛑 Trading loop stopped", f"{LOOP['dead']}. The app will report unhealthy and restart.",
+                              "error")
+            except Exception:
+                pass
 
 
 async def check_day(day: dict | None, report: dict) -> None:
@@ -363,7 +430,7 @@ async def lifespan(app: FastAPI):
     if legacy:   # names only, never values
         print(f"settings: {len(legacy)} deprecated STARNET_* name(s) still in use, rename to NEXUS_*: {', '.join(legacy)}")
     station = Ultron(env("DATA_DIR", "data"), notify=_station_notify)
-    task = asyncio.create_task(run_live() if MODE == "live" else run_city())
+    task = asyncio.create_task(supervised(run_live if MODE == "live" else run_city))
     station_task = asyncio.create_task(run_station())
     yield
     task.cancel()
@@ -400,9 +467,16 @@ app.add_middleware(FreshAssets)
 
 
 @app.get("/healthz")
-def healthz() -> dict:
-    """Always 200 while the server runs (Render restarts it otherwise); `problems` lists what the watchdog sees."""
-    return {"ok": True, "ready": engine is not None, "problems": watchdog.status()["problems"] if watchdog else []}
+def healthz():
+    """200 while the server and its trading loop run; `problems` lists what the watchdog sees. 503 when the trading
+    loop has stopped or stalled (audit C-1), so the host restarts the app instead of leaving positions unmanaged."""
+    stuck = loop_problem()
+    problems = ([stuck] if stuck else []) + (watchdog.status()["problems"] if watchdog else [])
+    body = {"ok": not stuck, "ready": engine is not None, "problems": problems}
+    if stuck:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(body, status_code=503)
+    return body
 
 
 @app.get("/api/state")
@@ -413,7 +487,7 @@ def get_state() -> dict:
 
 
 @app.post("/api/bots/{bot_id}/{action}")
-def toggle(bot_id: str, action: str) -> dict:
+async def toggle(bot_id: str, action: str) -> dict:
     if bot_id not in engine.bots or action not in ("on", "off"):
         raise HTTPException(404)
     engine.set_enabled(bot_id, action == "on")
@@ -679,7 +753,7 @@ def execution_orders() -> dict:
 
 
 @app.post("/api/execution/flatten")
-def execution_flatten() -> dict:
+async def execution_flatten() -> dict:
     """Kill switch: exit every real position, close the paper ones, disarm."""
     r = _router()
     for bot in engine.bots.values():
@@ -845,7 +919,7 @@ def _save_account() -> None:
 
 
 @app.post("/api/account/reset")
-def reset_account() -> dict:
+async def reset_account() -> dict:
     """Start a fresh evaluation (e.g. after a failed one)."""
     engine.reset_account()
     return engine.account.snapshot()
