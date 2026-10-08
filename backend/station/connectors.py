@@ -72,7 +72,7 @@ def _flatten(prefix: str, value, out: list) -> None:
         out.append((prefix, str(value)))
 
 
-def stripe_request(method: str, path: str, params: Optional[dict] = None) -> dict:
+def stripe_request(method: str, path: str, params: Optional[dict] = None, idempotency_key: Optional[str] = None) -> dict:
     key = os.getenv("STRIPE_API_KEY")
     if not key:
         raise ConnectorError("Stripe isn't connected (STRIPE_API_KEY)")
@@ -80,7 +80,10 @@ def stripe_request(method: str, path: str, params: Optional[dict] = None) -> dic
     _flatten("", params or {}, pairs)
     data = urllib.parse.urlencode(pairs).encode() if method == "POST" else None
     url = STRIPE_API + path + (("?" + urllib.parse.urlencode(pairs)) if method == "GET" and pairs else "")
-    req = urllib.request.Request(url, data=data, method=method, headers={"Authorization": f"Bearer {key}"})
+    headers = {"Authorization": f"Bearer {key}"}
+    if idempotency_key and method == "POST":   # Stripe returns the first result for a repeated key: no duplicates
+        headers["Idempotency-Key"] = idempotency_key[:255]
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read())
@@ -90,20 +93,24 @@ def stripe_request(method: str, path: str, params: Optional[dict] = None) -> dic
         except Exception:
             msg = ""
         raise ConnectorError(f"Stripe {exc.code}: {msg or exc.reason}"[:200])
+    except (urllib.error.URLError, OSError, ValueError) as exc:   # network, timeout, unreadable reply
+        raise ConnectorError(f"Stripe: {type(exc).__name__}: {exc}"[:200])
 
 
 def stripe_payment_link(name: str, description: str, price_usd: float, venture: str, redirect: str = "",
-                        extra: Optional[dict] = None) -> dict:
+                        extra: Optional[dict] = None, idempotency_key: Optional[str] = None) -> dict:
     """A product, a price and a payment link. redirect: where the buyer lands after paying ({CHECKOUT_SESSION_ID}
     is filled in by Stripe). The link's metadata is copied onto every Checkout Session it creates."""
     meta = {"nexus_venture": venture, **(extra or {})}
-    product = stripe_request("POST", "/products", {"name": name[:250], "description": description[:500], "metadata": meta})
+    key = (lambda step: f"nexus-{idempotency_key}-{step}") if idempotency_key else (lambda step: None)
+    product = stripe_request("POST", "/products", {"name": name[:250], "description": description[:500], "metadata": meta},
+                             idempotency_key=key("product"))
     price = stripe_request("POST", "/prices", {"product": product["id"], "currency": "usd",
-                                               "unit_amount": int(round(price_usd * 100))})
+                                               "unit_amount": int(round(price_usd * 100))}, idempotency_key=key("price"))
     params = {"line_items": [{"price": price["id"], "quantity": 1}], "metadata": meta}
     if redirect:
         params["after_completion"] = {"type": "redirect", "redirect": {"url": redirect}}
-    link = stripe_request("POST", "/payment_links", params)
+    link = stripe_request("POST", "/payment_links", params, idempotency_key=key("link"))
     return {"url": link["url"], "payment_link": link["id"], "product": product["id"], "price": price["id"]}
 
 
@@ -117,10 +124,14 @@ def stripe_verify(payload: bytes, header: str, tolerance: int = 300) -> dict:
     t = parts.get("t", "")
     if not t or not sigs:
         raise ConnectorError("missing signature")
-    if abs(time.time() - int(t)) > tolerance:
+    try:
+        signed_at = int(t)
+    except ValueError:
+        raise ConnectorError("bad signature")
+    if abs(time.time() - signed_at) > tolerance:
         raise ConnectorError("signature too old")
     expected = hmac.new(secret.encode(), f"{t}.".encode() + payload, hashlib.sha256).hexdigest()
-    if not any(hmac.compare_digest(expected, s) for s in sigs):
+    if not any(hmac.compare_digest(expected.encode(), s.encode("utf-8", "replace")) for s in sigs):
         raise ConnectorError("bad signature")
     return json.loads(payload)
 
@@ -524,7 +535,7 @@ def oauth_start(service: str) -> str:
 
 def oauth_finish(service: str, code: str, state: str) -> dict:
     pending = _tokens().get(f"{service}_pending") or {}
-    if not code or not pending or not hmac.compare_digest(str(pending.get("state", "")), str(state or "")) \
+    if not code or not pending or not hmac.compare_digest(str(pending.get("state", "")).encode(), str(state or "").encode("utf-8", "replace")) \
             or time.time() - pending.get("at", 0) > 900:
         raise ConnectorError("that link expired or didn't come from here: press Connect again")
     if service == "etsy":

@@ -32,7 +32,7 @@ from .store import Store, now_iso
 PER_DAY = int(env("DIGITAL_PER_DAY", "3"))
 PRODUCT_EVERY = timedelta(hours=float(env("DIGITAL_EVERY_HOURS", "24")))   # per venture
 MAX_PER_VENTURE = int(env("DIGITAL_MAX_PER_VENTURE", "6"))
-OPEN = ("qa", "revise", "ready", "manual", "waiting_owner")
+OPEN = ("qa", "revise", "ready", "sending", "manual", "waiting_owner")
 FORMATS = ["guide", "checklist", "planner", "workbook", "template_pack", "printable"]
 STORE_NAME = env("STORE_NAME", "Nexus City Studio")
 PAGE_W, PAGE_H = 1275, 1650   # US letter at 150 dpi
@@ -322,7 +322,8 @@ def publish(store: Store, action: dict) -> dict:
     slug = slugify(p["title"])
     url = store_url(slug)
     link = connectors.stripe_payment_link(p["title"], p["subtitle"], p["price_usd"], action["venture"],
-                                          redirect=f"{url}/thanks?session_id={{CHECKOUT_SESSION_ID}}", extra={"nexus_product": slug})
+                                          redirect=f"{url}/thanks?session_id={{CHECKOUT_SESSION_ID}}", extra={"nexus_product": slug},
+                                          idempotency_key=action["id"])
     rec = store.create("products", {"venture": action["venture"], "slug": slug, "title": p["title"], "subtitle": p["subtitle"],
                                     "format": p["format"], "price_usd": p["price_usd"], "pdf": p["pdf"], "pages": p["pages"],
                                     "cover": p["cover_image"], "sales_page": p["sales"], "checkout_url": link["url"],

@@ -109,8 +109,8 @@ def act(st, b: dict, notify=None) -> dict:
             return s.update("actions", rid, {"owner_ok": True, "status": "ready"}, BY, "Jarvis OK'd it for the owner",
                             kind="action.owner_ok")
         if op == "action.cancel":
-            if a["status"] == "sent":
-                raise ValueError("already sent")
+            if a["status"] in ("sent", "sending"):
+                raise ValueError("already sent" if a["status"] == "sent" else "it's being sent right now")
             return s.update("actions", rid, {"status": "cancelled"}, BY, f"Jarvis cancelled it: {_why(b)}", kind="action.cancelled")
 
     if op.startswith("venture."):

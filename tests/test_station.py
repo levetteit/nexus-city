@@ -437,7 +437,7 @@ def test_stripe_link_sale_and_webhook_signature(ultron, monkeypatch):
     a = actions.create(u.store, "stripe.payment_link", "A-005", v["id"], {"name": "Budget template", "price_usd": 12}, "checkout")
     actions.qa(u.store, u.brain, a)
     monkeypatch.setattr(connectors, "stripe_configured", lambda: True)
-    monkeypatch.setattr(connectors, "stripe_payment_link", lambda *a: {"url": "https://buy.stripe.com/x", "payment_link": "plink_1"})
+    monkeypatch.setattr(connectors, "stripe_payment_link", lambda *a, **kw: {"url": "https://buy.stripe.com/x", "payment_link": "plink_1"})
     actions.dispatch(u.store, u.store.get("actions", a["id"]), True)
     assert u.store.get("ventures", v["id"])["links"]["stripe"] == "https://buy.stripe.com/x"
     # a paid checkout books itself (sale + estimated fee), once, against the right venture
@@ -967,8 +967,12 @@ def test_autonomous_venture_launches_sells_and_closes_on_its_own(tmp_path, monke
     monkeypatch.setenv("NEXUS_PUBLIC_URL", "https://city.example.com")
     stripe_calls, etsy_calls, pins, vid = [], [], [], [None]
 
-    def fake_stripe(method, path, params=None):
+    idem_keys = []
+
+    def fake_stripe(method, path, params=None, idempotency_key=None):
         stripe_calls.append((method, path, params))
+        if method == "POST":
+            idem_keys.append(idempotency_key)
         if path == "/products":
             return {"id": "prod_1"}
         if path == "/prices":
@@ -1023,6 +1027,7 @@ def test_autonomous_venture_launches_sells_and_closes_on_its_own(tmp_path, monke
     prod = u.store.all("products")[0]
     slug = [prod["slug"]]
     assert link["metadata"] == {"nexus_venture": v["id"], "nexus_product": prod["slug"]}
+    assert idem_keys == [f"nexus-{a['id']}-{step}" for step in ("product", "price", "link")]   # a retry can't duplicate
     assert prod["url"] == f"https://city.example.com/shop/{prod['slug']}" and prod["etsy"]["listing_id"] == 99
     assert etsy_calls[0][3] == 6.5 and etsy_calls[0][4][:5] == b"%PDF-"                 # price and the PDF itself
     assert pins[0][3] == prod["url"] and pins[0][4].startswith("https://city.example.com/media/")
