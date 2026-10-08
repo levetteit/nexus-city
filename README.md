@@ -1,24 +1,45 @@
+<div align="center">
+
 # Nexus City
 
+**A 3D operations dashboard where trading bots and AI agents work under rules that code enforces, and a person approves.**
+
 [![CI](https://github.com/levetteit/nexus-city/actions/workflows/ci.yml/badge.svg)](https://github.com/levetteit/nexus-city/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-asyncio-009688?logo=fastapi&logoColor=white)
+![Three.js](https://img.shields.io/badge/Three.js-3D-000000?logo=threedotjs&logoColor=white)
+![Claude API](https://img.shields.io/badge/Claude_API-structured_outputs-D97757)
+![Tests](https://img.shields.io/badge/pytest-186_tests-2ea44f?logo=pytest&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Render-2496ED?logo=docker&logoColor=white)
 
-**A 3D operations dashboard where trading bots and AI agents work under human-set rules.**
+[Screenshots](#screenshots) · [Architecture](docs/ARCHITECTURE.md) · [Safety model](#safety-and-human-in-the-loop-model) · [What it demonstrates](docs/PORTFOLIO.md) · [Run it](#local-setup) · [Docs](#documentation)
 
-Nexus City is a single FastAPI application with two sides:
-- **The City.** Python bots trade micro futures for a prop firm account. The MNQ bots are on by default, and the MES bots can be switched on. Each bot lives in its own building in a Three.js city.
-- **The Space Station.** ULTRON, a scheduler built on the Claude API, runs a crew of AI agents. They research, draft and operate small online ventures: digital products, an Etsy shop, social content and outreach.
+![Nexus City: trading bots in the center, the AI station's departments around them](docs/screenshots/city-world.jpg)
 
-The two sides share one treasury and one audit log. Both run inside limits that code enforces: AI agents draft and propose; checks, caps, approvals and an emergency stop decide what actually reaches the outside world.
+</div>
 
-> Formerly **StarNet**. Old `STARNET_*` settings still work; see [docs/MIGRATION_FROM_STARNET.md](docs/MIGRATION_FROM_STARNET.md).
+## At a glance
+
+| | |
+|---|---|
+| **What it is** | One FastAPI app with two sides. **The City**: Python bots trade micro futures for a prop firm account, each in its own 3D building. **The Space Station**: ULTRON, a scheduler built on the Claude API, runs a crew of AI agents that research, draft and operate small online ventures |
+| **Why it's interesting** | LLM agents that can't act on their own. Every outbound action is a draft that passes code-enforced QA, a send policy, daily caps and an emergency stop. Real orders need an explicit arm, fresh data and session cutoffs. Every change is written to an audit log |
+| **Stack** | Python 3.12 · FastAPI · asyncio · Claude API · Three.js · Docker · GitHub Actions · Stripe, Etsy, Meta, Pinterest, TradersPost integrations |
+| **Quality** | 186 pytest cases with the network blocked, 76% backend coverage. CI runs lint, tests, a secret scan over the full history, a dependency audit and a Docker smoke test |
+| **Who built it** | Jerai Padilla: design, domain rules and operation, with Claude Code as an AI pair programmer ([details](docs/PORTFOLIO.md)) |
+| **Try it** | `uvicorn backend.main:app` runs a simulated market. It needs no keys or accounts ([setup](#local-setup)) |
+
+Old `STARNET_*` settings still work; see [docs/MIGRATION_FROM_STARNET.md](docs/MIGRATION_FROM_STARNET.md).
 
 ## Screenshots
 
-| The City | A bot's streamer room |
+| The Space Station (3D) | The Command Board |
 |---|---|
-| ![The city: one building per bot, beams for open trades](docs/city.png) | ![A bot's room: live chart, P&L and stream chat](docs/room.png) |
+| ![ULTRON's command core with the station's departments around it](docs/screenshots/station-3d.jpg) | ![Mission, emergency stop, AI credits, treasury and portfolio](docs/screenshots/command-board.jpg) |
+| **A bot's streamer room** | **Title screen** |
+| ![A bot's room: live chart, P&L and stream chat](docs/room.png) | ![Nexus: trading city and space station](docs/screenshots/title-screen.jpg) |
 
-To try it locally, run the simulation (see [Local setup](#local-setup)). It needs no keys or accounts.
+The screenshots come from the local simulation with seed data; no real accounts or money are involved.
 
 ## Architecture overview
 
