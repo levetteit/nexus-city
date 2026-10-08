@@ -100,4 +100,10 @@ class Brain:
             raise RuntimeError("the model declined this request")
         if resp.stop_reason == "max_tokens":
             raise RuntimeError("the answer was cut off")
-        return json.loads(next(b.text for b in resp.content if b.type == "text"))
+        text = next((b.text for b in resp.content if b.type == "text"), None)
+        if text is None:
+            raise RuntimeError("the answer had no text")
+        try:
+            return json.loads(text)
+        except ValueError:
+            raise RuntimeError("the answer wasn't valid JSON") from None

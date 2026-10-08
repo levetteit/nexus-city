@@ -3,6 +3,8 @@ import importlib
 import os
 
 import pytest
+
+pytestmark = pytest.mark.integration   # the whole app through its HTTP API
 from fastapi.testclient import TestClient
 
 

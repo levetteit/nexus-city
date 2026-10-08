@@ -36,15 +36,30 @@ uvicorn backend.main:app --env-file .env
 ## Test
 
 ```bash
-python -m pytest -q            # about 30 s; external services are faked, nothing is sent anywhere
-python -m pyflakes backend     # static checks
+python -m pytest -q                     # the whole suite, about 30-80 s
+python -m pytest -q -m "not integration"   # unit tests only
+python -m pytest -q --cov=backend --cov-report=term-missing   # with coverage
+python -m pyflakes backend              # static checks
 ```
 
-The tests never call paid APIs, post, email, trade or charge:
-- every connector is replaced with a fake in the test;
-- app files go to a temporary directory (`tests/conftest.py`).
+The suite has three kinds of tests:
 
-One test (`test_twenty_one_day_baseline`) needs 21 days of candle files in `data/` and is skipped without them.
+| Kind | Marker | What it covers |
+|---|---|---|
+| Unit | none | One module at a time: strategy, account rules, router, station, connectors (faked), persistence, security helpers |
+| Integration | `@pytest.mark.integration` | The FastAPI app end to end through its HTTP API, in process: auth gate, webhooks, arming, OAuth callback |
+| Live | `@pytest.mark.live` | Reaches a real external service. **Skipped** unless `NEXUS_LIVE_TESTS=1`, and never run in CI. There are none today |
+
+**Tests never touch the outside world.**
+- `tests/conftest.py` blocks every network connection and DNS lookup except to this machine, and clears proxy
+  variables, so a test that forgets to fake a connector fails loudly instead of posting, emailing, trading or paying.
+- Each connector (Stripe, Meta, Etsy, Printify, Pinterest, SMTP/IMAP, TradersPost, Claude) is replaced with a
+  fake inside the test that needs it.
+- App files go to a temporary directory.
+
+**Skipped tests.**
+- `test_twenty_one_day_baseline` needs 21 days of candle files in `data/` and is skipped without them.
+- `test_web_push_drops_phones_that_unsubscribed` needs `py-vapid` from `requirements.lock`.
 
 ## Dependencies
 
@@ -52,7 +67,7 @@ One test (`test_twenty_one_day_baseline`) needs 21 days of candle files in `data
 |---|---|
 | `requirements.txt` | Direct runtime dependencies, as version ranges (tested minimum to next major) |
 | `requirements.lock` | Every package with an exact version, resolved for Python 3.12 on Linux. **Docker and CI install this file**, so what is tested is what ships |
-| `requirements-dev.txt` | Test and lint tools on top of the runtime: pytest, httpx (TestClient), pyflakes |
+| `requirements-dev.txt` | Test and lint tools on top of the runtime: pytest, pytest-cov, httpx (TestClient), pyflakes |
 | `kits/requirements.txt` | Only for rebuilding a kit's PDFs and images from `kits/<kit>/source` (reportlab, fontTools, Pillow) |
 
 **Changing a dependency.**

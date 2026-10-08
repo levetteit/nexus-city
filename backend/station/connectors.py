@@ -480,6 +480,7 @@ def _save_token(name: str, tok: Optional[dict]) -> None:
     else:
         data[name] = tok
     tmp = _tokens_path[0] + ".tmp"
+    os.makedirs(os.path.dirname(_tokens_path[0]), exist_ok=True)
     with open(tmp, "w") as f:
         json.dump(data, f)
     os.chmod(tmp, 0o600)
