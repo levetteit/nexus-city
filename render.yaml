@@ -12,6 +12,15 @@ services:
     plan: starter          # always-on; the free plan sleeps after 15 idle minutes, which stops the bots
     healthCheckPath: /healthz
     autoDeploy: true
+    buildFilter:           # a deploy restarts the bots (and closes real positions): deploy only when what the
+      paths:               # image contains changes (the Dockerfile copies exactly these); docs, tests and CI don't
+        - backend/**
+        - frontend/**
+        - kits/**
+        - requirements.lock
+        - Dockerfile
+        - .dockerignore
+        - render.yaml
     envVars:
       - key: STARNET_MODE
         value: live

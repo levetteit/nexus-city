@@ -183,6 +183,6 @@ applied). See `docs/ENGINEERING_AUDIT.md` §14.
 | Webhooks have no replay protection beyond the shared secret (TradingView offers no signing) | Recommended: drop candles older than the last one (already ignored by time order) and rate-limit the endpoint |
 | Public storefront `thanks`/`download` routes call Stripe for any `cs_…` id | Recommended: negative cache and per-address rate limit |
 | Account webhook and push subscription URLs are only checked for `https://` | Recommended: allow-list `traderspost.io` and the known push-service hosts |
-| TradingView signal `price` re-anchors the live mark | Trading phase (M-3) |
+| TradingView signal `price` re-anchored the live mark | Fixed (M-3): on real candles an alert's price is ignored; only the simulation snaps to it |
 | JSON-file persistence (no transactions, whole-file rewrites, unlimited log growth) | Persistence phase (`docs/PERSISTENCE.md`) |
 | Single shared password, no 2FA, no per-user audit identity | Out of scope for a single-owner app; put the app behind an identity-aware proxy for more |

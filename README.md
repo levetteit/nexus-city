@@ -164,7 +164,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 ## Deployment
 
 - **Docker:** the `Dockerfile` builds a single image.
-- **Render:** `render.yaml` deploys it to Render with a password and a persistent disk, and every push to `main` redeploys.
+- **Render:** `render.yaml` deploys it to Render with a password and a persistent disk, and a push to `main` redeploys only when the app itself changes (a build filter skips docs, tests and CI files, since a deploy restarts the bots).
 - **Anywhere else:** the same image runs on any Docker host. Set `NEXUS_PASSWORD`, mount a volume at `/app/data` and expose port 8000.
 
 A deploy restarts the app, and on startup it closes any positions the order router had open. Deploy while the bots are flat.
@@ -183,9 +183,9 @@ Step-by-step hosting, phone alerts and monitoring are in [docs/OPERATIONS.md](do
 
 ## Roadmap
 
-1. **Trading:** the open medium findings (M-3 signal price anchoring, M-12 serial order posting) and Render build filters so docs-only changes don't restart the bots.
+1. **Station reliability:** the open medium findings M-6 (config shared across threads) and M-8 (Claude rate limits treated as failures).
 2. **Persistence:** move from JSON files to PostgreSQL along the schema already designed in [docs/PERSISTENCE.md](docs/PERSISTENCE.md), once the data outgrows one disk.
-3. **Station:** reconnect the expired social tokens, finish the Pinterest app review, and test channels with real traffic.
+3. **Station:** finish the Pinterest app review, and test channels with real traffic.
 
 ## Documentation
 
