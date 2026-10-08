@@ -323,7 +323,7 @@ DEFAULTS = {
     "trim_min_tf": 1,           # only zones of this timeframe or higher count as trim levels
     "trim_min_pts": 0.0,        # ...and only once they're at least this many points from the entry
     "trim_max": None,           # most trims per trade (None = no limit)
-    # Context filters (experiments, all off by default; see README "Context filters"):
+    # Context filters (experiments, all off by default; see docs/TRADING.md, "Context filters"):
     "rsi_filter": None,         # {"tf": 5, "period": 14, "ob": 70, "os": 30, "mode": "exhaustion"|"momentum"}
     "day_open_bias": None,      # ICT true day open (00:00 ET): "discount" = longs below it, shorts above; "trend" = the reverse
     "range_bias": None,         # previous trading day's range: "discount" = longs in its lower half, shorts upper; "trend" = reverse

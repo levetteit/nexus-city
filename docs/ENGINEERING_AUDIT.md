@@ -494,3 +494,26 @@ testing guide.
 | Owner and Jarvis action handlers (`main.station_action` and `jarvis.act` "action.*") | small | Similar checks, but different actors and audit messages. Merging them would couple the owner's API to Jarvis's narrower permissions |
 
 The domain names are unchanged: ULTRON, crew, ventures, War Room, treasury, station and desk.
+
+---
+
+## 12. Documentation restructure (Phase 10, 2026-10-08)
+
+The 1,069-line README was an operator manual. It is now a short overview that links to topic documents, and every
+section of the old README moved into them:
+
+| New document | Old README sections |
+|---|---|
+| `docs/CITY.md` | intro, market weather, streamer rooms, skins, payout shuttles, one world, full-screen chart |
+| `docs/TRADING.md` | how it's built (strategy, sizing, sessions, results, filters, prop account, scale plan, accounts), backtest, Strategy Forge, the Lookout |
+| `docs/LIVE_TRADING.md` | live paper trading, news filter, trading desk, candle history, paper vs backtest, daily report, real orders, signal check, TradingView alerts, going live |
+| `docs/STATION.md` | Space Station, owner-made products |
+| `docs/OPERATIONS.md` | Render hosting, phone alerts, tests and the watchdog |
+
+A script checked that every line of the old README appears in the new files. The only exceptions are four
+deliberate corrections:
+- **Going live** said everything runs on simulated prices; it now describes live paper mode and the armed real-order path.
+- **Hosting** step 1 said "Merge PR #1".
+- **Run it** installed `requirements.txt` instead of the lockfile.
+- **Two Station paragraphs** had lost their bold titles in an earlier edit. They were restored from git history:
+  "Autonomous ventures…" and "The Etsy shop, run by the crew".

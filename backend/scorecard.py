@@ -27,7 +27,7 @@ from .persist import write_json_atomic
 from .backtest import ReplayMarket, trading_day
 from .engine import Engine
 
-# The 21-day real-data backtest the default settings came from (README, "Optimizing")
+# The 21-day real-data backtest the default settings came from (docs/TRADING.md, "Real-data results")
 BASELINE = {"source": "21 real days, Sep 8 - Oct 5 2026", "profitable_day_pct": 71.4, "avg_day": 630.0,
             "profit_factor": 2.9, "win_rate": 49.3}
 MATCH_MINUTES = 3   # a paper trade and a replay trade on the same bot and side this close together are the same trade
