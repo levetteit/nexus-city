@@ -65,3 +65,13 @@ def test_jarvis_act_needs_its_token_and_refuses_money(client, monkeypatch):
         return
     assert c.post("/api/jarvis/act", json={"op": "venture.stage", "id": "V-001", "stage": "paused", "why": "x"}, headers=h).status_code == 403
     assert c.post("/api/jarvis/act", json={"op": "warroom"}, headers=h).json() == {"queued": "warroom"}
+
+
+def test_bad_request_bodies_are_400s_not_crashes(client):
+    c, main = client
+    c.get("/", auth=("x", "pw"))                                       # log in (the cookie)
+    for body in (b"not json", b"[1, 2]", b'"text"'):
+        for path in ("/api/account/payout", "/api/signals/2026-10-07/vote"):
+            r = c.post(path, content=body, headers={"content-type": "application/json"})
+            assert r.status_code == 400, (path, body)
+    assert c.post("/api/account/payout", content=b"").status_code == 400   # empty is {}: no amount, so 400 from the check

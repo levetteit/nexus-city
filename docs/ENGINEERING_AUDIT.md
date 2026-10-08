@@ -456,3 +456,41 @@ testing guide.
 4. **Owner sign-off first.** T-H1, T-H4, T-H7, M-4, M-11 (these change trading behaviour).
    **Owner decision (2026-10-07): approved.** They will be implemented with tests in the trading-reliability work; M-10 (send policy
    default); O-H1 (repository visibility/history); O-H2 (deploy filters).
+
+---
+
+## 11. Code quality review (Phase 9, 2026-10-08)
+
+**What was measured** (backend, about 11,000 lines):
+
+| Check | Result |
+|---|---|
+| Type hints | 744 of 766 functions (97%) have argument or return annotations |
+| Bare `except:` | none |
+| `except Exception` | 22. Each one is a stated boundary: "the station must never take the city down", "bookkeeping never breaks the desk", "network hiccup: try again next poll". One swallows silently (`desk.py`, booking the cost of a Claude call), and that is on purpose |
+| Import cycles at module level | none. The 76 imports inside functions are deliberate: endpoints load station modules only when they're used |
+| Functions over 60 lines | 11 (listed below) |
+
+**Changed.** Each change is small and covered by tests.
+
+| Change | Why | Behaviour |
+|---|---|---|
+| `json_body()` in `main.py`. One helper reads every POST body: empty becomes `{}`, and invalid JSON or a body that isn't an object is a **400** | 23 endpoints called `await request.json()` directly, and two copies of a `try/except Exception` handled the optional note. Before this, a malformed body was an unhandled exception and a 500 | Malformed bodies now get 400 instead of 500. Valid requests are unchanged. Test: `test_bad_request_bodies_are_400s_not_crashes` (it fails on the old code) |
+| ULTRON's `run_job` (147 lines) is split into `run_job`, `_do_job` and `_job_failed`. `run_job` is the safety wrapper, `_do_job` runs the job and `_job_failed` handles recovery | Running a job and recovering from a failed one were one block, and the recovery rules (retry while Claude can't be reached, skip after any other failure) were hard to find | None. The code was moved, not rewritten. The existing station tests cover both the failure paths and the success paths |
+| The `last_error` line in that handler gets explicit parentheses: `(brain.last_error or str(exc)) if conn else str(exc)` | `a or b if c else d` reads as if `or` were applied last, but Python applies the condition last, so the line was correct yet easy to misread | None |
+| A failed agent task (`crew.run_task`) and a failed Etsy scan now store the **redacted** error | These errors are shown on the board and written to the feed. Phase 3 redacted the other error paths but missed these two | Only secrets are masked. Test: `test_a_failed_task_is_recorded_without_secrets_and_never_raises` |
+| CI uses `actions/checkout@v5` and `actions/setup-python@v6` | GitHub is retiring the Node 20 runtime that v4/v5 use | None |
+
+**Looked at and deliberately left alone:**
+
+| Function | Lines | Why it stays |
+|---|---|---|
+| `jarvis.act` | 111 | A flat allowlist, with each refusal next to the operation it guards. Splitting it would scatter the safety rules |
+| `ultron._seed` | 88 | Data: the agents, routines and ventures the station starts with |
+| `ultron.next_job` | 73 | The scheduler's priority order. Reading it from top to bottom *is* the specification |
+| `digital.render_pdf` | 85 | Drawing code for one page layout |
+| `main.run_live`, `execution.handle`, `accounts.observe`, `bots/proc._on_close` | 63–85 | Trading paths. They change only together with the approved reliability fixes (C-1, T-H1–T-H7), with tests written first, not as part of a style pass |
+| `actions.dispatch`, `etsyscan.scan` | 62–63 | A single sequence each, with the send-safety states (Phase 4) inline. Splitting would hide the order those states depend on |
+| Owner and Jarvis action handlers (`main.station_action` and `jarvis.act` "action.*") | small | Similar checks, but different actors and audit messages. Merging them would couple the owner's API to Jarvis's narrower permissions |
+
+The domain names are unchanged: ULTRON, crew, ventures, War Room, treasury, station and desk.

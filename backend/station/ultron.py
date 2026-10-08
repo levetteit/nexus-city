@@ -281,152 +281,162 @@ class Ultron:
         return None
 
     def run_job(self, job: dict, now: Optional[datetime] = None) -> Optional[dict]:
-        """Do one job. Blocking (Claude calls): run in a thread."""
+        """Do one job. Blocking (Claude calls): run in a thread. A failure is recorded and the job is put back or
+        skipped (see _job_failed); it never propagates."""
         now = now or datetime.now(timezone.utc).astimezone(ET)
-        s = self.store
         try:
-            if job["kind"] == "routine":
-                r = s.get("routines", job["routine"])
-                spec = next(x for x in research.ROUTINES if x["id"] == r["id"])
-                self.busy = f"Research Station: {r['name']}"
-                s.update("agents", "A-002", {"status": "WORKING", "current_task": r["name"]}, "A-002", f"running {r['name']}", kind="agent.state")
-                doc = research.run_routine(spec, s, self.brain, now, self.cfg.get("mandate", research.MANDATE),
-                                           self.cfg.get("research_focus", ""))
-                s.update("routines", r["id"], {"last_run": now.isoformat(), "runs": r.get("runs", 0) + 1, "last_summary": doc["summary"],
-                                               "last_pick": doc["first_pick"]}, "A-002", f"{r['name']} filed {len(doc['filed'])} opportunities",
-                         kind="routine.completed")
-                s.update("agents", "A-002", {"status": "COMPLETED", "current_task": None, "last_output": r["name"]}, "A-002", "routine done",
-                         kind="agent.state")
-                if job.get("kickoff"):
-                    self.cfg["kicked_off"] = True
-                    self.cfg["kickoff_at"] = now.isoformat()
-                    self._save_cfg()
-                self._propose(now)
-                return doc
-            if job["kind"] == "plan":
-                v = s.get("ventures", job["venture"])
-                self.busy = f"Validating {v['name']}"
-                s.update("ventures", v["id"], {"planned": True}, "A-001", "handed to the Validation Agent")
-                plan = crew.plan_venture(s, self.brain, v, s.get("opportunities", v["opportunity"]))
-                if plan["verdict"] != "no_go" and plan["sell_via"] in ("stripe_link", "both") and plan["price_usd"] > 0:
-                    actions.create(s, "stripe.payment_link", "A-005", v["id"], {"name": plan["product_name"], "description": plan["offer"],
-                                                                                "price_usd": plan["price_usd"]}, f"checkout for {v['name']}")
-                return plan
-            if job["kind"] == "dispatch":
-                a = s.get("actions", job["action"])
-                self.busy = f"Sending {a['kind']}"
-                out = actions.dispatch(s, a, self.cfg.get("outbound", True))
-                if out["status"] == "ready":   # held by today's cap: don't spin on it until tomorrow
-                    self.cfg.setdefault("capped", {})
-                    self.cfg["capped"] = {now.date().isoformat(): sorted(set(self.cfg["capped"].get(now.date().isoformat(), [])) | {a["kind"]})}
-                    self._save_cfg()
-                return out
-            if job["kind"] == "shop_research":
-                self.busy = "Etsy Shop Manager: what's selling now"
-                self.cfg["shop_research_at"] = now.isoformat()
-                self._save_cfg()
-                return shop.research(s, self.brain, now)
-            if job["kind"] == "product":
-                v = s.get("ventures", job["venture"])
-                self.busy = f"Product Designer: next product for {v['name']}"
-                return digital.create(s, self.brain, v, now)
-            if job["kind"] == "credits_reconcile":
-                self.busy = "Auditor: Anthropic cost report"
-                return credits.reconcile(s)
-            if job["kind"] == "mail_check":
-                self.busy = "Auditor: reading replies in the outreach inbox"
-                return mailbox.check(s, now, self.notify)
-            if job["kind"] == "kit_pin":
-                self.busy = "Social Media Manager: pinning an owner product"
-                return kits.next_pin(s, job["product"])
-            if job["kind"] == "shop_orders":
-                self.busy = "Etsy Shop Manager: reading orders"
-                self.cfg["shop_orders_at"] = now.isoformat()
-                self._save_cfg()
-                return shop.sync_orders(s, now)
-            if job["kind"] == "metrics":
-                self.busy = "Auditor: reading post engagement"
-                self.cfg["metrics_at"] = now.isoformat()
-                self._save_cfg()
-                return results.refresh_metrics(s, now)
-            if job["kind"] == "audit":
-                self.busy = "Auditor: daily audit"
-                self.cfg["audited"] = now.date().isoformat()
-                self._save_cfg()
-                return finance.audit(s, self.treasury)
-            if job["kind"] in ("qa", "revise"):
-                a = s.get("actions", job["action"])
-                self.busy = f"Compliance & QA: {a['why'][:60]}" if job["kind"] == "qa" else f"Revising {a['kind']}"
-                return (actions.qa if job["kind"] == "qa" else actions.revise)(s, self.brain, a)
-            if job["kind"] == "warroom":
-                self.busy = "War Room in session"
-                self.cfg["warroom_now"] = False
-                doc = warroom.convene(s, self.brain, self.treasury, self.health, self.cfg, self.request, now)
-                self._save_cfg()
-                self.notify("🛰️ War Room", doc["summary"][:200])
-                return doc
-            if job["kind"] in ("marketing_plan", "content", "outreach"):
-                v = s.get("ventures", job["venture"])
-                self.busy = {"marketing_plan": "Marketing Lead: channel plan", "content": "Content Creator: today's posts",
-                             "outreach": "Outreach Agent: finding customers"}[job["kind"]] + f" ({v['name']})"
-                if job["kind"] == "marketing_plan":
-                    return marketing.plan(s, self.brain, v)
-                if job["kind"] == "content":
-                    return marketing.content(s, self.brain, v, now)
-                return marketing.outreach(s, self.brain, v, now)
-            if job["kind"] == "task":
-                t = s.get("tasks", job["task"])
-                self.busy = f"{t['title']} ({t['venture']})"
-                return crew.run_task(s, self.brain, t)
+            return self._do_job(job, now)
         except Exception as exc:
-            self.last_error = redact(self.brain.last_error or str(exc) if _is_connection(exc) else str(exc))[:200]
-            if "credit balance" in str(exc).lower():
-                credits.mark_empty(s, now)
-            if _is_connection(exc):
-                # the network or the key, not the job: keep the job and its slot, try again in a few minutes
-                self.cfg["ai_backoff_until"] = (now + AI_BACKOFF).isoformat()
-                self._save_cfg()
-                s.event("ultron.ai_unreachable", "A-001", f"{job['kind']} waiting: {self.last_error}", severity="WARNING")
-                if job["kind"] == "plan":
-                    s.update("ventures", job["venture"], {"planned": False}, "A-001", "planning will retry")
-                if job["kind"] == "shop_research":
-                    self.cfg.pop("shop_research_at", None)
-                    self._save_cfg()
-                if job["kind"] == "product":
-                    s.update("ventures", job["venture"], {"product_at": None}, "A-001", "Claude unreachable: product will retry")
-                if job["kind"] in ("task",):
-                    s.update("tasks", job["task"], {"status": "queued", "attempts": max(0, s.get("tasks", job["task"]).get("attempts", 1) - 1)},
-                             "A-001", "Claude unreachable: back in the queue")
-                if job["kind"] in ("qa", "revise"):
-                    s.update("actions", job["action"], {"status": job["kind"]}, "A-001", "Claude unreachable: will retry")
-                return None
-            s.event("ultron.job_failed", "A-001", f"{job['kind']} failed: {self.last_error}", ref=job.get("task") or job.get("routine")
-                    or job.get("venture"), severity="WARNING")
-            if job["kind"] == "routine" and job.get("kickoff"):
-                self.cfg["kicked_off"] = True   # don't hammer a failing kickoff: try again in KICKOFF_RETRY
-                self.cfg["kickoff_at"] = now.isoformat()
-                self._save_cfg()
-            if job["kind"] == "shop_research":   # try again in 6 hours, not in 2 days
-                self.cfg["shop_research_at"] = (now - shop.RESEARCH_EVERY + timedelta(hours=6)).isoformat()
-                self._save_cfg()
-            if job["kind"] == "routine":   # a failed slot is skipped, not retried in a loop
-                s.update("routines", job["routine"], {"last_run": now.isoformat(), "last_error": self.last_error}, "A-001", "run failed")
-            if job["kind"] == "plan":
-                s.update("ventures", job["venture"], {"planned": False}, "A-001", "planning failed; will retry")
-            if job["kind"] in ("content", "outreach"):
-                s.update("ventures", job["venture"], {f"{job['kind']}_day": now.date().isoformat()}, "A-001", "skipped today after a failure")
-            if job["kind"] == "marketing_plan":
-                s.update("ventures", job["venture"], {"marketing_plan": {"channels": [], "angles": [], "outreach": {"use": False},
-                                                                     "failed_at": now.isoformat()}},
-                         "A-001", "channel plan failed; using an empty plan until the War Room revisits it")
-            if job["kind"] in ("qa", "revise"):
-                s.update("actions", job["action"], {"status": "failed", "result": {"error": self.last_error}}, "A-001", "QA could not run")
-            if job["kind"] == "warroom":
-                self.cfg["warroom_at"] = now.isoformat()   # try again tomorrow, not every 15 seconds
-                self._save_cfg()
+            self._job_failed(job, exc, now)
+            return None
         finally:
             self.busy = None
+
+    def _do_job(self, job: dict, now: datetime) -> Optional[dict]:
+        s = self.store
+        if job["kind"] == "routine":
+            r = s.get("routines", job["routine"])
+            spec = next(x for x in research.ROUTINES if x["id"] == r["id"])
+            self.busy = f"Research Station: {r['name']}"
+            s.update("agents", "A-002", {"status": "WORKING", "current_task": r["name"]}, "A-002", f"running {r['name']}", kind="agent.state")
+            doc = research.run_routine(spec, s, self.brain, now, self.cfg.get("mandate", research.MANDATE),
+                                       self.cfg.get("research_focus", ""))
+            s.update("routines", r["id"], {"last_run": now.isoformat(), "runs": r.get("runs", 0) + 1, "last_summary": doc["summary"],
+                                           "last_pick": doc["first_pick"]}, "A-002", f"{r['name']} filed {len(doc['filed'])} opportunities",
+                     kind="routine.completed")
+            s.update("agents", "A-002", {"status": "COMPLETED", "current_task": None, "last_output": r["name"]}, "A-002", "routine done",
+                     kind="agent.state")
+            if job.get("kickoff"):
+                self.cfg["kicked_off"] = True
+                self.cfg["kickoff_at"] = now.isoformat()
+                self._save_cfg()
+            self._propose(now)
+            return doc
+        if job["kind"] == "plan":
+            v = s.get("ventures", job["venture"])
+            self.busy = f"Validating {v['name']}"
+            s.update("ventures", v["id"], {"planned": True}, "A-001", "handed to the Validation Agent")
+            plan = crew.plan_venture(s, self.brain, v, s.get("opportunities", v["opportunity"]))
+            if plan["verdict"] != "no_go" and plan["sell_via"] in ("stripe_link", "both") and plan["price_usd"] > 0:
+                actions.create(s, "stripe.payment_link", "A-005", v["id"], {"name": plan["product_name"], "description": plan["offer"],
+                                                                            "price_usd": plan["price_usd"]}, f"checkout for {v['name']}")
+            return plan
+        if job["kind"] == "dispatch":
+            a = s.get("actions", job["action"])
+            self.busy = f"Sending {a['kind']}"
+            out = actions.dispatch(s, a, self.cfg.get("outbound", True))
+            if out["status"] == "ready":   # held by today's cap: don't spin on it until tomorrow
+                self.cfg.setdefault("capped", {})
+                self.cfg["capped"] = {now.date().isoformat(): sorted(set(self.cfg["capped"].get(now.date().isoformat(), [])) | {a["kind"]})}
+                self._save_cfg()
+            return out
+        if job["kind"] == "shop_research":
+            self.busy = "Etsy Shop Manager: what's selling now"
+            self.cfg["shop_research_at"] = now.isoformat()
+            self._save_cfg()
+            return shop.research(s, self.brain, now)
+        if job["kind"] == "product":
+            v = s.get("ventures", job["venture"])
+            self.busy = f"Product Designer: next product for {v['name']}"
+            return digital.create(s, self.brain, v, now)
+        if job["kind"] == "credits_reconcile":
+            self.busy = "Auditor: Anthropic cost report"
+            return credits.reconcile(s)
+        if job["kind"] == "mail_check":
+            self.busy = "Auditor: reading replies in the outreach inbox"
+            return mailbox.check(s, now, self.notify)
+        if job["kind"] == "kit_pin":
+            self.busy = "Social Media Manager: pinning an owner product"
+            return kits.next_pin(s, job["product"])
+        if job["kind"] == "shop_orders":
+            self.busy = "Etsy Shop Manager: reading orders"
+            self.cfg["shop_orders_at"] = now.isoformat()
+            self._save_cfg()
+            return shop.sync_orders(s, now)
+        if job["kind"] == "metrics":
+            self.busy = "Auditor: reading post engagement"
+            self.cfg["metrics_at"] = now.isoformat()
+            self._save_cfg()
+            return results.refresh_metrics(s, now)
+        if job["kind"] == "audit":
+            self.busy = "Auditor: daily audit"
+            self.cfg["audited"] = now.date().isoformat()
+            self._save_cfg()
+            return finance.audit(s, self.treasury)
+        if job["kind"] in ("qa", "revise"):
+            a = s.get("actions", job["action"])
+            self.busy = f"Compliance & QA: {a['why'][:60]}" if job["kind"] == "qa" else f"Revising {a['kind']}"
+            return (actions.qa if job["kind"] == "qa" else actions.revise)(s, self.brain, a)
+        if job["kind"] == "warroom":
+            self.busy = "War Room in session"
+            self.cfg["warroom_now"] = False
+            doc = warroom.convene(s, self.brain, self.treasury, self.health, self.cfg, self.request, now)
+            self._save_cfg()
+            self.notify("🛰️ War Room", doc["summary"][:200])
+            return doc
+        if job["kind"] in ("marketing_plan", "content", "outreach"):
+            v = s.get("ventures", job["venture"])
+            self.busy = {"marketing_plan": "Marketing Lead: channel plan", "content": "Content Creator: today's posts",
+                         "outreach": "Outreach Agent: finding customers"}[job["kind"]] + f" ({v['name']})"
+            if job["kind"] == "marketing_plan":
+                return marketing.plan(s, self.brain, v)
+            if job["kind"] == "content":
+                return marketing.content(s, self.brain, v, now)
+            return marketing.outreach(s, self.brain, v, now)
+        if job["kind"] == "task":
+            t = s.get("tasks", job["task"])
+            self.busy = f"{t['title']} ({t['venture']})"
+            return crew.run_task(s, self.brain, t)
         return None
+
+    def _job_failed(self, job: dict, exc: Exception, now: datetime) -> None:
+        """Record why a job failed and leave its work where it will be retried (Claude unreachable) or skipped."""
+        s = self.store
+        self.last_error = redact((self.brain.last_error or str(exc)) if _is_connection(exc) else str(exc))[:200]
+        if "credit balance" in str(exc).lower():
+            credits.mark_empty(s, now)
+        if _is_connection(exc):
+            # the network or the key, not the job: keep the job and its slot, try again in a few minutes
+            self.cfg["ai_backoff_until"] = (now + AI_BACKOFF).isoformat()
+            self._save_cfg()
+            s.event("ultron.ai_unreachable", "A-001", f"{job['kind']} waiting: {self.last_error}", severity="WARNING")
+            if job["kind"] == "plan":
+                s.update("ventures", job["venture"], {"planned": False}, "A-001", "planning will retry")
+            if job["kind"] == "shop_research":
+                self.cfg.pop("shop_research_at", None)
+                self._save_cfg()
+            if job["kind"] == "product":
+                s.update("ventures", job["venture"], {"product_at": None}, "A-001", "Claude unreachable: product will retry")
+            if job["kind"] in ("task",):
+                s.update("tasks", job["task"], {"status": "queued", "attempts": max(0, s.get("tasks", job["task"]).get("attempts", 1) - 1)},
+                         "A-001", "Claude unreachable: back in the queue")
+            if job["kind"] in ("qa", "revise"):
+                s.update("actions", job["action"], {"status": job["kind"]}, "A-001", "Claude unreachable: will retry")
+            return None
+        s.event("ultron.job_failed", "A-001", f"{job['kind']} failed: {self.last_error}", ref=job.get("task") or job.get("routine")
+                or job.get("venture"), severity="WARNING")
+        if job["kind"] == "routine" and job.get("kickoff"):
+            self.cfg["kicked_off"] = True   # don't hammer a failing kickoff: try again in KICKOFF_RETRY
+            self.cfg["kickoff_at"] = now.isoformat()
+            self._save_cfg()
+        if job["kind"] == "shop_research":   # try again in 6 hours, not in 2 days
+            self.cfg["shop_research_at"] = (now - shop.RESEARCH_EVERY + timedelta(hours=6)).isoformat()
+            self._save_cfg()
+        if job["kind"] == "routine":   # a failed slot is skipped, not retried in a loop
+            s.update("routines", job["routine"], {"last_run": now.isoformat(), "last_error": self.last_error}, "A-001", "run failed")
+        if job["kind"] == "plan":
+            s.update("ventures", job["venture"], {"planned": False}, "A-001", "planning failed; will retry")
+        if job["kind"] in ("content", "outreach"):
+            s.update("ventures", job["venture"], {f"{job['kind']}_day": now.date().isoformat()}, "A-001", "skipped today after a failure")
+        if job["kind"] == "marketing_plan":
+            s.update("ventures", job["venture"], {"marketing_plan": {"channels": [], "angles": [], "outreach": {"use": False},
+                                                                 "failed_at": now.isoformat()}},
+                     "A-001", "channel plan failed; using an empty plan until the War Room revisits it")
+        if job["kind"] in ("qa", "revise"):
+            s.update("actions", job["action"], {"status": "failed", "result": {"error": self.last_error}}, "A-001", "QA could not run")
+        if job["kind"] == "warroom":
+            self.cfg["warroom_at"] = now.isoformat()   # try again tomorrow, not every 15 seconds
+            self._save_cfg()
 
     def _tasks_today(self, now: datetime) -> int:
         day = now.astimezone(timezone.utc).date().isoformat()
@@ -685,8 +695,9 @@ class Ultron:
         try:
             result = etsyscan.scan(terms, call=call)
         except Exception as exc:
-            self.store.update("tasks", task_id, {"scan": {"state": "failed", "error": str(exc)[:200], "at": now_iso()}},
-                              "A-002", f"Etsy scan failed: {str(exc)[:120]}", kind="task.scan")
+            err = redact(exc)
+            self.store.update("tasks", task_id, {"scan": {"state": "failed", "error": err[:200], "at": now_iso()}},
+                              "A-002", f"Etsy scan failed: {err[:120]}", kind="task.scan")
             raise
         url = etsyscan.save_csv(self.store.dir, task_id, result["rows"])
         s = result["summary"]
