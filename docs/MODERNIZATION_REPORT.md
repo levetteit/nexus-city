@@ -152,7 +152,9 @@ Totals since the baseline: **91 files changed, 5,179 insertions, 1,623 deletions
 > regression tests in `tests/test_trading_reliability.py`. Section 7 describes the state at the end of the
 > modernization. A second change fixed T-H1, T-H4, T-H7, M-4 and M-11 (owner-approved behaviour changes), with 16
 > tests in `tests/test_trading_behaviour.py`. Every approved trading finding is now fixed. A third change fixed M-3
-> (alert price on real candles), M-12 (accounts get each order in parallel) and O-H2 (Render build filter).
+> (alert price on real candles), M-12 (accounts get each order in parallel) and O-H2 (Render build filter), and a
+> fourth fixed M-6 (ULTRON's settings saved under a lock) and M-8 (a busy Claude is a short wait, not a failure).
+> Every critical, high and medium finding is now fixed except M-10, which the owner chose to keep.
 
 ## 8. Recommended future work
 

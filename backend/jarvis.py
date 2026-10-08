@@ -141,13 +141,15 @@ def act(st, b: dict, notify=None) -> dict:
 
     if op == "routine.run":
         _need(s, "routines", rid)
-        st.cfg.setdefault("run_now", [])
-        if rid not in st.cfg["run_now"]:
-            st.cfg["run_now"].append(rid)
+        with st.cfg_lock:
+            st.cfg.setdefault("run_now", [])
+            if rid not in st.cfg["run_now"]:
+                st.cfg["run_now"].append(rid)
         st._save_cfg()
         return {"queued": rid}
     if op == "warroom":
-        st.cfg["warroom_now"] = True
+        with st.cfg_lock:
+            st.cfg["warroom_now"] = True
         st._save_cfg()
         return {"queued": "warroom"}
     if op == "directive":

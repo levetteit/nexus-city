@@ -1305,7 +1305,8 @@ async def station_outbound(request: Request) -> dict:
     """The Station's E-STOP: `{"on": false}` stops every outgoing post, email and Stripe change at once."""
     st = _station()
     on = bool((await json_body(request)).get("on"))
-    st.cfg["outbound"] = on
+    with st.cfg_lock:
+        st.cfg["outbound"] = on
     st._save_cfg()
     st.store.event("station.outbound", "owner", "outbound ON: QA-passed work goes out" if on else "OUTBOUND STOPPED by the owner",
                    severity="INFO" if on else "WARNING")
@@ -1318,7 +1319,8 @@ def station_warroom() -> dict:
     st = _station()
     if not st.brain.enabled:
         raise HTTPException(503, "add ANTHROPIC_API_KEY to run the War Room")
-    st.cfg["warroom_now"] = True
+    with st.cfg_lock:
+        st.cfg["warroom_now"] = True
     st._save_cfg()
     return {"queued": True}
 
