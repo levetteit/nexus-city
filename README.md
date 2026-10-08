@@ -171,6 +171,7 @@ Step-by-step hosting, phone alerts and monitoring are in [docs/OPERATIONS.md](do
 
 | Document | Contents |
 |---|---|
+| [docs/PORTFOLIO.md](docs/PORTFOLIO.md) | What the project demonstrates, resume bullets, interview talking points |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, runtime model, the AI workflow, the trading flow, persistence, design decisions |
 | [docs/CITY.md](docs/CITY.md) | The 3D city: weather, streamer rooms, skins, shuttles, the shared world |
 | [docs/TRADING.md](docs/TRADING.md) | The strategy, sizing, sessions, prop account rules, real-data results, backtesting, Strategy Forge |
