@@ -10,7 +10,7 @@ import json
 import os
 import threading
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 COLLECTIONS = ("ventures", "agents", "tasks", "approvals", "opportunities", "missions", "routines", "actions", "leads",
                "products")
@@ -132,16 +132,26 @@ class Store:
         os.makedirs(d, exist_ok=True)
         path = os.path.join(d, name)
         tmp = f"{path}.{threading.get_ident()}.tmp"   # write, then swap: a reader never sees a half-written file
-        with open(tmp, "w") as f:
-            json.dump(doc, f, indent=1, default=str)
-        os.replace(tmp, path)
+        with self.lock:
+            with open(tmp, "w") as f:
+                json.dump(doc, f, indent=1, default=str)
+            os.replace(tmp, path)
+
+    def update_doc(self, name: str, change: Callable[[Any], Any]) -> Any:
+        """Read-modify-write a document under the store's lock, so two threads can't overwrite each other's change
+        (e.g. an opt-out arriving while the dispatch worker records a send). `change` returns the new document."""
+        with self.lock:
+            doc = change(self.load_doc(name))
+            self.save_doc(name, doc)
+            return doc
 
     def load_doc(self, name: str) -> Optional[Any]:
         path = os.path.join(self.dir, "docs", name)
-        if not os.path.exists(path):
-            return None
-        with open(path) as f:
-            return json.load(f)
+        with self.lock:
+            if not os.path.exists(path):
+                return None
+            with open(path) as f:
+                return json.load(f)
 
     def list_docs(self, prefix: str, limit: int = 20) -> list[str]:
         d = os.path.join(self.dir, "docs")

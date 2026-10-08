@@ -670,7 +670,7 @@ function execRows(s) {
     <div class="row"><span>Real orders</span><span class="${x.armed ? "neg" : ""}">${x.armed ? "● ARMED" : "off (paper only)"}</span></div>
     ${x.armed && !x.data_ok ? `<div class="halt">entries paused: price data is over ${x.max_delay} min old</div>` : ""}
     ${open ? `<div class="row"><span>On your accounts</span><span>${open}</span></div>` : ""}
-    ${x.last_error ? `<div class="halt">last order failed: ${x.last_error}</div>` : ""}
+    ${x.last_error ? `<div class="halt">last order failed: ${esc(x.last_error)}</div>` : ""}
     <div class="row"><span>Orders sent</span><span>${x.sent} ok · ${x.blocked} entries skipped · ${x.targets} webhook${x.targets === 1 ? "" : "s"}</span></div>
     <button class="desk-btn" data-orderlog>📜 ORDER LOG: WHAT WAS SENT AND WHAT CAME BACK</button>
     <div class="exec-btns">${x.armed ? `<button data-exec="disarm">DISARM</button>` : `<button class="arm" data-exec="arm">ARM REAL ORDERS</button>`}<button class="danger" data-exec="flatten">FLATTEN ALL</button></div>`;
@@ -766,9 +766,9 @@ function tvRows(h) {   // the TradingView feed's own candles, saved as they arri
 function newsRows(s) {
   const n = s.news;
   if (!n) return "";
-  const hold = n.hold ? `<div class="halt">📰 ${n.hold} · paused until ${n.hold_until}</div>` : "";
+  const hold = n.hold ? `<div class="halt">📰 ${esc(n.hold)} · paused until ${esc(n.hold_until)}</div>` : "";
   const next = n.next.length
-    ? n.next.slice(0, 3).map((e) => `<div class="row"><span>${e.time}</span><span>${e.title}</span></div>`).join("")
+    ? n.next.slice(0, 3).map((e) => `<div class="row"><span>${esc(e.time)}</span><span>${esc(e.title)}</span></div>`).join("")
     : `<div class="row"><span>News</span><span>no high-impact USD news ahead</span></div>`;
   return `<div class="row"><span><b>📰 News filter</b></span><span>${n.error ? "using saved calendar" : "on"}</span></div>${hold}${next}`;
 }
@@ -1172,7 +1172,7 @@ function feedEvents(events) {
     else if (ev.type === "acct_event") feed(`👥 ${esc(ev.text)}`, { passed: "win", payout: "win", failed: "loss", halt: "think" }[ev.what] || "");
     else if (ev.type === "desk_mode") feed(`🧠 <b>Desk</b> ${ev.mode.replace("_", " ")} until ${ev.until} · ${esc(ev.why)}`, "think");
     else if (ev.type === "desk_meeting") feed(`🧠 <b>${ev.kind === "evening" ? "Desk meeting" : "Morning briefing"}</b> · ${ev.session}: ${ev.mode.replace("_", " ")} · ${esc(ev.why)}`, "think");
-    else if (ev.type === "news_hold") feed(`📰 <b>${ev.title}</b> at ${ev.at} · no new trades until ${ev.until}`, "think");
+    else if (ev.type === "news_hold") feed(`📰 <b>${esc(ev.title)}</b> at ${esc(ev.at)} · no new trades until ${ev.until}`, "think");
   }
 }
 function feedSetups(s) {   // what each working bot is thinking: PROC seen, waiting for MES, skipped…

@@ -81,6 +81,10 @@ class Ultron:
         if str(self.cfg.get("mandate", "")).startswith(research.OLD_MANDATE_START):
             self.cfg["mandate"] = research.MANDATE   # the owner's Oct 6 update: autonomous ventures first
         self._seed()
+        for a in self.store.find("actions", status="sending"):   # the app stopped mid-send: never resend blindly
+            self.store.update("actions", a["id"], {"status": "failed", "result": {
+                "error": "interrupted mid-send by a restart", "check_before_resending": True}}, "A-001",
+                "interrupted mid-send by a restart: check the outside service before resending", kind="action.failed")
 
     # ---------------------------------------------------------------- setup
     def _seed(self) -> None:
@@ -221,7 +225,7 @@ class Ultron:
             return {"kind": "credits_reconcile"}
         if mailbox.due(s, now):
             return {"kind": "mail_check"}
-        pins = kits.pins_due(s, now)
+        pins = kits.pins_due(s, now) if self.cfg.get("outbound", True) else []   # the E-STOP stops pins too
         if pins:
             return {"kind": "kit_pin", "product": pins[0]}
         if not self.brain.enabled or not self.treasury.ai_allowed() or credits.blocks_ai(s, self.treasury, now):

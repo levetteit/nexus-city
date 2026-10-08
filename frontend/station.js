@@ -412,7 +412,7 @@ async function openRecord(col, id) {
       <div class="kv"><div>Score</div><div>${r.score}/100 · ${esc(r.recommendation)}</div><div>Platform</div><div>${esc(r.platform)}</div>
       <div>Startup cost</div><div>${money(r.startup_cost_usd)} (+${money(r.monthly_cost_usd)}/mo)</div><div>Start today</div><div>${r.can_start_today ? "Yes" : "No"}</div>
       <div>First dollar</div><div>~${r.days_to_first_dollar} days</div><div>Price</div><div>${esc(r.price_point)}</div>
-      <div>Demand / competition</div><div>${r.demand}/10 · ${r.competition}/10</div><div>Automation</div><div>${r.automation_potential}/10</div>
+      <div>Demand / competition</div><div>${esc(r.demand)}/10 · ${esc(r.competition)}/10</div><div>Automation</div><div>${esc(r.automation_potential)}/10</div>
       <div>Platform rules</div><div>${esc(r.platform_restrictions)}</div></div>
       <h2>Evidence</h2>${list(r.evidence)}<h2>What you'd do</h2>${list(r.owner_actions)}<h2>First 7 days</h2>${list(r.plan_7_day)}
       <h2>Risks</h2>${list(r.risks)}<div class="kv"><div>Success</div><div>${esc(r.success_criteria)}</div><div>Kill</div><div>${esc(r.kill_criteria)}</div></div>

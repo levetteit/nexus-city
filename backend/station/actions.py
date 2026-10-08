@@ -65,6 +65,14 @@ def contacts_doc(store: Store) -> dict:
     return store.load_doc("contacts.json") or {"contacted": {}, "do_not_contact": []}
 
 
+def _mark_contacted(store: Store, email: str, venture: Optional[str], action_id: str) -> None:
+    def change(c):
+        c = c or {"contacted": {}, "do_not_contact": []}
+        c["contacted"][email.lower()] = {"at": now_iso(), "venture": venture, "action": action_id}
+        return c
+    store.update_doc("contacts.json", change)
+
+
 def create(store: Store, kind: str, agent: str, venture: Optional[str], payload: dict, why: str) -> Optional[dict]:
     """File an outbound action for QA. Outreach to an address we've used or that opted out is refused here."""
     if kind == "outreach.email":
@@ -140,11 +148,14 @@ def dispatch(store: Store, action: dict, outbound_on: bool) -> dict:
                             kind="action.waiting_owner") if action["status"] != "waiting_owner" else action
     if sent_today(store, kind) >= CAPS.get(kind, 0):
         return action   # over today's cap: it waits for tomorrow
+    # claim it first: whatever happens next, this action is never picked up and sent again by the loop
+    action = store.update("actions", action["id"], {"status": "sending"}, "A-001", f"sending {kind}", kind="action.sending")
     try:
         if kind == "stripe.payment_link":
             if not connectors.stripe_configured():
                 return _manual(store, action, "Stripe isn't connected")
-            res = connectors.stripe_payment_link(p["name"], p.get("description", ""), float(p["price_usd"]), action["venture"])
+            res = connectors.stripe_payment_link(p["name"], p.get("description", ""), float(p["price_usd"]), action["venture"],
+                                                 idempotency_key=action["id"])
             v = store.get("ventures", action["venture"])
             if v:
                 links = {**(v.get("links") or {}), "stripe": res["url"]}
@@ -153,9 +164,7 @@ def dispatch(store: Store, action: dict, outbound_on: bool) -> dict:
             if not connectors.email_configured():
                 return _manual(store, action, "email isn't connected")
             res = connectors.send_email(p["to_email"], p["subject"], p["body"])
-            c = contacts_doc(store)
-            c["contacted"][p["to_email"].lower()] = {"at": now_iso(), "venture": action["venture"], "action": action["id"]}
-            store.save_doc("contacts.json", c)
+            _mark_contacted(store, p["to_email"], action["venture"], action["id"])
         elif kind == "social.post":
             if not connectors.social_configured(p.get("platform", "")):
                 return _manual(store, action, f"{p.get('platform')} isn't connected")
@@ -181,6 +190,12 @@ def dispatch(store: Store, action: dict, outbound_on: bool) -> dict:
     except connectors.ConnectorError as exc:
         return store.update("actions", action["id"], {"status": "failed", "result": {"error": str(exc)}}, "A-001",
                             f"send failed: {exc}", kind="action.failed")
+    except Exception as exc:   # unexpected: the outside side effect may have happened, so it is never retried on its own
+        from ..redact import redact
+        err = redact(f"{type(exc).__name__}: {exc}")[:200]
+        return store.update("actions", action["id"], {"status": "failed", "result": {"error": err, "check_before_resending": True}},
+                            "A-001", f"send failed unexpectedly ({err}): check the outside service before resending",
+                            kind="action.failed")
     return store.update("actions", action["id"], {"status": "sent", "sent_at": now_iso(), "result": res}, action["agent"],
                         f"SENT {kind}", kind="action.sent")
 
@@ -200,17 +215,21 @@ def owner_done(store: Store, action_id: str, note: str = "") -> dict:
     if a["status"] not in ("manual", "waiting_owner", "ready"):
         raise ValueError(f"it's {a['status']}")
     if a["kind"] == "outreach.email":
-        c = contacts_doc(store)
-        c["contacted"][a["payload"].get("to_email", "").lower()] = {"at": now_iso(), "venture": a["venture"], "action": a["id"]}
-        store.save_doc("contacts.json", c)
+        _mark_contacted(store, a["payload"].get("to_email", ""), a["venture"], a["id"])
     return store.update("actions", action_id, {"status": "sent", "sent_at": now_iso(), "result": {"by": "owner", "note": note}},
                         "owner", "owner sent it by hand", kind="action.sent")
 
 
 def opt_out(store: Store, email: str) -> None:
-    c = contacts_doc(store)
     e = email.strip().lower()
-    if e and e not in c["do_not_contact"]:
-        c["do_not_contact"].append(e)
-        store.save_doc("contacts.json", c)
+    added = []
+
+    def change(c):
+        c = c or {"contacted": {}, "do_not_contact": []}
+        if e and e not in c["do_not_contact"]:
+            c["do_not_contact"].append(e)
+            added.append(e)
+        return c
+    store.update_doc("contacts.json", change)   # under the lock: a send recorded at the same moment can't undo it
+    if added:
         store.event("contact.opt_out", "owner", f"{e} opted out: never contacted again")

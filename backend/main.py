@@ -5,14 +5,14 @@ NEXUS_MODE=live runs the city on real candles with paper trading (see live.py).
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
 import html
 import hmac
 import json
+import math
 import os
 import re
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .env import env
 from .redact import redact
+from .security import PasswordGate, secret_matches
 from .config import TICK_SECONDS
 from .bots.pointer import SIGNALS
 from .backtest import ET
@@ -361,57 +362,6 @@ PASSWORD = env("PASSWORD")   # set this whenever the city is reachable from the 
 OPEN_PATHS = ("/healthz", "/api/tradingview", "/api/feed", "/api/station/stripe/webhook", "/api/jarvis/brief", "/api/jarvis/act")   # health checks, and webhooks (they have their own secret)
 
 
-COOKIE, LEGACY_COOKIE = "nexus_auth", "starnet_auth"   # the old name is still accepted: no one is logged out
-
-
-class PasswordGate:
-    """HTTP Basic auth for every page, API call and the WebSocket when NEXUS_PASSWORD is set.
-    A successful login also sets a cookie, so the browser's WebSocket gets in too."""
-
-    def __init__(self, app) -> None:
-        self.app = app
-        # the "starnet:" salt is kept so existing cookies stay valid (docs/MIGRATION_FROM_STARNET.md)
-        self.token = hashlib.sha256(f"starnet:{PASSWORD}".encode()).hexdigest() if PASSWORD else None
-
-    def _authorized(self, headers: dict) -> tuple[bool, bool]:
-        """(allowed, set_cookie)"""
-        cookie = headers.get(b"cookie", b"").decode()
-        if f"{COOKIE}={self.token}" in cookie or f"{LEGACY_COOKIE}={self.token}" in cookie:
-            return True, False
-        auth = headers.get(b"authorization", b"").decode()
-        if auth.lower().startswith("basic "):
-            try:
-                _, _, pw = base64.b64decode(auth[6:]).decode().partition(":")
-            except Exception:
-                return False, False
-            if hmac.compare_digest(pw, PASSWORD):
-                return True, True
-        return False, False
-
-    async def __call__(self, scope, receive, send):
-        if (not self.token or scope["type"] not in ("http", "websocket") or scope["path"] in OPEN_PATHS
-                or scope["path"].startswith("/media/")   # post images: Instagram fetches them itself
-                or scope["path"] == "/shop" or scope["path"].startswith("/shop/")):   # the storefront is for the public
-            return await self.app(scope, receive, send)
-        ok, set_cookie = self._authorized(dict(scope["headers"]))
-        if not ok:
-            if scope["type"] == "websocket":
-                return await send({"type": "websocket.close", "code": 4401})
-            await send({"type": "http.response.start", "status": 401,
-                        "headers": [(b"www-authenticate", b'Basic realm="Nexus City"'),
-                                    (b"content-type", b"text/plain")]})
-            return await send({"type": "http.response.body", "body": b"password required"})
-        if not set_cookie:
-            return await self.app(scope, receive, send)
-
-        async def send_with_cookie(msg):
-            if msg["type"] == "http.response.start":
-                msg = {**msg, "headers": list(msg.get("headers", [])) + [
-                    (b"set-cookie", f"{COOKIE}={self.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000".encode())]}
-            await send(msg)
-        return await self.app(scope, receive, send_with_cookie)
-
-
 class FreshAssets:
     """Tell browsers to re-check the app's files on every load (a cheap ETag check), so a deploy
     shows up the next time the app opens instead of whenever the phone's cache decides."""
@@ -431,7 +381,7 @@ class FreshAssets:
         return await self.app(scope, receive, send_fresh)
 
 
-app.add_middleware(PasswordGate)
+app.add_middleware(PasswordGate, open_paths=OPEN_PATHS, public_prefixes=("/media/", "/shop/"))   # backend/security.py
 app.add_middleware(FreshAssets)
 
 
@@ -608,7 +558,7 @@ async def feed(request: Request) -> dict:
     if not secret:
         _feed_note(False, "NEXUS_FEED_SECRET is not set on the server", ticker)
         raise HTTPException(503, "set NEXUS_FEED_SECRET to enable the real-time feed")
-    if not isinstance(p, dict) or not hmac.compare_digest(str(p.get("secret", "")), secret):
+    if not isinstance(p, dict) or not secret_matches(p.get("secret"), secret):
         got = str(p.get("secret", "")) if isinstance(p, dict) else ""
         hint = "empty: set the secret in the indicator, then create the alert again" if not got else \
             "doesn't match the server's feed secret"
@@ -623,9 +573,13 @@ async def feed(request: Request) -> dict:
         ts = int(float(p["t"]))
         ts = ts // 1000 if ts > 10**12 else ts
         o, h, l, c = (float(p[k]) for k in ("o", "h", "l", "c"))
+        if not all(math.isfinite(x) and x > 0 for x in (o, h, l, c)) or not (l <= min(o, c) and h >= max(o, c)):
+            raise ValueError("prices must be positive numbers with low <= open/close <= high")
+        if ts > time.time() + 90:   # a candle from the future would freeze the feed and fool the staleness check
+            raise ValueError("candle time is in the future")
     except (KeyError, ValueError, TypeError):
-        _feed_note(False, "missing t/o/h/l/c: use the Nexus City feed script as is", ticker)
-        raise HTTPException(400, "need t, o, h, l, c")
+        _feed_note(False, "bad candle (t/o/h/l/c missing or invalid): use the Nexus City feed script as is", ticker)
+        raise HTTPException(400, "need valid t, o, h, l, c")
     if sym not in engine.market.underlyings:
         _feed_note(False, f"unknown symbol {ticker!r}: use the NQ1! and ES1! charts", ticker)
         raise HTTPException(400, f"unknown symbol {ticker}")
@@ -905,7 +859,7 @@ async def tradingview(request: Request) -> dict:
         payload = json.loads(await request.body())
     except ValueError:
         raise HTTPException(400, "alert message must be JSON")
-    if not isinstance(payload, dict) or not hmac.compare_digest(str(payload.get("secret", "")), secret):
+    if not isinstance(payload, dict) or not secret_matches(payload.get("secret"), secret):
         raise HTTPException(401, "bad secret")
     signal = str(payload.get("signal", "")).lower()
     if signal not in SIGNALS:
@@ -1230,8 +1184,8 @@ async def station_action(rid: str, what: str, request: Request) -> dict:
                 raise ValueError(f"it's {a['status']}")
             return st.store.update("actions", rid, {"owner_ok": True, "status": "ready"}, "owner", "owner OK'd sending it", kind="action.owner_ok")
         if what == "cancel":
-            if a["status"] == "sent":
-                raise ValueError("already sent")
+            if a["status"] in ("sent", "sending"):
+                raise ValueError("already sent" if a["status"] == "sent" else "it's being sent right now")
             return st.store.update("actions", rid, {"status": "cancelled"}, "owner", f"owner cancelled it {note}".strip(), kind="action.cancelled")
         if what == "result":
             st.store.event("action.result", "owner", f"{a['kind']} result: {note}", ref=a.get("venture"))
