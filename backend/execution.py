@@ -30,6 +30,7 @@ import os
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from .persist import write_json_atomic
 from .env import env
 from .redact import redact
 
@@ -95,8 +96,7 @@ class TradersPostRouter:
 
     def _save(self) -> None:
         os.makedirs(self.data_dir, exist_ok=True)
-        with open(self.state_path, "w") as f:
-            json.dump({"armed": self.armed, "open": self.open}, f, indent=1)
+        write_json_atomic(self.state_path, {"armed": self.armed, "open": self.open}, indent=1)
 
     def arm(self, on: bool) -> None:
         if on and not self.configured:

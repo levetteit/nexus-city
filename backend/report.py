@@ -12,6 +12,7 @@ import os
 import re
 from datetime import date
 
+from .persist import write_json_atomic
 from .backtest import trading_day
 
 
@@ -87,8 +88,7 @@ class DayReports:
     # ---------------------------------------------------------------- storage
     def save(self, report: dict) -> None:
         os.makedirs(self.dir, exist_ok=True)
-        with open(os.path.join(self.dir, f"{report['day']}.json"), "w") as f:
-            json.dump(report, f, indent=1)
+        write_json_atomic(os.path.join(self.dir, f"{report['day']}.json"), report, indent=1)
 
     def get(self, day: str) -> dict | None:
         try:

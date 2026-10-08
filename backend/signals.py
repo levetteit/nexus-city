@@ -18,6 +18,7 @@ import json
 import os
 from datetime import date, datetime, timezone
 
+from .persist import write_json_atomic
 from .backtest import ET, trading_day
 
 SESSIONS = {"LONDON": (2 * 60, 5 * 60), "NY AM": (9 * 60 + 30, 11 * 60), "NY PM": (14 * 60, 16 * 60)}
@@ -104,8 +105,7 @@ class SignalLog:
     def save(self) -> None:
         if self.day:
             os.makedirs(self.dir, exist_ok=True)
-            with open(self._path(self.day["day"]), "w") as f:
-                json.dump(self.day, f)
+            write_json_atomic(self._path(self.day["day"]), self.day)
 
     def get(self, day: str) -> dict | None:
         if self.day and self.day["day"] == day:
@@ -123,8 +123,7 @@ class SignalLog:
         if self.day and self.day["day"] == doc["day"]:
             self.day = doc
         os.makedirs(self.dir, exist_ok=True)
-        with open(self._path(doc["day"]), "w") as f:
-            json.dump(doc, f)
+        write_json_atomic(self._path(doc["day"]), doc)
 
     def vote(self, day: str, sig_id: str, vote: str, note: str = "") -> dict:
         doc = self.get(day)

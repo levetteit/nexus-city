@@ -23,6 +23,7 @@ import os
 import secrets
 from datetime import datetime, timezone
 
+from .persist import write_json_atomic
 from .account import PropAccount
 
 FIELDS = ("phase", "balance", "eod_high", "mll", "mll_locked", "best_day", "days", "profitable_days",
@@ -66,8 +67,7 @@ class AccountBook:
 
     def save(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, "w") as f:
-            json.dump([a.to_json() for a in self.accounts], f, indent=1)
+        write_json_atomic(self.path, [a.to_json() for a in self.accounts], indent=1)
 
     def get(self, acc_id: str) -> Linked:
         for a in self.accounts:

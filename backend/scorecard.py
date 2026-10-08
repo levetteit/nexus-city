@@ -23,6 +23,7 @@ import json
 import os
 from datetime import datetime, timedelta
 
+from .persist import write_json_atomic
 from .backtest import ReplayMarket, trading_day
 from .engine import Engine
 
@@ -159,8 +160,7 @@ class Scorecard:
                  "desk_effect": round(live_pnl - replay_pnl, 2) if day.get("desk") else None}
         self.checks = [c for c in self.checks if c["day"] != check["day"]] + [check]
         os.makedirs(self.data_dir, exist_ok=True)
-        with open(self.path, "w") as f:
-            json.dump(self.checks, f, indent=1)
+        write_json_atomic(self.path, self.checks, indent=1)
         return check
 
     # ---------------------------------------------------------------- the edge check

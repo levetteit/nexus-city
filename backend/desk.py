@@ -25,6 +25,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from .persist import write_json_atomic
 from .env import env
 from .backtest import ET
 
@@ -259,8 +260,7 @@ class TradingDesk:
 
     # ---------------------------------------------------------------- storage
     def _save(self, name: str, data) -> None:
-        with open(os.path.join(self.dir, name), "w") as f:
-            json.dump(data, f, indent=1)
+        write_json_atomic(os.path.join(self.dir, name), data, indent=1)
 
     def _store(self, day: str, kind: str, out: dict) -> None:
         path = os.path.join(self.dir, f"{day}.json")
